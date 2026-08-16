@@ -22,6 +22,8 @@ from apps.api.core.redis import close_redis, get_redis
 from apps.api.modules.asset.router import router as asset_router
 from apps.api.modules.auth.router import router as auth_router
 from apps.api.modules.project.router import router as project_router
+from apps.api.modules.realtime.router import router as realtime_router
+from apps.api.modules.task.router import router as task_router
 
 settings = get_settings()
 configure_logging(level=settings.log_level, json_output=settings.is_production)
@@ -132,6 +134,8 @@ API_PREFIX = "/api/v1"
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(project_router, prefix=API_PREFIX)
 app.include_router(asset_router, prefix=API_PREFIX)
+app.include_router(task_router, prefix=API_PREFIX)
+app.include_router(realtime_router, prefix=API_PREFIX)
 
 
 # ---------------------------------------------------------------- 健康检查

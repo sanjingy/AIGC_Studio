@@ -26,6 +26,7 @@ from apps.api.core.models import Base
 from apps.api.modules.asset import models as _asset_models  # noqa: F401
 from apps.api.modules.auth import models as _auth_models  # noqa: F401
 from apps.api.modules.project import models as _project_models  # noqa: F401
+from apps.api.modules.task import models as _task_models  # noqa: F401
 
 # --------------------------------------------------------------------
 

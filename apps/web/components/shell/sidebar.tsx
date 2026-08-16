@@ -8,6 +8,7 @@ import {
   Film,
   LayoutGrid,
   Library,
+  ListChecks,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -22,6 +23,7 @@ const NAV: Item[] = [
   { href: "/storyboard", label: "分镜", icon: Film },
   { href: "/cast", label: "角色与场景", icon: Users },
   { href: "/assets", label: "资产库", icon: Library },
+  { href: "/tasks", label: "任务中心", icon: ListChecks },
   { href: "/credits", label: "Credits", icon: Coins },
 ];
 
