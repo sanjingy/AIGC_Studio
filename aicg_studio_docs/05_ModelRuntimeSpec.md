@@ -42,11 +42,21 @@ video_editing
   "capabilities": ["text_to_video"],
   "pricing": {
     "unit": "second",
-    "provider_cost": 1.2,
-    "credit_price": 2.0
+    "provider_cost": 120,
+    "credit_price": 200,
+    "effective_from": "2026-08-16T00:00:00Z"
   }
 }
 ```
+
+> **价格字段约定（ADR-014）**：
+> - 金额一律整数，单位为最小单位（此处 120 = ¥1.20 = 120 Credits 成本），
+>   **禁止浮点数**
+> - 必须带 `effective_from`，支持历史订单按当时价格核算
+> - 价格从 `model_pricing` 表读取，**代码中不得出现价格常量**
+>
+> 理由：上游调价是常态。DeepSeek 于 2026-08-17 起高峰输出价上涨 350%，
+> 任何硬编码的实现会在一夜之间毛利转负。见 `19_UnitEconomics.md`。
 
 ## 4. Runtime
 
@@ -88,12 +98,18 @@ text_to_video
 
 - 用户指定
 - Skill 偏好
+- **渲染档位（预览档 / 定稿档，ADR-015）**
 - 可用性
 - 价格
 - 队列长度
 - GPU 状态
 - 质量评分
 - 失败率
+
+**Failover 的触发条件**（原文档缺失，导致 failover 落不了地）
+见 `21_ErrorTaxonomy.md` 第 4 节：熔断阈值、DEGRADED/DOWN 状态转换、
+探测恢复策略。熔断状态必须存 Redis 供全 Worker 共享，
+否则每个 Worker 各自熔断等于没熔断。
 
 ## 7. Secrets
 

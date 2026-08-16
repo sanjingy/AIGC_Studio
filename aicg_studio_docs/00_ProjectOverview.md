@@ -37,6 +37,14 @@ Agent 只描述能力需求，例如 `text_to_video`；Provider/Runtime 决定�
 ### 2.5 一切任务异步化
 耗时生成任务不得阻塞 Web 请求；统一 Task/Job/Worker/Provider 生命周期。
 
+### 2.6 一致性是生死线（2026-08-16 新增）
+用户判断产品可用性的第一标准，是第 1 个镜头的主角和第 47 个镜头是不是同一个人。
+编排体验可以被抄，一致性质量抄不走。见 `17_ConsistencyEngine.md`、ADR-012。
+
+### 2.7 成本可算、可控、可参数化（2026-08-16 新增）
+每个动作在执行前必须知道要花多少钱，执行后必须知道实际花了多少。
+所有单价与系数走数据库，代码中不出现价格常量。见 `19_UnitEconomics.md`、ADR-014。
+
 ## 3. 首发产品范围
 
 第一阶段采用：
@@ -67,31 +75,35 @@ Agent 只描述能力需求，例如 `text_to_video`；Provider/Runtime 决定�
 
 ### AI 编排层
 
-- Router Agent
-- Director Agent
-- Story Agent
-- Character Agent
-- World/Scene Agent
-- Storyboard Agent
-- Prompt Agent
-- Image Agent
-- Video Agent
-- Audio Agent
-- Editing Agent
-- QA Agent
+> 2026-08-16 修订：Specialist Agent 由 11 个收敛为 4 个，
+> 见 `03_AgentSystem.md` 第 1 节。
+
+- Router Agent —— 分类与路由
+- Director Agent —— 编排与调度
+- Story Agent —— 故事结构 / 剧本 / 台词
+- Visual Agent —— 角色 / 场景 / 分镜 / 镜头提示词
+- Media Agent —— TTS / 图像 / 视频（**TTS 先行**，ADR-011）
+- QA Agent —— 质量校验
+
+### 确定性模块（不是 Agent）
+
+- **Consistency Engine** —— 角色资产冻结、风格锁定、一致性度量
+- **Timeline Assembler** —— 音频优先的时长推导与 ffmpeg 渲染
 
 ### 基础设施层
 
-- API Gateway
+- API（模块化单体，ADR-009）
 - Agent Engine
-- Task Queue
+- Task Queue（Arq，ADR-010）
+- Realtime（SSE，ADR-013）
 - AI Gateway
-- Runtime Gateway
-- ComfyUI Adapter
-- SSH Node Agent
-- Cloud Provider Adapter
-- Asset Storage
-- PostgreSQL
+- Runtime Gateway ┈ M4
+- ComfyUI Adapter ┈ M4
+- Node Agent（仅出站连接，ADR-007）┈ M4
+- Cloud Provider Adapter ┈ 预留
+- Moderation Hook ┈ M1 空实现
+- Asset Storage（预签名直传）
+- PostgreSQL + pgvector
 - Redis
 - Observability
 - Billing Ledger

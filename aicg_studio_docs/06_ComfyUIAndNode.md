@@ -1,8 +1,13 @@
-# ComfyUI / 本地节点 / SSH 节点设计
+# ComfyUI / 本地节点设计
+
+> 目标里程碑：**M4**。M1–M3 不实现本文档内容。
 
 ## 1. ComfyUI 支持结论
 
-ComfyUI 可以通过 HTTP `/prompt` 提交执行请求，并通过 WebSocket 接收 executing/progress 等事件；官方仓库同时提供 OpenAPI 定义。citeturn905503search2turn905503search3
+ComfyUI 可以通过 HTTP `/prompt` 提交执行请求，并通过 WebSocket 接收
+`executing` / `progress` / `executed` 等事件；官方仓库同时提供 OpenAPI 定义。
+
+参考：<https://github.com/comfyanonymous/ComfyUI>（接入前需重新核实接口现状）
 
 因此 AICG Studio 必须把 ComfyUI 封装成标准 Runtime Adapter，而不是把 ComfyUI 特殊逻辑散落到各业务模块。
 
@@ -48,30 +53,25 @@ Node Agent 提供：
 - cancel
 - update
 
-## 4. SSH
+## 4. SSH：不做入站（ADR-007 修订）
 
-平台不要保存用户长期 SSH 私钥明文。
+> 2026-08-16 决定：**取消"MVP 先做入站 SSH、长期改出站"的过渡方案，
+> 只做出站一种。**
 
-MVP 可以：
+原方案打算 MVP 先托管用户 SSH 私钥、由平台反向连接用户服务器，
+长期再改为出站。这会产生一笔无法回收的安全债务：
+一旦保管过用户私钥，泄露风险和合规责任就已经产生，改架构也消不掉。
 
-- 用户上传受限密钥
-- 加密存储
-- 只允许指定 host
-- 只允许 Node Agent bootstrap
-
-长期建议改为：
+**唯一方案：**
 
 ```text
-服务器主动出站连接平台
+Node Agent → 出站连接 → Platform
 ```
 
-即：
+平台永不持有用户 SSH 私钥，永不主动连接用户机器。
+用户机器只需要能访问外网，不需要开放任何入站端口、不需要公网 IP。
 
-```text
-Node Agent → Platform
-```
-
-而不是平台反向 SSH 用户服务器。
+`09_Database.md` 中的 `ssh_credentials` 表**不落地**。
 
 ## 5. Node Agent
 

@@ -29,6 +29,28 @@ Codex 不允许一次生成整个系统。
 - 把余额只保存为一个字段
 - 把用户上传 Skill 当成可信代码执行
 
+新增（2026-08-16）：
+
+- **把任何价格、汇率、废片率写成代码常量**（ADR-014）
+- **在 `tasks` 之外的地方维护执行状态**（ADR-008）
+- **让 Agent 自行编写风格提示词**（画风漂移头号来源，见 `17_ConsistencyEngine.md` 第 4 节）
+- **让 LLM 计算金额**（Router 只输出生产参数，金额由确定性代码算）
+- 用浮点数存金额
+- 跨模块直接 import 对方的 repository / models（见 `11_ProjectStructure.md`）
+- 新增第 3 个后端进程而不写 ADR
+- 不写 eval 用例就上线新 Agent（`22_AgentEval.md`）
+
+## 2.1 文档与 ADR 纪律
+
+**文档是唯一真相。任何偏离文档的实现，必须先提交 ADR。**
+
+```text
+发现文档有问题  → 提 ADR 改文档 → 再改代码
+不允许          → 直接改代码，事后再说
+```
+
+代码与文档不一致时，视为 bug，不视为"文档过时"。
+
 ## 3. 每个功能的开发顺序
 
 ```text
@@ -106,14 +128,25 @@ MockAutoDL
 ```text
 你现在负责实现 AICG Studio。
 先不要写业务代码。
-先读取 docs/00_ProjectOverview.md 到 docs/13_CodexDevelopmentGuide.md。
+
+必读（按此顺序）：
+  19_UnitEconomics.md      —— 先搞清楚钱怎么算
+  17_ConsistencyEngine.md  —— 核心技术难点
+  15_ArchitectureDecisions.md —— 所有已定决策
+  12_MVP_Roadmap.md        —— 当前在哪个里程碑
+  然后 00 ~ 22 全部
+
 然后检查仓库现状，输出：
 1. 当前代码结构
 2. 与目标架构差异
-3. Phase 0 实施计划
-4. 风险
+3. 当前里程碑的实施计划
+4. 风险，特别是与 ADR 冲突的地方
+
 未经我确认，不执行大规模重构。
 ```
+
+> 注意 `12_MVP_Roadmap.md` 的 **M0 是手工验证，不写代码**。
+> 如果 M0 尚未完成，正确的回答是"建议先完成 M0"，而不是开始搭架子。
 
 ## 8. Codex 后续开发方式
 

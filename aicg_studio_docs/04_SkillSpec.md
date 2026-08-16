@@ -20,25 +20,32 @@ input:
 route:
   type: NOVEL_TO_ANIME
 
+# Agent 收敛为 4 个（见 03_AgentSystem.md 第 1 节）
+# 注意顺序：media 内部必须 TTS 先行（ADR-011）
 agents:
   - story
-  - character
-  - scene
-  - script
-  - storyboard
-  - image
-  - video
-  - audio
-  - editing
+  - visual
+  - media
   - qa
 
+# 确定性模块，不是 Agent
+pipeline:
+  - consistency.freeze      # 角色资产冻结 + 风格锁定
+  - timeline.assemble       # 音频优先装配
+  - timeline.render         # ffmpeg
+
+# 默认 3 道阻塞门（见 01_ProductSpec.md 第 5 节）
 human_gates:
-  - story
-  - characters
-  - scenes
-  - storyboard
-  - key_visuals
-  - final_video
+  - setup                   # 故事 + 角色基准立绘 + 场景
+  - storyboard              # 剧本 + 分镜 + 预览档视频
+  - final                   # 成片
+
+consistency:
+  default_tier: L1          # 见 17_ConsistencyEngine.md 第 2 节
+  protagonist_tier: L2      # 主角升级（M4 起可用）
+
+render:
+  mode: tiered              # 预览档 → 确认 → 定稿档（ADR-015）
 
 capabilities:
   - text_generation
