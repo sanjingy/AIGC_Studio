@@ -38,3 +38,9 @@ Thumbs.db
 # 日志
 *.log
 logs/
+
+# Node / Next
+node_modules/
+.next/
+out/
+next-env.d.ts

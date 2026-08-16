@@ -1,0 +1,184 @@
+@import "tailwindcss";
+
+/* 暗色走 class 策略，由 next-themes 在 <html> 上打 .dark */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ============================================================
+   设计令牌 — 见 design-system/aigc-studio/MASTER.md
+   组件里禁止出现写死的颜色值，一律通过这些语义 token 取色。
+   ============================================================ */
+
+:root {
+  /* --- 中性：slate 色阶（蓝偏中性，非纯灰）--- */
+  --bg: oklch(0.9842 0.0034 247.86); /* slate-50  */
+  --surface: oklch(1 0 0); /* white     */
+  --surface-2: oklch(0.9683 0.0069 247.9); /* slate-100 */
+  --surface-3: oklch(0.947 0.0097 252.81); /* slate-150 */
+  --border: oklch(0.9288 0.0126 255.51); /* slate-200 */
+  --border-strong: oklch(0.869 0.0198 252.89); /* slate-300 */
+  --fg: oklch(0.2077 0.0398 265.75); /* slate-900 */
+  --fg-muted: oklch(0.4455 0.0374 257.28); /* slate-600 */
+  --fg-subtle: oklch(0.4924 0.0345 257.79); /* 比 slate-500 深一档：
+      slate-500 在 surface-2 上只有 4.34:1，不达 4.5。实测后调深。 */
+
+  /* --- 主色：交互、选中、焦点 --- */
+  /* 亮底用 teal-700 而非检索给的 teal-600：600 在白底只有 3.74:1，
+     用于 13px 导航文字不达标。实测 700 = 5.47:1。 */
+  --primary: oklch(0.5109 0.0861 186.39); /* teal-700 */
+  --primary-hover: oklch(0.4308 0.0714 187.5); /* teal-800 */
+  --primary-fg: oklch(1 0 0);
+  --primary-soft: oklch(0.9636 0.0129 185.1);
+
+  /* --- 语义色：与主色分离，不复用 --- */
+  /* 同理全部下沉一档：600 系在白底普遍只有 3.2–3.3:1。 */
+  --running: oklch(0.5553 0.1455 49); /* amber-700，仅"生成中" */
+  --running-soft: oklch(0.9677 0.0237 79.74);
+  --success: oklch(0.5273 0.1371 150.07); /* green-700 */
+  --success-soft: oklch(0.9632 0.0189 157.87);
+  --danger: oklch(0.5054 0.1905 27.52); /* red-700 */
+  --danger-soft: oklch(0.9566 0.0185 17.48);
+
+  --ring: var(--primary);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
+
+.dark {
+  --bg: oklch(0.2077 0.0398 265.75); /* slate-900 */
+  --surface: oklch(0.2449 0.0388 264.35); /* slate-850 */
+  --surface-2: oklch(0.2795 0.0368 260.03); /* slate-800 */
+  --surface-3: oklch(0.3717 0.0392 257.29); /* slate-700 */
+  --border: oklch(0.3717 0.0392 257.29); /* slate-700 */
+  --border-strong: oklch(0.4455 0.0374 257.28); /* slate-600 */
+  --fg: oklch(0.9842 0.0034 247.86); /* slate-50  */
+  --fg-muted: oklch(0.7107 0.0351 256.79); /* slate-400 */
+  --fg-subtle: oklch(0.6847 0.0386 257.41); /* 比 slate-500 亮一档：
+      暗底上 slate-500 在 surface-2 只有 3.07:1。实测后调亮。 */
+
+  /* 暗底上主色要提亮，否则对比度不够 */
+  --primary: oklch(0.7845 0.1325 181.91); /* teal-400 */
+  --primary-hover: oklch(0.7038 0.123 182.5); /* teal-500 */
+  --primary-fg: oklch(0.2077 0.0398 265.75);
+  --primary-soft: oklch(0.32 0.04 184);
+
+  --running: oklch(0.8369 0.1644 84.43); /* amber-400 */
+  --running-soft: oklch(0.33 0.05 75);
+  --success: oklch(0.7227 0.192 149.58); /* green-500 */
+  --success-soft: oklch(0.31 0.05 150);
+  --danger: oklch(0.7106 0.1661 22.22); /* red-400 */
+  --danger-soft: oklch(0.33 0.06 25);
+}
+
+/* 把语义 token 暴露给 Tailwind 工具类：bg-surface / text-fg-muted 等 */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
+  --color-primary-soft: var(--primary-soft);
+
+  --color-running: var(--running);
+  --color-running-soft: var(--running-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+
+  /* 工作台密度：正文 13px。偏离 16px 基准是有意的，
+     用对比度 ≥7:1 补偿。理由见 MASTER.md §3。 */
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-lg: 16px;
+  --text-lg--line-height: 24px;
+  --text-xl: 20px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 32px;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    color-scheme: light;
+  }
+  .dark html,
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 13px;
+    line-height: 18px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 数字必须按列对齐——时间码、镜号、Credits、成本。
+     工作台里数字宽度跳动是硬伤。 */
+  .tnum,
+  table,
+  time,
+  output {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 焦点态必须可见。skill 优先级表第 1 条：不许移除焦点环。 */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 「生成中」的呼吸提示。amber 是这个产品里最高频的状态，
+   值得一个极克制的动效来吸引扫视。 */
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.animate-pulse-soft {
+  animation: pulse-soft 1.8s ease-in-out infinite;
+}
