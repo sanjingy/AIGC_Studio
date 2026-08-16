@@ -19,6 +19,7 @@ dependencies = [
     "httpx>=0.28",
     "pyjwt>=2.10",
     "argon2-cffi>=23.1",
+    "email-validator>=2.2",  # pydantic 的 EmailStr 需要
     "python-multipart>=0.0.20",
     "aioboto3>=13.2",
 ]

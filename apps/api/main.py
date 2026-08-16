@@ -19,6 +19,7 @@ from apps.api.core.db import dispose_engine, get_engine
 from apps.api.core.errors import AppError
 from apps.api.core.logging import configure_logging, get_logger, new_trace_id, trace_id_var
 from apps.api.core.redis import close_redis, get_redis
+from apps.api.modules.auth.router import router as auth_router
 
 settings = get_settings()
 configure_logging(level=settings.log_level, json_output=settings.is_production)
@@ -90,7 +91,18 @@ async def handle_app_error(_request: Request, exc: AppError) -> JSONResponse:
 
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
-    err = AppError("common.validation_failed", detail={"errors": exc.errors()})
+    # 不能直接塞 exc.errors()：自定义校验器抛 ValueError 时，pydantic 会把
+    # 异常对象本身放进 ctx，JSON 序列化会炸，422 变成 500。
+    # 只取客户端真正需要的三个字段，顺带避免泄露内部结构。
+    details = [
+        {
+            "field": ".".join(str(p) for p in e["loc"][1:]) or "body",
+            "message": str(e.get("msg", "")),
+            "type": str(e.get("type", "")),
+        }
+        for e in exc.errors()
+    ]
+    err = AppError("common.validation_failed", detail={"errors": details})
     return JSONResponse(status_code=422, content=err.to_payload(trace_id_var.get()))
 
 
@@ -109,6 +121,13 @@ async def handle_unexpected(_request: Request, exc: Exception) -> JSONResponse:
     log.exception("app.unhandled", error=repr(exc))
     err = AppError("common.internal", message=repr(exc))
     return JSONResponse(status_code=500, content=err.to_payload(trace_id_var.get()))
+
+
+# ---------------------------------------------------------------- 路由
+
+API_PREFIX = "/api/v1"
+
+app.include_router(auth_router, prefix=API_PREFIX)
 
 
 # ---------------------------------------------------------------- 健康检查

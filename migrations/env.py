@@ -22,9 +22,9 @@ from apps.api.core.models import Base
 # ---- 模型注册（新增模块时必须在这里加 import）----------------------
 # 漏 import 会让 autogenerate 把没注册的表当成"需要 DROP"，
 # 生成一个删表的迁移。这是 Alembic 最容易踩的坑。
-# 目前还没有业务模型，S2 起逐步加入，形如：
-#     from apps.api.modules.auth import models as _auth_models
-# 这类 import 只为副作用（把表注册进 metadata），需要标注忽略未使用告警。
+# 这类 import 只为副作用：把表注册进 Base.metadata。
+from apps.api.modules.auth import models as _auth_models  # noqa: F401
+
 # --------------------------------------------------------------------
 
 config = context.config
