@@ -19,7 +19,9 @@ from apps.api.core.db import dispose_engine, get_engine
 from apps.api.core.errors import AppError
 from apps.api.core.logging import configure_logging, get_logger, new_trace_id, trace_id_var
 from apps.api.core.redis import close_redis, get_redis
+from apps.api.modules.asset.router import router as asset_router
 from apps.api.modules.auth.router import router as auth_router
+from apps.api.modules.project.router import router as project_router
 
 settings = get_settings()
 configure_logging(level=settings.log_level, json_output=settings.is_production)
@@ -128,6 +130,8 @@ async def handle_unexpected(_request: Request, exc: Exception) -> JSONResponse:
 API_PREFIX = "/api/v1"
 
 app.include_router(auth_router, prefix=API_PREFIX)
+app.include_router(project_router, prefix=API_PREFIX)
+app.include_router(asset_router, prefix=API_PREFIX)
 
 
 # ---------------------------------------------------------------- 健康检查

@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     s3_bucket: str = "aigc-assets"
     s3_region: str = "us-east-1"
     s3_presign_ttl_seconds: int = 900
+    s3_max_upload_bytes: int = 512 * 1024 * 1024  # 512 MiB
+    # 未完成的上传超过这个时长由清理任务回收
+    upload_abandon_after_seconds: int = 86_400
 
     # NoDecode 不可省：pydantic-settings 会在【读取环境变量的源层】就对 list 字段
     # 做 JSON 解析，失败直接抛 SettingsError——那时 field_validator 还没轮到执行。

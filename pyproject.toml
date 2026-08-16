@@ -103,7 +103,8 @@ plugins = ["pydantic.mypy"]
 exclude = ["migrations/versions/"]
 
 [[tool.mypy.overrides]]
-module = ["arq.*", "aioboto3.*", "pgvector.*"]
+# botocore 不带 py.typed；完整类型要装 boto3-stubs，体积大且收益有限
+module = ["arq.*", "aioboto3.*", "botocore.*", "pgvector.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------- pytest

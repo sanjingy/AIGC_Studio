@@ -10,23 +10,17 @@ Redis 在本系统里承担四件事，不要混用 key 前缀：
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
-
 from redis.asyncio import ConnectionPool, Redis
-from redis.asyncio.connection import Connection
 
 from apps.api.core.config import get_settings
 
-# Redis 只在类型存根里是泛型，运行时不是——直接写 `Redis[str]` 会在
-# 导入阶段抛 "is not a generic class"。必须按上下文分开定义。
-# ConnectionPool 的泛型参数是连接类型，Redis 的才是响应类型；
-# 池上设了 decode_responses=True，所以响应是 str。
-if TYPE_CHECKING:
-    RedisClient = Redis[str]
-else:
-    RedisClient = Redis
+# Redis / ConnectionPool 都不是泛型——redis>=5 自带的类型标注里没有类型参数。
+# （已废弃的 types-redis 存根把它们标成了泛型，按那个写运行时会直接抛
+#  "is not a generic class"。）
+# 池上设了 decode_responses=True，所以命令返回的是 str。
+RedisClient = Redis
 
-_pool: ConnectionPool[Connection] | None = None
+_pool: ConnectionPool | None = None
 
 
 def get_redis() -> RedisClient:
@@ -37,8 +31,7 @@ def get_redis() -> RedisClient:
             decode_responses=True,
             max_connections=50,
         )
-    # 类型标注推不出 decode_responses 是运行期参数，这里显式收敛。
-    return cast(RedisClient, Redis(connection_pool=_pool))
+    return Redis(connection_pool=_pool)
 
 
 async def close_redis() -> None:

@@ -1,6 +1,10 @@
 name: aigc-studio
 
 x-backend: &backend
+  # api 与 worker 是同一份代码，共用一个镜像。
+  # 不指定 image 时 compose 会按服务名各建一个，改了依赖只重建其中一个
+  # 就会出现"api 能跑 worker 崩了"这种排查起来很浪费时间的状态。
+  image: aigc-studio-backend
   build:
     context: .
     dockerfile: infra/docker/api.Dockerfile
