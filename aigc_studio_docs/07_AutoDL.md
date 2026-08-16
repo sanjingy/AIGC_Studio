@@ -16,7 +16,7 @@
 
 ## 1. 商业模式
 
-用户在 AICG Studio 选择：
+用户在 AIGC Studio 选择：
 
 ```text
 RTX 4090-48G
@@ -29,7 +29,7 @@ RTX 4090-48G
 2. 使用平台已绑定的 AutoDL 账号
 3. 调用 AutoDL API 创建新实例
 4. 等待实例 Running
-5. 自动初始化 AICG Node Agent / ComfyUI
+5. 自动初始化 AIGC Node Agent / ComfyUI
 6. 将实例注册为 Runtime Node
 7. 用户开始使用
 8. 计时
@@ -53,7 +53,7 @@ autodl_account
 用户只看到：
 
 ```text
-AICG GPU Pool
+AIGC GPU Pool
 ```
 
 ## 3. Instance 生命周期
@@ -85,11 +85,11 @@ RELEASED
 预制镜像：
 
 ```text
-AICG-ComfyUI-Base
-AICG-Wan
-AICG-Flux
-AICG-LTX
-AICG-AllInOne
+AIGC-ComfyUI-Base
+AIGC-Wan
+AIGC-Flux
+AIGC-LTX
+AIGC-AllInOne
 ```
 
 优先使用平台维护的私有镜像，减少用户每次启动时重新安装依赖的时间。

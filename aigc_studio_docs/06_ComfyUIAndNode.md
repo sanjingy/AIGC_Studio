@@ -9,7 +9,7 @@ ComfyUI 可以通过 HTTP `/prompt` 提交执行请求，并通过 WebSocket 接
 
 参考：<https://github.com/comfyanonymous/ComfyUI>（接入前需重新核实接口现状）
 
-因此 AICG Studio 必须把 ComfyUI 封装成标准 Runtime Adapter，而不是把 ComfyUI 特殊逻辑散落到各业务模块。
+因此 AIGC Studio 必须把 ComfyUI 封装成标准 Runtime Adapter，而不是把 ComfyUI 特殊逻辑散落到各业务模块。
 
 ## 2. Local ComfyUI
 
@@ -18,9 +18,9 @@ ComfyUI 可以通过 HTTP `/prompt` 提交执行请求，并通过 WebSocket 接
 连接：
 
 ```text
-AICG Web
+AIGC Web
   ↓
-AICG Local Node Agent
+AIGC Local Node Agent
   ↓
 localhost:8188
   ↓
@@ -34,7 +34,7 @@ ComfyUI
 推荐：
 
 ```text
-AICG Cloud
+AIGC Cloud
     ↓
 Node Agent / Secure Tunnel
     ↓
@@ -78,9 +78,9 @@ Node Agent → 出站连接 → Platform
 安装方式目标：
 
 ```bash
-aicg-node install
-aicg-node login
-aicg-node register
+aigc-node install
+aigc-node login
+aigc-node register
 ```
 
 注册后生成：

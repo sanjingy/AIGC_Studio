@@ -1,4 +1,4 @@
-# AICG Studio 产品需求文档（PRD）
+# AIGC Studio 产品需求文档（PRD）
 
 ## 1. 用户类型
 

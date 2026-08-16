@@ -1,8 +1,8 @@
-# AICG Studio 项目总览
+# AIGC Studio 项目总览
 
 ## 1. 项目定位
 
-AICG Studio 是一个面向普通用户的 AI 内容生产操作系统（AI Content Production OS），统一编排：
+AIGC Studio 是一个面向普通用户的 AI 内容生产操作系统（AI Content Production OS），统一编排：
 
 - 文本、图片、文档等多模态输入
 - Router Agent 与 Director Agent
@@ -112,4 +112,4 @@ Agent 只描述能力需求，例如 `text_to_video`；Provider/Runtime 决定�
 
 最终用户不再理解“模型”，只需要理解“创作任务”。
 
-AICG Studio 应让复杂的 AI 生产链被隐藏在 Agent 编排系统之后，同时仍然允许专业用户下沉到模型、Prompt、Workflow、GPU 和节点级控制。
+AIGC Studio 应让复杂的 AI 生产链被隐藏在 Agent 编排系统之后，同时仍然允许专业用户下沉到模型、Prompt、Workflow、GPU 和节点级控制。
