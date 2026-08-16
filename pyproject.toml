@@ -1,0 +1,117 @@
+[project]
+name = "aigc-studio"
+version = "0.1.0"
+description = "AIGC Studio — AI 内容生产操作系统"
+requires-python = ">=3.13,<3.14"
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.16",  # path_separator 配置项需要 1.16+
+    "pgvector>=0.3",
+    "redis>=5.2",
+    "arq>=0.26",
+    "structlog>=24.4",
+    "httpx>=0.28",
+    "pyjwt>=2.10",
+    "argon2-cffi>=23.1",
+    "python-multipart>=0.0.20",
+    "aioboto3>=13.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    # 不装 types-redis：redis>=5 自带 py.typed，装了反而与内置存根冲突
+    "watchfiles>=0.24",  # arq --watch 需要
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["apps", "worker", "packages"]
+
+# ---------------------------------------------------------------- ruff
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["migrations/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "C4",        # comprehensions
+    "SIM",       # simplify
+    "TID",       # tidy-imports  ← 模块边界靠它强制
+    "RUF",
+]
+ignore = [
+    "B008",    # FastAPI 的 Depends() 作为默认参数是官方惯用法
+    "RUF001",  # 全角标点"歧义字符"——中文注释与文案里它们是正确写法，
+    "RUF002",  # 不是歧义。开着会把每一行中文注释都报成错误。
+    "RUF003",
+]
+
+# ADR-009 / 11_ProjectStructure.md：
+# 模块之间只能通过对方的 service 层交互，禁止直接摸 repository / models。
+# 这是"模块化单体"能否不烂掉的唯一保障。
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"apps.api.modules.auth.repository".msg = "跨模块请走 auth.service"
+"apps.api.modules.auth.models".msg = "跨模块请走 auth.service"
+"apps.api.modules.project.repository".msg = "跨模块请走 project.service"
+"apps.api.modules.project.models".msg = "跨模块请走 project.service"
+"apps.api.modules.asset.repository".msg = "跨模块请走 asset.service"
+"apps.api.modules.asset.models".msg = "跨模块请走 asset.service"
+"apps.api.modules.task.repository".msg = "跨模块请走 task.service"
+"apps.api.modules.task.models".msg = "跨模块请走 task.service"
+"apps.api.modules.billing.repository".msg = "跨模块请走 billing.service"
+"apps.api.modules.billing.models".msg = "跨模块请走 billing.service"
+
+[tool.ruff.lint.per-file-ignores]
+# 各模块自己的文件当然可以 import 自己的 models/repository。
+# ruff 的 banned-api 不区分调用方，这里为模块自身开豁免。
+"apps/api/modules/*/**" = ["TID251"]
+"migrations/**" = ["TID251", "E501"]
+"tests/**" = ["TID251"]
+
+# ---------------------------------------------------------------- mypy
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+exclude = ["migrations/versions/"]
+
+[[tool.mypy.overrides]]
+module = ["arq.*", "aioboto3.*", "pgvector.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------- pytest
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "integration: 需要 PostgreSQL / Redis / MinIO",
+]

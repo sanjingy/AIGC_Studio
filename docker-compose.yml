@@ -1,0 +1,97 @@
+name: aigc-studio
+
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: infra/docker/api.Dockerfile
+  env_file: [.env]
+  environment:
+    # 容器内互访用服务名，覆盖 .env 里给宿主机用的值
+    POSTGRES_HOST: postgres
+    REDIS_HOST: redis
+    S3_ENDPOINT_URL: http://minio:9000
+    S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
+  volumes:
+    - ./apps:/app/apps
+    - ./packages:/app/packages
+    - ./worker:/app/worker
+    - ./migrations:/app/migrations
+    - ./tests:/app/tests
+    # 配置文件也挂进来：改 lint / 迁移配置不该需要重建镜像
+    - ./pyproject.toml:/app/pyproject.toml:ro
+    - ./alembic.ini:/app/alembic.ini:ro
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aigc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aigc_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-aigc_studio}
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aigc} -d ${POSTGRES_DB:-aigc_studio}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports: ["6379:6379"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-aigc_minio}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-aigc_minio_password}
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [miniodata:/data]
+    # 不加 healthcheck：minio 镜像里有没有 curl/mc 随版本变动，
+    # 探针本身反而成了不稳定源。就绪判断交给下面的 minio-init 轮询。
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on: [minio]
+    restart: "no"
+    entrypoint: >
+      sh -c "
+      until mc alias set local http://minio:9000 '${S3_ACCESS_KEY:-aigc_minio}' '${S3_SECRET_KEY:-aigc_minio_password}' >/dev/null 2>&1; do
+        echo 'waiting for minio...'; sleep 1;
+      done;
+      mc mb --ignore-existing local/${S3_BUCKET:-aigc-assets} &&
+      echo 'minio bucket ready'
+      "
+
+  api:
+    <<: *backend
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  worker:
+    <<: *backend
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    command: arq worker.main.WorkerSettings --watch worker
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

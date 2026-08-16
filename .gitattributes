@@ -1,0 +1,16 @@
+# 仓库内一律 LF。代码要在 Linux 容器里跑，CRLF 会让 shell 脚本和
+# Dockerfile 的 entrypoint 出现 "\r: command not found" 这类怪问题。
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.mp4 binary
+*.webm binary
+*.mp3 binary
+*.wav binary
+*.safetensors binary
+*.ckpt binary
+*.pt binary
