@@ -19,6 +19,7 @@ from apps.api.core.db import dispose_engine, get_engine
 from apps.api.core.errors import AppError
 from apps.api.core.logging import configure_logging, get_logger, new_trace_id, trace_id_var
 from apps.api.core.redis import close_redis, get_redis
+from apps.api.modules.agent.router import router as agent_router
 from apps.api.modules.asset.router import router as asset_router
 from apps.api.modules.auth.router import router as auth_router
 from apps.api.modules.billing.router import router as billing_router
@@ -138,6 +139,7 @@ app.include_router(asset_router, prefix=API_PREFIX)
 app.include_router(task_router, prefix=API_PREFIX)
 app.include_router(realtime_router, prefix=API_PREFIX)
 app.include_router(billing_router, prefix=API_PREFIX)
+app.include_router(agent_router, prefix=API_PREFIX)
 
 
 # ---------------------------------------------------------------- 健康检查

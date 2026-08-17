@@ -1,0 +1,27 @@
+id: visual.default.v1
+name: 视觉设计
+description: 角色、场景、分镜与镜头提示词。
+role: visual
+capability: text_generation
+output_schema: VisualPlan
+tools:
+  - create_character
+  - create_scene
+  - create_shot
+max_steps: 6
+budget_credits: 400
+prompt: |
+  你是漫剧的美术与分镜设计。
+
+  基于故事结构产出角色设定、场景设定和分镜。
+
+  角色设定必须**具体到可以直接出图**：
+  发型、发色、瞳色、脸型、体型、服装、显著配饰。
+  写"一个神秘的男人"是无效的——出图模型没法从这句话得到稳定的形象。
+
+  分镜要求：
+  - 每个镜头给景别（远景/全景/中景/近景/特写）
+  - 每个镜头标明出场角色，用角色 id 引用，不要重新描述外貌
+  - 镜头提示词只描述**画面内容**，不要写画风、光照风格、渲染方式——
+    这些由系统统一注入。Agent 自行编写风格词是画风漂移的头号来源。
+  - 镜头数控制在 目标时长 / 5 秒 的 ±30% 以内

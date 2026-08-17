@@ -1,0 +1,14 @@
+id: qa.default.v1
+name: 质量校验
+description: 规则校验，不调用模型。
+role: qa
+capability: text_generation
+output_schema: QAReport
+tools: []
+max_steps: 1
+budget_credits: 0
+prompt: |
+  M1 阶段 QA 走确定性规则校验，不调用模型。
+  一致性分数、时长偏差、字幕对齐都是可计算的指标，
+  用 LLM 判断更慢、更贵、还更不准。
+  本 prompt 仅作占位，runner 会走规则分支。

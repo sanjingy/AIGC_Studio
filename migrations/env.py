@@ -23,6 +23,7 @@ from apps.api.core.models import Base
 # 漏 import 会让 autogenerate 把没注册的表当成"需要 DROP"，
 # 生成一个删表的迁移。这是 Alembic 最容易踩的坑。
 # 这类 import 只为副作用：把表注册进 Base.metadata。
+from apps.api.modules.agent import models as _agent_models  # noqa: F401
 from apps.api.modules.asset import models as _asset_models  # noqa: F401
 from apps.api.modules.auth import models as _auth_models  # noqa: F401
 from apps.api.modules.billing import models as _billing_models  # noqa: F401
