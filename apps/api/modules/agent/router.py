@@ -12,7 +12,10 @@ from apps.api.modules.agent.schemas import (
     AgentSpecOut,
     ApprovalDecisionIn,
     ApprovalOut,
+    ConversationMessageOut,
     RegistryOut,
+    ReviseIn,
+    ReviseOut,
 )
 from apps.api.modules.auth.deps import CurrentUser, DbSession
 
@@ -121,6 +124,45 @@ async def resolve_approval(
         blocked=result.blocked,
         output=result.output,
     )
+
+
+@router.post("/projects/{project_id}/revise", response_model=ReviseOut)
+async def revise(
+    project_id: uuid.UUID,
+    payload: ReviseIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> ReviseOut:
+    """用一句话改掉某个阶段的产出。
+
+    走的是同一个 Agent、同一个 output_schema——聊天只是输入形式，
+    产出仍然是结构化的，否则下游解析会崩。
+    """
+    result = await service.revise(
+        db,
+        org_id=user.org_id,
+        project_id=project_id,
+        target_role=payload.target_role,
+        instruction=payload.instruction,
+    )
+    return ReviseOut(
+        target_role=result.target_role,
+        revision=result.revision,
+        changed_fields=result.changed_fields,
+        output=result.output,
+        stale_roles=result.stale_roles,
+    )
+
+
+@router.get("/projects/{project_id}/conversation", response_model=list[ConversationMessageOut])
+async def list_conversation(
+    project_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    limit: int = Query(100, ge=1, le=200),
+) -> list[ConversationMessageOut]:
+    rows = await service.list_messages(db, org_id=user.org_id, project_id=project_id, limit=limit)
+    return [ConversationMessageOut.model_validate(r) for r in rows]
 
 
 @router.get("/projects/{project_id}/agent-runs", response_model=list[AgentRunOut])

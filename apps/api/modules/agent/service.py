@@ -10,9 +10,11 @@ from agents import registry
 from apps.api.core.errors import AppError
 from apps.api.modules.agent import orchestrator
 from apps.api.modules.agent import repository as repo
-from apps.api.modules.agent.models import AgentRun, AgentStep, Approval
+from apps.api.modules.agent import revise as revise_mod
+from apps.api.modules.agent.models import AgentRun, AgentStep, Approval, ConversationMessage
 
 MAX_RUNS = 100
+MAX_MESSAGES = 200
 
 
 async def advance(
@@ -88,6 +90,31 @@ async def get_run_steps(
     if run is None:
         raise AppError("common.not_found", message=f"agent run {run_id}")
     return await repo.list_steps(db, run_id=run_id)
+
+
+async def revise(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    target_role: str,
+    instruction: str,
+) -> revise_mod.ReviseResult:
+    return await revise_mod.revise(
+        db,
+        org_id=org_id,
+        project_id=project_id,
+        target_role=target_role,
+        instruction=instruction,
+    )
+
+
+async def list_messages(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, limit: int = 100
+) -> list[ConversationMessage]:
+    return await repo.list_messages(
+        db, org_id=org_id, project_id=project_id, limit=min(limit, MAX_MESSAGES)
+    )
 
 
 def registry_snapshot() -> registry.LoadReport:

@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.modules.agent.models import AgentRun, AgentStep, Approval
+from apps.api.modules.agent.models import AgentRun, AgentStep, Approval, ConversationMessage
 
 
 async def create_run(
@@ -109,6 +109,69 @@ async def get_run(db: AsyncSession, *, org_id: uuid.UUID, run_id: uuid.UUID) -> 
 
 async def list_steps(db: AsyncSession, *, run_id: uuid.UUID) -> list[AgentStep]:
     stmt = select(AgentStep).where(AgentStep.run_id == run_id).order_by(AgentStep.step_index)
+    return list((await db.execute(stmt)).scalars())
+
+
+# ------------------------------------------------------------------ 对话修订
+
+
+async def add_message(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    target_role: str,
+    author: str,
+    text: str,
+    revision: int,
+    run_id: uuid.UUID | None = None,
+    changed_fields: list[str] | None = None,
+) -> ConversationMessage:
+    row = ConversationMessage(
+        org_id=org_id,
+        project_id=project_id,
+        target_role=target_role,
+        author=author,
+        text=text,
+        revision=revision,
+        run_id=run_id,
+        changed_fields=changed_fields or [],
+    )
+    db.add(row)
+    await db.flush()
+    return row
+
+
+async def next_revision(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, role: str
+) -> int:
+    stmt = (
+        select(ConversationMessage.revision)
+        .where(
+            ConversationMessage.org_id == org_id,
+            ConversationMessage.project_id == project_id,
+            ConversationMessage.target_role == role,
+        )
+        .order_by(ConversationMessage.revision.desc())
+        .limit(1)
+    )
+    latest = (await db.execute(stmt)).scalar_one_or_none()
+    return (latest or 0) + 1
+
+
+async def list_messages(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, limit: int
+) -> list[ConversationMessage]:
+    stmt = (
+        select(ConversationMessage)
+        .where(
+            ConversationMessage.org_id == org_id,
+            ConversationMessage.project_id == project_id,
+            ConversationMessage.deleted_at.is_(None),
+        )
+        .order_by(ConversationMessage.created_at)
+        .limit(limit)
+    )
     return list((await db.execute(stmt)).scalars())
 
 

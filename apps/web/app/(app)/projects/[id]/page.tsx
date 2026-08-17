@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import { Check, RotateCcw, Sparkles, X } from "lucide-react";
 
+import { ReviseChat } from "@/components/revise-chat";
 import { Button } from "@/components/ui/button";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import {
@@ -11,6 +12,7 @@ import {
   type AgentRun,
   type Approval,
   type Project,
+  type ReviseTarget,
 } from "@/lib/api";
 
 const STAGE_STEPS = [
@@ -85,6 +87,12 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           ? "story"
           : "routing";
   const stageIndex = STAGE_STEPS.findIndex((s) => s.key === stage);
+
+  // 有产出才能改。顺序与生产顺序一致，聊天框默认选最靠后的那个
+  const revisable: ReviseTarget[] = [
+    ...(story ? (["story"] as const) : []),
+    ...(visual ? (["visual"] as const) : []),
+  ];
 
   return (
     <div className="mx-auto flex max-w-[1000px] flex-col gap-4">
@@ -250,6 +258,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           </div>
         </Panel>
       )}
+
+      {/* 聊天修订 */}
+      <ReviseChat projectId={id} available={revisable} onRevised={reload} />
 
       {/* Agent 运行记录 */}
       <Panel>

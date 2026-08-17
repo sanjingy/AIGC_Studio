@@ -117,6 +117,28 @@ export type AgentRun = {
 
 export type Balance = { balance: number; reserved: number; total: number };
 
+export type ReviseTarget = "story" | "visual";
+
+export type Revise = {
+  target_role: ReviseTarget;
+  revision: number;
+  /** 后端 diff 出来的实际改动，不是模型自述 */
+  changed_fields: string[];
+  output: Record<string, any>;
+  /** 基于旧版生成的下游产出，需要重新生成才会同步 */
+  stale_roles: string[];
+};
+
+export type ChatMessage = {
+  id: string;
+  target_role: ReviseTarget;
+  author: "user" | "assistant";
+  text: string;
+  revision: number;
+  changed_fields: string[];
+  created_at: string;
+};
+
 export const projects = {
   list: () => apiFetch<{ items: Project[]; next_cursor: string | null }>("/projects?limit=50"),
 
@@ -141,6 +163,15 @@ export const projects = {
     }),
 
   runs: (id: string) => apiFetch<AgentRun[]>(`/projects/${id}/agent-runs?limit=50`),
+
+  /** 用一句话改掉某个阶段的产出。走同一个 Agent 与同一个 schema。 */
+  revise: (id: string, targetRole: ReviseTarget, instruction: string) =>
+    apiFetch<Revise>(`/projects/${id}/revise`, {
+      method: "POST",
+      body: JSON.stringify({ target_role: targetRole, instruction }),
+    }),
+
+  conversation: (id: string) => apiFetch<ChatMessage[]>(`/projects/${id}/conversation`),
 };
 
 export const credits = {

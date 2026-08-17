@@ -73,6 +73,33 @@ class AgentStep(OrgEntity):
     __table_args__ = (Index("ix_agent_steps_run_index", "run_id", "step_index"),)
 
 
+class ConversationMessage(OrgEntity):
+    """聊天修订的对话记录。
+
+    **聊天是输入，不是真相。** 执行状态仍只认 `tasks.status` +
+    `projects.current_state_json`（ADR-008）。这张表存的是
+    "用户说了什么、据此改出了哪一版"，用于回看与撤销，
+    **不参与任何状态判断**。任何"从对话推断当前进度"的代码都是错的。
+    """
+
+    __tablename__ = "conversation_messages"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    target_role: Mapped[str] = mapped_column(String(16), nullable=False)
+    author: Mapped[str] = mapped_column(String(16), nullable=False)  # user / assistant
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # assistant 消息指向产出这一版的那次运行，便于回看提示词与原始输出
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+
+    # 该 role 产出的版本号，从 1 开始。旧版留在 agent_runs 里，
+    # "改回上一版"是高频需求，不能改一次丢一次。
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    changed_fields: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+
+    __table_args__ = (Index("ix_conversation_project_created", "project_id", "created_at"),)
+
+
 class Approval(OrgEntity):
     """审核门。用户的决策记在这里，不记在 agent_runs 里。"""
 

@@ -97,9 +97,21 @@ async def run_agent(
     spec: AgentSpec,
     user_input: str,
     variables: dict[str, Any] | None = None,
+    system_suffix: str = "",
 ) -> RunResult:
+    """跑一个 Agent。
+
+    `system_suffix` 追加在 spec 提示词之后、输出契约之前，用于**改变任务性质**
+    而不换 Agent——修订就是这种情况：同一个 Agent、同一个 schema，
+    但干的是"改一份已有产出"而不是"从素材创作"。
+    不给它一条新的角色指令，模型会按原来的角色理解输入，
+    实测表现是把用户消息里那份已经合规的 JSON 原样吐回来。
+    """
     schema = resolve_schema(spec.output_schema)
-    system = build_system_prompt(render_prompt(spec.prompt, variables or {}), schema)
+    prompt = render_prompt(spec.prompt, variables or {})
+    if system_suffix:
+        prompt = f"{prompt.rstrip()}\n\n{system_suffix.strip()}"
+    system = build_system_prompt(prompt, schema)
 
     run = await repo.create_run(
         db,
