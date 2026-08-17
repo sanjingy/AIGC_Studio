@@ -16,8 +16,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.core.config import get_settings
-from apps.api.core.errors import ERRORS, AppError
+from apps.api.core.errors import ERRORS, AppError, Disposition
 from apps.api.core.logging import get_logger
+from apps.api.modules.billing import pricing
+from apps.api.modules.billing import service as billing
 from apps.api.modules.task import events
 from apps.api.modules.task import repository as repo
 from apps.api.modules.task.models import ALLOWED_TRANSITIONS, TASK_TYPES, Task
@@ -26,6 +28,19 @@ log = get_logger(__name__)
 
 MAX_PAGE_SIZE = 100
 EXECUTE_JOB = "execute_task"
+
+
+def _next_run_attempt(task: Task) -> int:
+    """任务下一次执行时的 attempt 编号。
+
+    `begin_execution` 会把 attempt 自增，所以"即将执行的那一次"
+    永远是当前值 +1。
+
+    预扣和结算必须用**同一个编号**，否则结算找不到对应的预扣，
+    会静默跳过——表现为任务成功了但钱一直挂在 reserved 里没扣走。
+    这个 off-by-one 不会报错，只会悄悄漏收钱。
+    """
+    return task.attempt + 1
 
 
 class InvalidTransitionError(AppError):
@@ -66,6 +81,8 @@ async def create_task(
     priority: int = 100,
     max_attempts: int = 3,
     idempotency_key: str | None = None,
+    project_budget_cap: int | None = None,
+    project_spent: int = 0,
 ) -> tuple[Task, bool]:
     """建任务并入队。返回 (任务, 是否新建)。
 
@@ -83,6 +100,8 @@ async def create_task(
                 raise AppError("common.conflict", message="idempotency key conflict")
             return existing, False
 
+    estimated = await pricing.estimate(db, task_type=task_type, payload=input_json or {})
+
     try:
         task = await repo.create(
             db,
@@ -95,6 +114,7 @@ async def create_task(
             max_attempts=max_attempts,
             idempotency_key=idempotency_key,
         )
+        task.estimated_cost = estimated
         await events.emit(
             db,
             org_id=org_id,
@@ -112,8 +132,54 @@ async def create_task(
             return existing, False
         raise
 
-    await _enqueue(task.id)
+    # 先扣后跑。跑完再扣的话，余额不足时钱已经花在上游了。
+    # 预扣失败要把任务标掉——留一个 queued 任务在那里会被 Worker 捞去执行。
+    #
+    # task_id 必须在 try 之前取出：rollback 会让 ORM 对象全部过期，
+    # 之后再读 task.id 会触发一次同步 refresh，在 async 上下文里直接抛
+    # MissingGreenlet，把真正的业务错误掩盖成一个 500。
+    task_id = task.id
+    try:
+        reservation = await billing.reserve(
+            db,
+            org_id=org_id,
+            amount=estimated,
+            task_id=task_id,
+            attempt=_next_run_attempt(task),
+            project_budget_cap=project_budget_cap,
+            project_spent=project_spent,
+        )
+        task.reserved_cost = reservation.reserved_delta
+        await db.commit()
+    except AppError:
+        await db.rollback()
+        await _abort_unfunded(db, task_id=task_id)
+        raise
+
+    await _enqueue(task_id)
     return task, True
+
+
+async def _abort_unfunded(db: AsyncSession, *, task_id: uuid.UUID) -> None:
+    """预扣失败：把任务落到终态，绝不能留在 queued。"""
+    task = await repo.get_for_worker(db, task_id=task_id)
+    if task is None or task.status in ("cancelled", "failed"):
+        return
+    await repo.mark_finished(
+        db,
+        task,
+        status="failed",
+        error_code="billing.credit.insufficient",
+        error_detail="预扣失败，任务未执行",
+    )
+    await events.emit(
+        db,
+        org_id=task.org_id,
+        project_id=task.project_id,
+        type=events.EVENT_TASK_FAILED,
+        data=_snapshot(task),
+    )
+    await db.commit()
 
 
 async def get_task(db: AsyncSession, *, org_id: uuid.UUID, task_id: uuid.UUID) -> Task:
@@ -159,6 +225,11 @@ async def cancel_task(db: AsyncSession, *, org_id: uuid.UUID, task_id: uuid.UUID
         data=_snapshot(task),
     )
     await db.commit()
+
+    # 取消不收钱。已开跑的用当前 attempt，还没开跑的预扣记在 attempt+1 上，
+    # 两个都试一遍才能保证预扣一定被释放。
+    await billing.release(db, org_id=org_id, task_id=task_id, attempt=task.attempt)
+    await billing.release(db, org_id=org_id, task_id=task_id, attempt=task.attempt + 1)
     return task
 
 
@@ -179,6 +250,8 @@ async def retry_task(db: AsyncSession, *, org_id: uuid.UUID, task_id: uuid.UUID)
     task.error_detail = None
     task.finished_at = None
     task.progress = 0
+    next_attempt = _next_run_attempt(task)
+    task_id_local, estimated = task.id, task.estimated_cost
     await events.emit(
         db,
         org_id=task.org_id,
@@ -188,7 +261,25 @@ async def retry_task(db: AsyncSession, *, org_id: uuid.UUID, task_id: uuid.UUID)
     )
     await db.commit()
 
-    await _enqueue(task.id)
+    # 重试必须重新预扣：上一次的预扣在结算或释放时已经消掉了。
+    # attempt 会在 begin_execution 里自增，所以这里按下一个编号预扣，
+    # 否则会撞上一次的幂等键——任务照跑但一分钱没扣，重试越多亏越狠。
+    try:
+        reservation = await billing.reserve(
+            db,
+            org_id=org_id,
+            amount=estimated,
+            task_id=task_id_local,
+            attempt=next_attempt,
+        )
+        task.reserved_cost = reservation.reserved_delta
+        await db.commit()
+    except AppError:
+        await db.rollback()
+        await _abort_unfunded(db, task_id=task_id_local)
+        raise
+
+    await _enqueue(task_id_local)
     return task
 
 
@@ -258,6 +349,13 @@ async def finish_execution(
         return
 
     spec = ERRORS.get(error_code or "")
+    # 成功按预扣全额计费；失败按错误目录的处置方式决定退不退。
+    # 处置规则只在 errors.py 定义一处，不在这里另写 if/else——
+    # 两处规则迟早不一致，而不一致的后果是某类失败漏了退款。
+    disposition = spec.disposition if spec else Disposition.KEEP
+    actual = task.reserved_cost if status == "succeeded" else 0
+    task.actual_cost = actual if disposition is Disposition.KEEP else 0
+
     await repo.mark_finished(
         db,
         task,
@@ -267,6 +365,7 @@ async def finish_execution(
         error_detail=error_detail,
         counts_as_waste=bool(spec and spec.counts_as_waste),
     )
+    org_id, tid, attempt = task.org_id, task.id, task.attempt
     await events.emit(
         db,
         org_id=task.org_id,
@@ -275,6 +374,22 @@ async def finish_execution(
         data=_snapshot(task),
     )
     await db.commit()
+
+    # 结算放在状态提交之后：钱的操作要自己加行锁，
+    # 塞进上面的事务会把账户锁的持有时间拉长到整个任务收尾流程。
+    await billing.finalize_by_disposition(
+        db,
+        org_id=org_id,
+        task_id=tid,
+        disposition=disposition,
+        actual_cost=task.actual_cost,
+        attempt=attempt,
+    )
+
+
+async def settle_cancelled(db: AsyncSession, *, org_id: uuid.UUID, task_id: uuid.UUID) -> None:
+    """取消任务后释放预扣。取消不该收钱。"""
+    await billing.release(db, org_id=org_id, task_id=task_id)
 
 
 def _snapshot(task: Task) -> dict[str, Any]:

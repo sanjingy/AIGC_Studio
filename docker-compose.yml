@@ -90,6 +90,10 @@ services:
 
   worker:
     <<: *backend
+    # 关掉从 Dockerfile 继承的 HTTP 健康检查——worker 不跑 HTTP 服务，
+    # 探针必然失败，容器会一直显示 unhealthy 掩盖真实问题。
+    healthcheck:
+      disable: true
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

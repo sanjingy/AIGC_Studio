@@ -31,8 +31,14 @@ async def create_task(
     response: Response,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> TaskOut:
+    budget_cap: int | None = None
+    spent = 0
     if payload.project_id is not None:
-        await project_service.get_project(db, org_id=user.org_id, project_id=payload.project_id)
+        project = await project_service.get_project(
+            db, org_id=user.org_id, project_id=payload.project_id
+        )
+        budget_cap = project.budget_cap_credits
+        spent = project.spent_credits
 
     task, created = await service.create_task(
         db,
@@ -43,6 +49,8 @@ async def create_task(
         input_json=payload.input,
         priority=payload.priority,
         idempotency_key=idempotency_key,
+        project_budget_cap=budget_cap,
+        project_spent=spent,
     )
     # 幂等命中时返回 200 而非 201，让客户端能分辨"新建了"和"已存在"
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK

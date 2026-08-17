@@ -19,6 +19,7 @@ from apps.api.core.logging import get_logger
 from apps.api.modules.auth import repository as repo
 from apps.api.modules.auth import security
 from apps.api.modules.auth.models import User
+from apps.api.modules.billing import service as billing
 
 log = get_logger(__name__)
 
@@ -59,7 +60,20 @@ async def register(
         await db.rollback()
         raise AppError("auth.email.taken") from exc
 
-    log.info("auth.registered", user_id=str(user.id), org_id=str(user.org_id))
+    # 发放注册体验额度。放在会话签发之后：即便发放失败也不该
+    # 阻断注册——用户拿不到额度是可修复的，注册失败不是。
+    try:
+        granted = await billing.grant_welcome_credits(db, org_id=user.org_id)
+    except Exception as exc:
+        granted = 0
+        log.warning("auth.welcome_grant_failed", org_id=str(user.org_id), error=repr(exc))
+
+    log.info(
+        "auth.registered",
+        user_id=str(user.id),
+        org_id=str(user.org_id),
+        welcome_credits=granted,
+    )
     return session
 
 
