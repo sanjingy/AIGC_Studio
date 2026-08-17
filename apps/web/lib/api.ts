@@ -74,6 +74,86 @@ export type User = {
   created_at: string;
 };
 
+export type Project = {
+  id: string;
+  title: string;
+  route_type: string | null;
+  status: string;
+  spent_credits: number;
+  created_at: string;
+};
+
+export type Advance = {
+  stage: string;
+  ran_role: string | null;
+  gate_opened: string | null;
+  blocked: boolean;
+  output: Record<string, unknown> | null;
+};
+
+export type Approval = {
+  id: string;
+  gate: string;
+  status: string;
+  payload_json: { stage?: string; summary?: Record<string, unknown> };
+  comment: string | null;
+  created_at: string;
+  resolved_at: string | null;
+};
+
+export type AgentRun = {
+  id: string;
+  agent_id: string;
+  role: string;
+  status: string;
+  model_id: string | null;
+  tokens_in: number;
+  tokens_out: number;
+  attempts: number;
+  error_code: string | null;
+  output_json: Record<string, any> | null;
+  created_at: string;
+};
+
+export type Balance = { balance: number; reserved: number; total: number };
+
+export const projects = {
+  list: () => apiFetch<{ items: Project[]; next_cursor: string | null }>("/projects?limit=50"),
+
+  create: (title: string) =>
+    apiFetch<Project>("/projects", { method: "POST", body: JSON.stringify({ title }) }),
+
+  get: (id: string) => apiFetch<Project>(`/projects/${id}`),
+
+  /** 推进到下一个审核门。真实 LLM 调用，会花 Credits。 */
+  advance: (id: string, userInput: string) =>
+    apiFetch<Advance>(`/projects/${id}/advance?to_gate=true`, {
+      method: "POST",
+      body: JSON.stringify({ user_input: userInput }),
+    }),
+
+  approvals: (id: string) => apiFetch<Approval[]>(`/projects/${id}/approvals`),
+
+  resolve: (id: string, approvalId: string, decision: string, comment?: string) =>
+    apiFetch<Advance>(`/projects/${id}/approvals/${approvalId}`, {
+      method: "POST",
+      body: JSON.stringify({ decision, comment: comment || null }),
+    }),
+
+  runs: (id: string) => apiFetch<AgentRun[]>(`/projects/${id}/agent-runs?limit=50`),
+};
+
+export const credits = {
+  balance: () => apiFetch<Balance>("/credits/balance"),
+
+  topup: (principal: number) =>
+    apiFetch<Balance>("/credits/topup", {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({ principal }),
+    }),
+};
+
 export const auth = {
   register: (data: { email: string; password: string; display_name: string }) =>
     apiFetch<{ user: User; access_expires_in: number }>("/auth/register", {

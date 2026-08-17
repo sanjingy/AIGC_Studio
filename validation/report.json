@@ -1,0 +1,181 @@
+{
+  "generated_at": "2026-08-17T02:58:28.857501+00:00",
+  "base_portrait": "https://dashscope-5859.oss-cn-wulanchabu-acdr-1.aliyuncs.com/1d/23/20260817/6514ac22/1c272d5b-7bd5-4db6-b9dd-e864f6c9cde8-1.png?Expires=1787021810&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=Ng5gkqi%2FhT7CmoRjlMce9SUDNZM%3D",
+  "style": {
+    "positive": "日式动画风格，赛璐璐上色，清晰线稿",
+    "negative": "真人照片，3D渲染，模糊，多余手指，畸变，水印，文字",
+    "render_mode": "赛璐璐",
+    "seed_base": 100000
+  },
+  "thresholds": {
+    "pass": 0.75,
+    "reject": 0.6
+  },
+  "counts": {
+    "total": 10,
+    "passed": 3,
+    "needs_review": 7,
+    "must_regenerate": 0,
+    "errors": 0
+  },
+  "similarity": {
+    "min": 0.6506,
+    "median": 0.7068,
+    "max": 0.8122
+  },
+  "measured_image_retry_factor": 3.33,
+  "by_kind": [
+    {
+      "kind": "多人同框",
+      "similarity": 0.6506,
+      "passed": false
+    },
+    {
+      "kind": "动态",
+      "similarity": 0.6707,
+      "passed": false
+    },
+    {
+      "kind": "侧脸近景",
+      "similarity": 0.6772,
+      "passed": false
+    },
+    {
+      "kind": "远景全身",
+      "similarity": 0.6796,
+      "passed": false
+    },
+    {
+      "kind": "特写手部",
+      "similarity": 0.6812,
+      "passed": false
+    },
+    {
+      "kind": "低角度",
+      "similarity": 0.7068,
+      "passed": false
+    },
+    {
+      "kind": "背身",
+      "similarity": 0.7442,
+      "passed": false
+    },
+    {
+      "kind": "换装",
+      "similarity": 0.7735,
+      "passed": true
+    },
+    {
+      "kind": "暗光",
+      "similarity": 0.7766,
+      "passed": true
+    },
+    {
+      "kind": "正面中景",
+      "similarity": 0.8122,
+      "passed": true
+    }
+  ],
+  "shots": [
+    {
+      "index": 1,
+      "kind": "正面中景",
+      "similarity": 0.8122,
+      "passed": true,
+      "must_regenerate": false,
+      "error": null,
+      "url": "https://dashscope-5859.oss-cn-wulanchabu-acdr-1.aliyuncs.com/1d/36/20260817/6514ac22/6101e6a6-1274-4f3f-b79e-f70243de7684100001.png?Expires=1787021820&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=MGLj%2BdbUqBu8fiFCWE0DS9DBPCE%3D",
+      "prompt": "林舒，30 出头，黑色短发，右侧偏分，发梢微卷，深褐色，眼尾下垂，瘦削，颧骨明显，左眉有一道旧疤，偏瘦，中等身高，深灰长风衣，内搭高领毛衣，黑色皮鞋，常年戴一块停摆的银色怀表。站在锈蚀的集装箱前，正对镜头，神情警觉。日式动画风格，赛璐璐上色，清晰线稿，赛璐璐，中等线宽，低饱和，冷调，高对比"
+    },
+    {
+      "index": 2,
+      "kind": "侧脸近景",
+      "similarity": 0.6772,
+      "passed": false,
+      "must_regenerate": false,
+      "error": null,
+      "url": "https://dashscope-5859.oss-cn-wulanchabu-acdr-1.aliyuncs.com/1d/ed/20260817/6514ac22/230b28b0-ce9d-406f-81ad-8497dfdf3713100002.png?Expires=1787021829&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=U23wET%2FsafA%2FqPqbdThSb9nDNHE%3D",
+      "prompt": "林舒，30 出头，黑色短发，右侧偏分，发梢微卷，深褐色，眼尾下垂，瘦削，颧骨明显，左眉有一道旧疤，偏瘦，中等身高，深灰长风衣，内搭高领毛衣，黑色皮鞋，常年戴一块停摆的银色怀表。侧脸看向海面，雨水顺着下颌线滑落。日式动画风格，赛璐璐上色，清晰线稿，赛璐璐，中等线宽，低饱和，冷调，高对比"
+    },
+    {
+      "index": 3,
+      "kind": "远景全身",
+      "similarity": 0.6796,
+      "passed": false,
+      "must_regenerate": false,
+      "error": null,
+      "url": "https://dashscope-5859.oss-cn-wulanchabu-acdr-1.aliyuncs.com/1d/f3/20260817/6514ac22/7d97090b-7b12-4cd5-95a6-79ee67a3b94b100003.png?Expires=1787021838&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=3FPmb724oTAoJsiwi0%2F4rZo9LEY%3D",
+      "prompt": "林舒，30 出头，黑色短发，右侧偏分，发梢微卷，深褐色，眼尾下垂，瘦削，颧骨明显，左眉有一道旧疤，偏瘦，中等身高，深灰长风衣，内搭高领毛衣，黑色皮鞋，常年戴一块停摆的银色怀表。远景，独自走在空旷的栈桥上，背影占画面很小一部分。日式动画风格，赛璐璐上色，清晰线稿，赛璐璐，中等线宽，低饱和，冷调，高对比"
+    },
+    {
+      "index": 4,
+      "kind": "特写手部",
+      "similarity": 0.6812,
+      "passed": false,
+      "must_regenerate": false,
+      "error": null,
+      "url": "https://dashscope-5859.oss-cn-wulanchabu-acdr-1.aliyuncs.com/1d/dc/20260817/6514ac22/449716b0-36fd-4a9b-b9ff-479dc2f7ad4b100004.png?Expires=1787021845&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=oxobjsRkKKlM7jW98Vg4zeHRlTQ%3D",
+      "prompt": "林舒，30 出头，黑色短发，右侧偏分，发梢微卷，深褐色，眼尾下垂，瘦削，颧骨明显，左眉有一道旧疤，偏瘦，中等身高，深灰长风衣，内搭高领毛衣，黑色皮鞋，常年戴一块停摆的银色怀表。特写，手中攥着一块停摆的怀表。日式动画风格，赛璐璐上色，清晰线稿，赛璐璐，中等线宽，低饱和，冷调，高对比"
+    },
+    {
+      "index": 5,
+      "kind": "背身",
+      "similarity": 0.7442,
+      "passed": false,
+      "must_regenerate": false,
+      "error": null,
+      "url": "https://dashscope-5859.oss-cn-wulanchabu-acdr-1.aliyuncs.com/1d/17/20260817/6514ac22/29f45c02-2ba5-4fff-bd39-9b655b7b2283100005.png?Expires=1787021852&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=eQ5ElUZbXquGMJ9PPttxqE3uL2g%3D",
+      "prompt": "林舒，30 出头，黑色短发，右侧偏分，发梢微卷，深褐色，眼尾下垂，瘦削，颧骨明显，左眉有一道旧疤，偏瘦，中等身高，深灰长风衣，内搭高领毛衣，黑色皮鞋，常年戴一块停摆的银色怀表。背对镜头，推开一扇锈死的铁门。日式动画风格，赛璐璐上色，清晰线稿，赛璐璐，中等线宽，低饱和，冷调，高对比"
+    },
+    {
+      "index": 6,
+      "kind": "低角度",
+      "similarity": 0.7068,
+      "passed": false,
+      "must_regenerate": false,
+      "error": null,
+      "url": "https://dashscope-5859.oss-cn-wulanchabu-acdr-1.aliyuncs.com/1d/67/20260817/6514ac22/656a6936-792d-4da2-968b-95761fceee1b100006.png?Expires=1787021869&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=VLKTa2gOh0an0smPoHO%2BjaCBBq0%3D",
+      "prompt": "林舒，30 出头，黑色短发，右侧偏分，发梢微卷，深褐色，眼尾下垂，瘦削，颧骨明显，左眉有一道旧疤，偏瘦，中等身高，深灰长风衣，内搭高领毛衣，黑色皮鞋，常年戴一块停摆的银色怀表。低角度仰拍，站在钠灯下抬头看向天空。日式动画风格，赛璐璐上色，清晰线稿，赛璐璐，中等线宽，低饱和，冷调，高对比"
+    },
+    {
+      "index": 7,
+      "kind": "动态",
+      "similarity": 0.6707,
+      "passed": false,
+      "must_regenerate": false,
+      "error": null,
+      "url": "https://dashscope-5859.oss-cn-wulanchabu-acdr-1.aliyuncs.com/1d/c2/20260817/6514ac22/809785ce-9ff6-45d6-84c9-795296e9fdfe100007.png?Expires=1787021879&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=8cqOCZFmMW9LGbkEth31yI%2Bgh2Y%3D",
+      "prompt": "林舒，30 出头，黑色短发，右侧偏分，发梢微卷，深褐色，眼尾下垂，瘦削，颧骨明显，左眉有一道旧疤，偏瘦，中等身高，深灰长风衣，内搭高领毛衣，黑色皮鞋，常年戴一块停摆的银色怀表。在雨中奔跑，风衣下摆扬起。日式动画风格，赛璐璐上色，清晰线稿，赛璐璐，中等线宽，低饱和，冷调，高对比"
+    },
+    {
+      "index": 8,
+      "kind": "暗光",
+      "similarity": 0.7766,
+      "passed": true,
+      "must_regenerate": false,
+      "error": null,
+      "url": "https://dashscope-5859.oss-cn-wulanchabu-acdr-1.aliyuncs.com/1d/30/20260817/6514ac22/5a59da5e-d682-4fc1-a767-ffabf597f8b4100008.png?Expires=1787021888&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=uXe64HT8cMnqIsu1MXhFRyRsaw4%3D",
+      "prompt": "林舒，30 出头，黑色短发，右侧偏分，发梢微卷，深褐色，眼尾下垂，瘦削，颧骨明显，左眉有一道旧疤，偏瘦，中等身高，深灰长风衣，内搭高领毛衣，黑色皮鞋，常年戴一块停摆的银色怀表。几乎全黑的仓库里，只有一束光打在脸上。日式动画风格，赛璐璐上色，清晰线稿，赛璐璐，中等线宽，低饱和，冷调，高对比"
+    },
+    {
+      "index": 9,
+      "kind": "换装",
+      "similarity": 0.7735,
+      "passed": true,
+      "must_regenerate": false,
+      "error": null,
+      "url": "https://dashscope-5859.oss-cn-wulanchabu-acdr-1.aliyuncs.com/1d/88/20260817/6514ac22/58ba106e-34ab-47ea-b0dc-aec7de769361100009.png?Expires=1787021898&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=tSltWoyhbz27Xp7L1n9%2B%2F9jdAZ4%3D",
+      "prompt": "林舒，30 出头，黑色短发，右侧偏分，发梢微卷，深褐色，眼尾下垂，瘦削，颧骨明显，左眉有一道旧疤，偏瘦，中等身高，深灰长风衣，内搭高领毛衣，黑色皮鞋，常年戴一块停摆的银色怀表。脱掉风衣只穿高领毛衣，坐在长椅上。日式动画风格，赛璐璐上色，清晰线稿，赛璐璐，中等线宽，低饱和，冷调，高对比"
+    },
+    {
+      "index": 10,
+      "kind": "多人同框",
+      "similarity": 0.6506,
+      "passed": false,
+      "must_regenerate": false,
+      "error": null,
+      "url": "https://dashscope-5859.oss-cn-wulanchabu-acdr-1.aliyuncs.com/1d/0c/20260817/6514ac22/ccaede00-d465-4d29-ac44-d0fccfdc1085100010.png?Expires=1787021906&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=EpRh8Iv8I2RKwtIu3GuPLtPCB%2BU%3D",
+      "prompt": "林舒，30 出头，黑色短发，右侧偏分，发梢微卷，深褐色，眼尾下垂，瘦削，颧骨明显，左眉有一道旧疤，偏瘦，中等身高，深灰长风衣，内搭高领毛衣，黑色皮鞋，常年戴一块停摆的银色怀表。与另一名穿警服的男子在码头对峙，两人各占半边画面。日式动画风格，赛璐璐上色，清晰线稿，赛璐璐，中等线宽，低饱和，冷调，高对比"
+    }
+  ]
+}

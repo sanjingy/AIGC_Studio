@@ -2,29 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Clapperboard,
-  Coins,
-  Film,
-  LayoutGrid,
-  Library,
-  ListChecks,
-  Users,
-  type LucideIcon,
-} from "lucide-react";
+import { Clapperboard, LayoutGrid, ListChecks, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 type Item = { href: string; label: string; icon: LucideIcon };
 
-/** M1 的 7 个页面（01_ProductSpec.md §6）。其余里程碑再加。 */
+// 只列已经接了真实接口的页面。放一堆点进去是假数据的入口，
+// 比少放几个更糟——用户分不清哪些能用。
 const NAV: Item[] = [
-  { href: "/dashboard", label: "工作台", icon: LayoutGrid },
-  { href: "/storyboard", label: "分镜", icon: Film },
-  { href: "/cast", label: "角色与场景", icon: Users },
-  { href: "/assets", label: "资产库", icon: Library },
+  { href: "/dashboard", label: "项目", icon: LayoutGrid },
   { href: "/tasks", label: "任务中心", icon: ListChecks },
-  { href: "/credits", label: "Credits", icon: Coins },
 ];
 
 export function Sidebar() {
@@ -33,12 +21,15 @@ export function Sidebar() {
   return (
     <nav
       aria-label="主导航"
-      className="flex w-[200px] shrink-0 flex-col border-r border-border bg-surface"
+      className="flex w-[180px] shrink-0 flex-col border-r border-border bg-surface"
     >
-      <div className="flex h-12 items-center gap-2 border-b border-border px-3">
+      <Link
+        href="/dashboard"
+        className="flex h-12 items-center gap-2 border-b border-border px-3 hover:bg-surface-2"
+      >
         <Clapperboard aria-hidden className="size-4 text-primary" />
         <span className="text-sm font-semibold tracking-tight">AIGC Studio</span>
-      </div>
+      </Link>
 
       <ul className="flex flex-col gap-0.5 p-2">
         {NAV.map(({ href, label, icon: Icon }) => {
