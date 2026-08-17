@@ -253,6 +253,48 @@ async def test_router_still_sees_the_raw_text(alice: AsyncClient, db: AsyncSessi
     assert MARKER in await _sent_to_agent(db, pid, "router.default.v1")
 
 
+# ------------------------------------------------------------------ 存量数据
+
+
+async def test_legacy_stage_names_still_advance(alice: AsyncClient, db: AsyncSession) -> None:
+    """库里存着旧阶段名的项目不能一点就 500。
+
+    状态存在库里（ADR-008），改阶段枚举就是一次数据迁移。
+    2026-08-18 阶段图从 story/visual 两步改成五步时漏了这条，
+    存量项目在 `_NEXT[stage]` 上 KeyError，用户看到的是"点继续没反应"。
+    """
+    from apps.api.modules.project import service as project_service
+
+    pid = await _project(alice)
+    org_id = uuid.UUID((await alice.get("/api/v1/auth/me")).json()["org_id"])
+    await _advance(alice, pid, SOURCE)
+
+    for legacy, expect_ran in (("story", "plot_index"), ("visual", "plot_index")):
+        project = await project_service.get_project(db, org_id=org_id, project_id=uuid.UUID(pid))
+        # 模拟旧版留下的状态：只有旧阶段名，没有新阶段的产出
+        project.current_state_json = {"stage": legacy, "router": {"route": "NOVEL_TO_ANIME"}}
+        await db.commit()
+
+        result = await _advance(alice, pid, to_gate=False)
+        # visual 缺上游产出，要退回到能真正跑起来的那一步而不是拿空数据硬跑
+        assert result["ran_role"] == expect_ran, f"{legacy} 没有正确迁移"
+
+
+async def test_rewind_skips_nothing_when_upstream_exists(
+    alice: AsyncClient, db: AsyncSession
+) -> None:
+    """上游齐全时不要乱退——退了就是白花一次钱重做。"""
+    from apps.api.modules.agent.orchestrator import rewind_to_runnable
+
+    state = {"plot_index": {}, "screenplay": {}, "characters": {}, "scenes": {}}
+    assert rewind_to_runnable("storyboard", state) == "storyboard"
+    assert rewind_to_runnable("characters", state) == "characters"
+
+    # 缺 scenes 时，storyboard 退到 scenes；再缺 screenplay 就一路退到 plot_index
+    assert rewind_to_runnable("storyboard", {"plot_index": {}, "screenplay": {}}) == "scenes"
+    assert rewind_to_runnable("storyboard", {}) == "plot_index"
+
+
 # ------------------------------------------------------------------ 状态无内存依赖
 
 

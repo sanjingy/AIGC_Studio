@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { Clapperboard } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,13 @@ import { ApiRequestError, auth } from "@/lib/api";
 
 type Mode = "login" | "register";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const params = useSearchParams();
+  // 会话过期被踢回来时带着原来的页面，登录后回到那儿而不是仪表盘。
+  // 只接受站内相对路径——把 next 直接当 URL 用就是开放重定向。
+  const rawNext = params.get("next") ?? "";
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/dashboard";
   const [mode, setMode] = useState<Mode>("login");
   const [pending, setPending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -34,7 +39,7 @@ export default function LoginPage() {
       } else {
         await auth.register({ email, password, display_name: displayName });
       }
-      router.push("/dashboard");
+      router.push(next);
     } catch (err) {
       if (err instanceof ApiRequestError) {
         // 后端已经给了可直接展示的文案，不在前端另写一套
@@ -123,5 +128,14 @@ export default function LoginPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  // useSearchParams 要求包在 Suspense 里，否则整页会退化成客户端渲染
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

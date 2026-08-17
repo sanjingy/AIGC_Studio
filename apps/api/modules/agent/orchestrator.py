@@ -85,6 +85,25 @@ _REDO_FROM: dict[Stage, Stage] = {
 # 除了 routing 沿用历史键名 "router"，其余与阶段同名。
 _STATE_KEY: dict[Stage, str] = {"routing": "router"}
 
+# 旧阶段名 → 新阶段。
+#
+# 2026-08-18 阶段图由 2 步生产（story / visual）改为 5 步。库里已经存在的
+# 项目仍带着旧名字，不翻译就会在 `_NEXT[stage]` 上 KeyError 变 500，
+# 表现为"点继续彻底没反应"。**改阶段枚举必须同时处理存量数据**——
+# 状态存在库里（ADR-008）意味着枚举变更就是一次数据迁移。
+_LEGACY_STAGES: dict[str, Stage] = {
+    "story": "plot_index",
+    "visual": "characters",
+}
+
+# 每个阶段依赖哪个上游产出（键名与产出它的阶段同名）。
+_REQUIRES: dict[Stage, str] = {
+    "screenplay": "plot_index",
+    "characters": "screenplay",
+    "scenes": "screenplay",
+    "storyboard": "scenes",
+}
+
 
 def _key(stage: Stage) -> str:
     return _STATE_KEY.get(stage, stage)
@@ -127,7 +146,26 @@ class Advance:
 
 
 def current_stage(state: dict[str, Any]) -> Stage:
-    return str(state.get("stage", "routing"))  # type: ignore[return-value]
+    raw = str(state.get("stage", "routing"))
+    if legacy := _LEGACY_STAGES.get(raw):
+        return legacy
+    return raw  # type: ignore[return-value]
+
+
+def rewind_to_runnable(stage: Stage, state: dict[str, Any]) -> Stage:
+    """缺上游产出就往回退，直到能真正跑起来的那一步。
+
+    老项目的 state 里只有 `story` / `visual` 的旧格式产出，新阶段读不到
+    自己要的东西。不退而硬往下跑，就是拿着空数据去请求模型——
+    烧钱，且产出必然是错的，还看不出为什么错。
+    """
+    seen: set[str] = set()
+    while (need := _REQUIRES.get(stage)) and need not in state:
+        if stage in seen:  # 防环，配置写错时不要变成死循环
+            break
+        seen.add(stage)
+        stage = need  # type: ignore[assignment]
+    return stage
 
 
 async def advance(
@@ -171,6 +209,9 @@ async def advance(
             await db.commit()
             log.info("agent.gate_opened", project_id=str(project_id), gate=gate)
         return Advance(stage=stage, ran_role=None, gate_opened=gate, blocked=True, output=None)
+
+    # 到这里 stage 一定是生产阶段。老项目可能缺上游产出，先退到能跑的那一步。
+    stage = rewind_to_runnable(stage, state)
 
     spec_id = _SPEC_OF[stage]
     spec = registry.get(spec_id)

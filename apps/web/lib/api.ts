@@ -48,6 +48,14 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
   const body = await res.json().catch(() => null);
 
+  // 会话过期就直接送回登录页。只把错误显示在按钮旁边，用户看到的是
+  // "点了没反应"——他不会把一行小字和"我得重新登录"联系起来。
+  // 登录接口本身的 401 是"密码错了"，不能跳，否则表单永远提交不了。
+  if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/auth/")) {
+    const next = encodeURIComponent(window.location.pathname + window.location.search);
+    window.location.href = `/login?next=${next}`;
+  }
+
   if (!res.ok) {
     throw new ApiRequestError(
       res.status,
