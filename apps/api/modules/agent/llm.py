@@ -1,11 +1,7 @@
-"""LLM 端口与 Mock 实现。
+"""Agent 用的文本生成入口。
 
-S7 只用 Mock 把编排、审核门、计费、事件这些控制流跑通；
-S6 在同一个 Protocol 上接真实 Provider（Mock First，
-13_CodexDevelopmentGuide.md §5）。
-
-Mock 不是"随便返回点什么"——它必须产出**结构上合法**的输出，
-否则 schema 校验、重试、审核门这些逻辑根本得不到验证。
+真实调用走 Gateway（按能力解析 Provider + failover + 熔断），
+Mock 用于测试与无 Key 环境。切换只改这一处，runner 不感知。
 """
 
 from __future__ import annotations
@@ -15,7 +11,12 @@ import json
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from adapters.providers.base import TextRequest
 from apps.api.core.errors import AppError
+from apps.api.core.logging import get_logger
+from apps.api.modules.gateway import service as gateway
+
+log = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +40,35 @@ class LLMProvider(Protocol):
     async def complete(self, request: LLMRequest) -> LLMResponse: ...
 
 
+class GatewayLLM:
+    """走 AI Gateway 的真实实现。"""
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        resp = await gateway.generate_text(
+            TextRequest(
+                system=request.system,
+                user=request.user,
+                json_mode=True,
+                max_output_tokens=request.max_output_tokens,
+                temperature=request.temperature,
+            )
+        )
+        if resp.reasoning_tokens:
+            # 推理 token 计入输出预算且要付费，量大时要能看见
+            log.info(
+                "llm.reasoning_tokens",
+                model_id=resp.model_id,
+                reasoning=resp.reasoning_tokens,
+                output=resp.tokens_out,
+            )
+        return LLMResponse(
+            text=resp.text,
+            tokens_in=resp.tokens_in,
+            tokens_out=resp.tokens_out,
+            model_id=resp.model_id,
+        )
+
+
 # ---------------------------------------------------------------- Mock
 
 
@@ -52,7 +82,6 @@ class MockLLM:
     model_id = "mock.llm.v1"
 
     def __init__(self, *, fail_schema_times: int = 0) -> None:
-        # 用来验证 schema 校验重试路径
         self._fail_remaining = fail_schema_times
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
@@ -69,8 +98,7 @@ class MockLLM:
                 "agent.output.schema_invalid",
                 message=f"Mock 不支持 schema {request.schema_name}",
             )
-        payload = builder(seed, request.user)
-        text = json.dumps(payload, ensure_ascii=False)
+        text = json.dumps(builder(seed, request.user), ensure_ascii=False)
         return LLMResponse(
             text=text,
             tokens_in=len(request.system + request.user) // 3,
@@ -80,8 +108,6 @@ class MockLLM:
 
 
 def _router(seed: int, user: str) -> dict[str, Any]:
-    # 输入太短就要求澄清——这条分支必须能被触发，
-    # 否则"信息不足时追问"的逻辑没人验证过
     if len(user.strip()) < 12:
         return {
             "route": "CUSTOM",
@@ -93,7 +119,6 @@ def _router(seed: int, user: str) -> dict[str, Any]:
             "requires_clarification": True,
             "clarification_question": "想做多长的片子？是从小说改编还是已有剧本？",
         }
-
     route = "NOVEL_TO_ANIME" if "小说" in user or "漫剧" in user else "SHORT_VIDEO"
     duration = 300 if "5 分钟" in user or "5分钟" in user else 60
     return {
@@ -165,7 +190,6 @@ def _visual(seed: int, _user: str) -> dict[str, Any]:
 
 
 def _director(_seed: int, user: str) -> dict[str, Any]:
-    # Director 的决策由编排器按项目状态给出，Mock 只回显
     if "story" in user:
         return {"next_role": "visual", "gate": "setup", "reason": "故事已完成，进入视觉设计"}
     return {"next_role": "story", "gate": None, "reason": "从故事结构开始"}
@@ -184,14 +208,34 @@ _BUILDERS = {
 }
 
 
-_provider: LLMProvider = MockLLM()
+_provider: LLMProvider | None = None
 
 
 def get_provider() -> LLMProvider:
+    """选择文本生成实现。
+
+    规则（按优先级）：
+    1. `ENV=test` 一律用 Mock。**这条不能靠 conftest 去设**——
+       测试环境有 Key 时，漏设一次就是每跑一遍测试都在真花钱，
+       还会把网络抖动和限流带进 CI。默认必须是安全的。
+    2. 有 Key 走真实 Gateway
+    3. 没 Key 用 Mock，这样本地无凭据也能跑通全链路
+    """
+    global _provider
+    if _provider is None:
+        from apps.api.core.config import get_settings
+
+        settings = get_settings()
+        if settings.env == "test":
+            _provider = MockLLM()
+        elif settings.deepseek_api_key.get_secret_value():
+            _provider = GatewayLLM()
+        else:
+            _provider = MockLLM()
+        log.info("llm.provider_selected", kind=type(_provider).__name__, env=settings.env)
     return _provider
 
 
-def set_provider(provider: LLMProvider) -> None:
-    """S6 接入真实 Provider 时替换这里，其余代码不动。"""
+def set_provider(provider: LLMProvider | None) -> None:
     global _provider
     _provider = provider

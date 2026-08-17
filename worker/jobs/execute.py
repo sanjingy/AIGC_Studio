@@ -33,6 +33,8 @@ async def execute_task(ctx: dict[Any, Any], task_id: str, *_a: Any, **_kw: Any) 
         return "skipped"  # 已取消、已跑过、或不存在
 
     task_type, payload = task.type, dict(task.input_json)
+    # 出图任务要知道资产归属哪个租户
+    payload["__org_id"] = str(task.org_id)
 
     try:
         output = await _dispatch(task_type, payload, task_id=tid)
@@ -72,6 +74,13 @@ async def _dispatch(
         return await _mock_echo(payload, task_id=task_id)
     if task_type == "mock.fail":
         return await _mock_fail(payload)
+    if task_type == "image.generate":
+        from worker.jobs.generation import generate_image
+
+        org_id = payload.get("__org_id")
+        if not org_id:
+            raise AppError("provider.params.invalid", message="缺少 org 上下文")
+        return await generate_image(payload, org_id=uuid.UUID(str(org_id)))
     raise AppError("provider.params.invalid", message=f"no handler for {task_type}")
 
 

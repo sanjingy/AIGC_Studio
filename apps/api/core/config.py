@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     # 未完成的上传超过这个时长由清理任务回收
     upload_abandon_after_seconds: int = 86_400
 
+    # --- 上游 Provider 凭据 ---
+    # 用 SecretStr：打印配置对象时不会泄露。绝不进代码、不进日志、不进库。
+    deepseek_api_key: SecretStr = SecretStr("")
+    ark_api_key: SecretStr = SecretStr("")
+    dashscope_api_key: SecretStr = SecretStr("")
+
     # NoDecode 不可省：pydantic-settings 会在【读取环境变量的源层】就对 list 字段
     # 做 JSON 解析，失败直接抛 SettingsError——那时 field_validator 还没轮到执行。
     # 加上它才能把原始字符串交给下面的校验器处理。

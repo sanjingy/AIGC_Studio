@@ -13,6 +13,7 @@ from apps.api.modules.asset.service import (
     get_asset,
     list_assets,
     purge_abandoned_uploads,
+    register_generated,
 )
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "get_asset",
     "list_assets",
     "purge_abandoned_uploads",
+    "register_generated",
 ]

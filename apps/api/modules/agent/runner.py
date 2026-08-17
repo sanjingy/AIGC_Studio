@@ -57,6 +57,26 @@ def _extract_json(raw: str) -> dict[str, Any]:
     return dict(json.loads(cleaned[start : end + 1]))
 
 
+def build_system_prompt(spec_prompt: str, schema: type[BaseModel]) -> str:
+    """在 Agent 提示词后追加输出契约。
+
+    两件事必须由平台统一注入，不能指望每个提示词作者记得写：
+
+    1. **目标 schema 全文**。不给的话模型只能猜字段名，
+       结构化输出的成功率会低得离谱。
+    2. **"json" 这个词**。DeepSeek 等 OpenAI 兼容接口在
+       `response_format=json_object` 下会校验提示词里必须出现 "json"，
+       否则直接 400。第三方 Agent 作者不该需要知道这种厂商怪癖。
+    """
+    contract = json.dumps(schema.model_json_schema(), ensure_ascii=False, indent=None)
+    return (
+        f"{spec_prompt.rstrip()}\n\n"
+        "---\n"
+        "输出要求：只返回一个 JSON 对象，不要任何解释文字，不要 markdown 围栏。\n"
+        f"必须严格匹配这个 JSON Schema：\n{contract}"
+    )
+
+
 def render_prompt(template: str, variables: dict[str, Any]) -> str:
     """填充 {变量} 占位符。
 
@@ -79,7 +99,7 @@ async def run_agent(
     variables: dict[str, Any] | None = None,
 ) -> RunResult:
     schema = resolve_schema(spec.output_schema)
-    system = render_prompt(spec.prompt, variables or {})
+    system = build_system_prompt(render_prompt(spec.prompt, variables or {}), schema)
 
     run = await repo.create_run(
         db,
@@ -110,6 +130,31 @@ async def run_agent(
             )
             raw = response.text
             parsed = schema.model_validate(_extract_json(raw))
+        except AppError as exc:
+            # 上游错误（限流、参数、鉴权…）不属于 schema 校验失败，
+            # 不该在这里重试——Gateway 已经做过 failover 了。
+            # 但必须把 run 标成 failed，否则它会永远卡在 running，
+            # 前端显示"生成中"直到天荒地老。
+            await repo.add_step(
+                db,
+                org_id=org_id,
+                run_id=run.id,
+                step_index=attempt,
+                kind="llm",
+                resolved_prompt=system if attempt == 0 else None,
+                error=f"{exc.code}: {exc.message}"[:2000],
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
+            await repo.finish_run(
+                db,
+                run,
+                status="failed",
+                error_code=exc.code,
+                error_detail=exc.message[:2000],
+                attempts=attempt + 1,
+            )
+            await db.commit()
+            raise
         except (ValidationError, ValueError, json.JSONDecodeError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
             await repo.add_step(

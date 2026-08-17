@@ -8,6 +8,13 @@ x-backend: &backend
   build:
     context: .
     dockerfile: infra/docker/api.Dockerfile
+  # Docker Desktop 内置 DNS 对 AAAA 查询不稳定，getaddrinfo(AF_UNSPEC)
+  # 会整体失败（EAI_NODATA），表现为"能 ping 通但 httpx 连不上"。
+  # 显式指定解析器绕开它。上游 Provider 全靠这条。
+  dns:
+    - 223.5.5.5
+    - 119.29.29.29
+    - 8.8.8.8
   env_file: [.env]
   environment:
     # 容器内互访用服务名，覆盖 .env 里给宿主机用的值
@@ -21,6 +28,7 @@ x-backend: &backend
     - ./worker:/app/worker
     # Agent spec 目录也挂载：加/改第三方 Agent 不该需要重建镜像
     - ./agents:/app/agents
+    - ./adapters:/app/adapters
     - ./migrations:/app/migrations
     - ./tests:/app/tests
     # 配置文件也挂进来：改 lint / 迁移配置不该需要重建镜像

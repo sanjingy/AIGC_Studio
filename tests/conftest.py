@@ -8,7 +8,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-os.environ.setdefault("ENV", "test")
+# 必须用赋值而非 setdefault：compose 已经把 ENV=local 注入了环境变量，
+# setdefault 不会覆盖。之前就是这个原因导致整个测试套件在打真实上游——
+# 每跑一轮都在花钱，且把网络抖动带进了测试。
+os.environ["ENV"] = "test"
 
 # 预签名 URL 的对外地址默认是 localhost:9000，那是给浏览器用的。
 # 测试跑在容器内，那里的 localhost 指向 API 自己，连不到 MinIO。
@@ -23,6 +26,11 @@ os.environ.setdefault("ENV", "test")
 # 测试进程与 API 同处一地，内部地址按定义就是可达的。
 if _internal := os.environ.get("S3_ENDPOINT_URL"):
     os.environ["S3_PUBLIC_ENDPOINT_URL"] = _internal
+
+# 上面改了环境变量，缓存的 Settings 必须作废，否则读到的还是旧值。
+from apps.api.core.config import get_settings
+
+get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)

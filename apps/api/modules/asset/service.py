@@ -126,6 +126,51 @@ async def complete_upload(db: AsyncSession, *, org_id: uuid.UUID, asset_id: uuid
     return asset
 
 
+async def register_generated(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    filename: str,
+    storage_key: str,
+    mime_type: str,
+    data: bytes,
+    metadata: dict[str, object] | None = None,
+) -> Asset:
+    """登记一份**平台生成**的资产。
+
+    与用户上传的区别：字节已经在服务端手里，不需要三段式直传，
+    也不需要 HEAD 校验——我们就是写入方。
+
+    对外单独开这个入口，是为了让 Worker 不必去碰 asset 的 repository。
+    跨模块直接摸对方的数据层会被 ruff banned-api 拦下（ADR-009），
+    那条规则是对的：绕过 service 层意味着绕过它将来会加的审核、
+    配额、生命周期逻辑。
+    """
+    import hashlib
+
+    await storage.put_bytes(key=storage_key, data=data, content_type=mime_type)
+
+    row = await repo.create(
+        db,
+        org_id=org_id,
+        owner_user_id=org_id,
+        project_id=project_id,
+        asset_type=asset_type_for(mime_type) or "image",
+        filename=filename,
+        storage_key=storage_key,
+        mime_type=mime_type,
+        declared_size_bytes=len(data),
+    )
+    row.metadata_json = {**(metadata or {}), "source": "generated"}
+    await repo.mark_ready(
+        db, row, size_bytes=len(data), checksum=hashlib.sha256(data).hexdigest()[:64]
+    )
+    await db.commit()
+    log.info("asset.generated_registered", asset_id=str(row.id), bytes=len(data))
+    return row
+
+
 async def get_asset(db: AsyncSession, *, org_id: uuid.UUID, asset_id: uuid.UUID) -> Asset:
     return await _get_or_404(db, org_id=org_id, asset_id=asset_id)
 

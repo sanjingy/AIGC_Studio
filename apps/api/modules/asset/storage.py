@@ -88,6 +88,17 @@ async def head_object(*, key: str) -> ObjectInfo | None:
     )
 
 
+async def put_bytes(*, key: str, data: bytes, content_type: str) -> None:
+    """服务端直接写对象。
+
+    只用于**平台生成**的内容（出图结果等）。用户上传永远走预签名直传，
+    绝不经过 API 进程——一个 500MB 的视频素材就能把进程打死。
+    """
+    s = get_settings()
+    async with _client(public=False) as s3:
+        await s3.put_object(Bucket=s.s3_bucket, Key=key, Body=data, ContentType=content_type)
+
+
 async def delete_object(*, key: str) -> None:
     s = get_settings()
     async with _client(public=False) as s3:

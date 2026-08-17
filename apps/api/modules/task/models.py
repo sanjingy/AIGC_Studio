@@ -21,7 +21,7 @@ _OUTBOX_SEQ = Sequence("outbox_events_seq")
 TASK_TYPES = (
     "mock.echo",  # S4 用于打通链路
     "mock.fail",  # S4 用于验证失败路径
-    "image.generate",
+    "image.generate",  # S6 起为真实出图
     "video.generate",
     "audio.tts",
     "timeline.render",
