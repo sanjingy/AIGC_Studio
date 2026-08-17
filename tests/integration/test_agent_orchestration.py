@@ -1,4 +1,4 @@
-"""编排链路：Router → Story → 门 → Visual → 门。
+"""编排链路：路线 → 情节目录 → 剧本 → 门 → 角色 → 场景 → 分镜 → 门。
 
 重点验证两件事：
 1. 状态完全由 `projects.current_state_json` 决定，不依赖内存（ADR-008）
@@ -56,7 +56,12 @@ async def test_runs_until_first_gate(alice: AsyncClient) -> None:
     assert pending is not None
     assert pending["gate"] == "setup"
     # 门的摘要要能让用户判断该不该通过
-    assert pending["payload_json"]["summary"]["acts"] >= 1
+    summary = pending["payload_json"]["summary"]
+    assert summary["episodes"] >= 1
+    assert summary["scenes"] >= 1
+    # 情节覆盖率：改编有没有漏掉原著情节，这是能核对的数字
+    assert summary["nodes_total"] >= 1
+    assert summary["nodes_covered"] >= 1
 
 
 async def test_gate_actually_blocks(alice: AsyncClient) -> None:
@@ -78,9 +83,9 @@ async def test_approve_advances_to_next_stage(alice: AsyncClient) -> None:
 
     r = await alice.post(f"{P}/{pid}/approvals/{pending['id']}", json={"decision": "approved"})
     assert r.status_code == 200
-    assert r.json()["stage"] == "visual"
+    assert r.json()["stage"] == "characters"
 
-    # 继续跑到第二个门
+    # 继续跑到第二个门：角色档案 → 场景档案 → 分镜表
     result = await _advance(alice, pid)
     assert result["gate_opened"] == "storyboard"
     assert result["stage"] == "await_storyboard"
@@ -98,7 +103,7 @@ async def test_changes_requested_sends_it_back(alice: AsyncClient) -> None:
         json={"decision": "changes_requested", "comment": "冲突不够强"},
     )
     assert r.status_code == 200
-    assert r.json()["stage"] == "story", "打回应退回故事阶段"
+    assert r.json()["stage"] == "screenplay", "打回应退回剧本阶段重写"
 
 
 async def test_same_approval_cannot_be_resolved_twice(alice: AsyncClient) -> None:
@@ -174,7 +179,7 @@ async def test_source_material_reaches_the_story_agent(
     pid = await _project(alice)
     await _advance(alice, pid, SOURCE)
 
-    assert MARKER in await _sent_to(db, pid, "story"), "Story 没收到原始素材"
+    assert MARKER in await _sent_to_agent(db, pid, "story.plot_index.v1"), "没收到原始素材"
 
 
 async def test_source_material_is_persisted(alice: AsyncClient, db: AsyncSession) -> None:
@@ -193,12 +198,25 @@ async def test_source_material_is_persisted(alice: AsyncClient, db: AsyncSession
     assert MARKER in project.current_state_json["source"]
 
 
-async def test_visual_gets_the_whole_story_not_just_the_logline(
+async def _sent_to_agent(db: AsyncSession, pid: str, agent_id: str) -> str:
+    from sqlalchemy import select
+
+    stmt = (
+        select(AgentRun)
+        .where(AgentRun.project_id == uuid.UUID(pid), AgentRun.agent_id == agent_id)
+        .order_by(AgentRun.created_at.desc())
+        .limit(1)
+    )
+    run = (await db.execute(stmt)).scalars().one()
+    return str(run.input_json["user_input"])
+
+
+async def test_downstream_stages_get_the_full_screenplay(
     alice: AsyncClient, db: AsyncSession
 ) -> None:
-    """Visual 要拿到完整分幕和素材节选。
+    """角色/场景/分镜都要拿到**完整剧本**，不是摘要。
 
-    只给标题和一句话 logline，角色姓名和场景只能靠猜——
+    只给标题和一句 logline，角色姓名和场景只能靠猜；
     猜出来的名字和剧本对不上，一致性引擎后面全是错的。
     """
     pid = await _project(alice)
@@ -209,16 +227,30 @@ async def test_visual_gets_the_whole_story_not_just_the_logline(
     await alice.post(f"{P}/{pid}/approvals/{pending['id']}", json={"decision": "approved"})
     await _advance(alice, pid)
 
-    sent = await _sent_to(db, pid, "visual")
-    assert "分幕：" in sent, "没带上分幕，Visual 只能看到一句 logline"
-    assert MARKER in sent, "没带上素材节选"
+    chars = await _sent_to_agent(db, pid, "visual.character.v1")
+    assert "△" in chars, "没带上剧本正文的动作行"
+    assert MARKER in chars, "没带上原著节选"
+
+    board = await _sent_to_agent(db, pid, "visual.storyboard.v1")
+    assert "可用角色 ref：" in board, "分镜必须只能用已有的角色 ref，不能新造"
+    assert "可用场景 ref：" in board
+
+
+async def test_screenplay_gets_the_plot_index(alice: AsyncClient, db: AsyncSession) -> None:
+    """剧本阶段要拿到情节目录，才能逐节点覆盖。"""
+    pid = await _project(alice)
+    await _advance(alice, pid, SOURCE)
+
+    sent = await _sent_to_agent(db, pid, "story.screenplay.v1")
+    assert "情节目录：" in sent
+    assert MARKER in sent, "剧本阶段也要能看到原著全文"
 
 
 async def test_router_still_sees_the_raw_text(alice: AsyncClient, db: AsyncSession) -> None:
     pid = await _project(alice)
     await _advance(alice, pid, SOURCE)
 
-    assert MARKER in await _sent_to(db, pid, "router")
+    assert MARKER in await _sent_to_agent(db, pid, "router.default.v1")
 
 
 # ------------------------------------------------------------------ 状态无内存依赖
@@ -243,13 +275,13 @@ async def test_stage_is_derived_purely_from_db(alice: AsyncClient, db: AsyncSess
     )
     assert orchestrator.current_stage(project.current_state_json) == "await_setup"
 
-    # 手工把状态改回 story
-    project.current_state_json = {**project.current_state_json, "stage": "story"}
+    # 手工把状态改回剧本阶段
+    project.current_state_json = {**project.current_state_json, "stage": "screenplay"}
     await db.commit()
 
     # 单步推进：一路跑到门口的话，最后返回的是"开门"那步（ran_role=None）
     result = await _advance(alice, pid, to_gate=False)
-    assert result["ran_role"] == "story", "应按库里的状态重新执行故事阶段"
+    assert result["ran_role"] == "screenplay", "应按库里的状态重新执行剧本阶段"
 
 
 # ------------------------------------------------------------------ Router 追问
@@ -264,7 +296,7 @@ async def test_router_asks_for_clarification_on_thin_input(alice: AsyncClient) -
     result = await _advance(alice, pid, "做个")
 
     assert result["blocked"] is True
-    assert result["ran_role"] == "router"
+    assert result["ran_role"] == "routing"
     assert result["output"]["requires_clarification"] is True
     assert result["output"]["clarification_question"]
     assert result["stage"] == "routing", "追问时不能推进阶段"
@@ -304,11 +336,17 @@ async def test_agent_output_is_schema_validated(alice: AsyncClient) -> None:
     del result
 
     runs = (await alice.get(f"{P}/{pid}/agent-runs")).json()
-    story = next(r for r in runs if r["role"] == "story")
-    out = story["output_json"]
+    script = next(r for r in runs if r["agent_id"] == "story.screenplay.v1")
+    out = script["output_json"]
 
     assert out["title"]
-    assert out["acts"] and all("index" in a and "summary" in a for a in out["acts"])
+    assert out["episodes"]
+    scenes = [sc for ep in out["episodes"] for sc in ep["scenes"]]
+    assert scenes and all(sc["beats"] for sc in scenes)
+    # 每个节拍只装一件事，动作和台词不混写
+    assert all(
+        b["kind"] in ("action", "dialogue", "vo", "sfx") for sc in scenes for b in sc["beats"]
+    )
 
 
 # ------------------------------------------------------------------ 隔离

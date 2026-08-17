@@ -199,12 +199,195 @@ def _qa(_seed: int, _user: str) -> dict[str, Any]:
     return {"passed": True, "issues": []}
 
 
+def _plot_index(seed: int, _user: str) -> dict[str, Any]:
+    count = 5 + seed % 3
+    return {
+        "genre": "悬疑",
+        "logline": "被调职的刑警在旧资料馆接受了一场突如其来的观察力考验。",
+        "synopsis": "主角初到新单位报到，沿途遇见门卫与清洁工，最终在馆长室被问及一路上的细节。",
+        "central_conflict": "新人被迫在毫无准备的情况下证明自己的观察力",
+        "characters": [
+            {"name": "主角", "aliases": ["新人"]},
+            {"name": "馆长", "aliases": []},
+        ],
+        "nodes": [{"index": i + 1, "summary": f"节点 {i + 1}"} for i in range(count)],
+        "scene_count": 3,
+        "dialogue_chars": 240,
+    }
+
+
+def _screenplay(seed: int, _user: str) -> dict[str, Any]:
+    scenes = 2 + seed % 2
+    return {
+        "title": "资料馆的第一天",
+        "synopsis": "主角报到当日经历的一场观察力考验。",
+        "episodes": [
+            {
+                "index": 1,
+                "title": "第一集",
+                "scenes": [
+                    {
+                        "id": f"1-{i + 1}",
+                        "location": "资料馆门口" if i == 0 else "馆长室",
+                        "time_mood": "冬日上午 - 压抑",
+                        "character_refs": ["zhu_jue", "guan_zhang"],
+                        "beats": [
+                            {
+                                "kind": "action",
+                                "character_ref": "",
+                                "emotion": "",
+                                "text": f"第 {i + 1} 场的第一个动作。",
+                            },
+                            {
+                                "kind": "dialogue",
+                                "character_ref": "guan_zhang",
+                                "emotion": "冷淡",
+                                "text": "有问题想问你。",
+                            },
+                        ],
+                        "hook": "他还不知道考验已经开始了。" if i == scenes - 1 else "",
+                    }
+                    for i in range(scenes)
+                ],
+            }
+        ],
+        "node_coverage": [
+            {"node_index": i + 1, "scene_id": f"1-{min(i, scenes - 1) + 1}", "merged_into": None}
+            for i in range(5)
+        ],
+    }
+
+
+def _character_sheets(_seed: int, _user: str) -> dict[str, Any]:
+    return {
+        "characters": [
+            {
+                "ref": "zhu_jue",
+                "name": "主角",
+                "kind": "人类",
+                "camp": "正派",
+                "identity": "被调职的刑警",
+                "relations": "馆长的新下属",
+                "personality": ["隐忍", "敏锐"],
+                "power_position": "弱势被压迫者",
+                "arc_stage": "潜伏期",
+                "present_state": "初来乍到，强撑镇定",
+                "age_range": "30 出头",
+                "hair": "黑色短发，额前碎发",
+                "eyes": "深褐色，眼神沉稳",
+                "face": "轮廓分明，下颌线清晰",
+                "build": "中等身高，结实精干",
+                "outfit": "深灰西装外套，白衬衫，无领带",
+                "distinctive": "左手常握成拳",
+                "ethnicity": "东亚面孔",
+                "skin": "自然健康肤色",
+                "shoes": "黑色皮鞋",
+                "accessories": "无",
+                "inferred": ["outfit"],
+            },
+            {
+                "ref": "guan_zhang",
+                "name": "馆长",
+                "kind": "人类",
+                "camp": "中立",
+                "identity": "资料馆馆长",
+                "relations": "主角的上司",
+                "personality": ["冷峻", "锐利"],
+                "power_position": "强势压迫者",
+                "arc_stage": "潜伏期",
+                "present_state": "端坐读书，不动声色",
+                "age_range": "年龄难辨",
+                "hair": "黑色长发，垂至腰际",
+                "eyes": "瞳仁大而深",
+                "face": "人偶般冷峻，五官精致",
+                "build": "修长纤细，站姿挺拔",
+                "outfit": "一袭白衣",
+                "distinctive": "无框眼镜",
+                "ethnicity": "东亚面孔",
+                "skin": "自然白皙",
+                "shoes": "白色平底鞋",
+                "accessories": "无框眼镜",
+                "inferred": ["shoes"],
+            },
+        ]
+    }
+
+
+def _scene_sheets(_seed: int, _user: str) -> dict[str, Any]:
+    return {
+        "era": "现代",
+        "scenes": [
+            {
+                "ref": "gate",
+                "name": "资料馆门口",
+                "time_slot": "上午",
+                "setting": "爬满爬山虎的水泥墙围出的院落，锈迹斑斑的滑动铁门",
+                "lighting": "上午均匀自然日光，阴影清晰短小",
+                "key_elements": ["铁门", "门柱牌子", "红砖建筑", "停车场"],
+                "camera_axis": {
+                    "position": "铁门外的路面",
+                    "facing": "朝向建筑正面",
+                    "far_end": "红砖三层建筑的正门石阶",
+                },
+                "fixed_references": ["铁门在画面正前方", "门柱牌子在铁门右侧"],
+            },
+            {
+                "ref": "office",
+                "name": "馆长室",
+                "time_slot": "室内不分时",
+                "setting": "约八叠大小，两侧顶天书架，正中黑檀木书桌",
+                "lighting": "窗帘遮蔽，室内灯光为主，整体偏暗",
+                "key_elements": ["黑檀木书桌", "书架", "窗帘"],
+                "camera_axis": {
+                    "position": "房门内侧",
+                    "facing": "朝向书桌",
+                    "far_end": "书桌后的窗帘墙",
+                },
+                "fixed_references": ["书桌在房间正中", "书架沿左右两墙"],
+            },
+        ],
+    }
+
+
+def _storyboard(seed: int, _user: str) -> dict[str, Any]:
+    shots = 8 + seed % 4
+    sizes = ["全景", "中景腰部", "近景胸像", "特写", "中全景", "极近特写"]
+    moves = ["固定镜头", "缓缓推近镜头", "跟随主体移动", "向左横移"]
+    return {
+        "nodes": [
+            {"index": 1, "scene_ref": "gate", "summary": "门口报到"},
+            {"index": 2, "scene_ref": "office", "summary": "馆长的提问"},
+        ],
+        "shots": [
+            {
+                "index": i + 1,
+                "node_index": 1 if i < shots // 2 else 2,
+                "scene_ref": "gate" if i < shots // 2 else "office",
+                "character_refs": ["zhu_jue"] if i % 2 == 0 else ["zhu_jue", "guan_zhang"],
+                "shot_size": sizes[i % len(sizes)],
+                "angle": "斜前方45度" if i % 3 == 0 else "",
+                "camera_move": moves[i % len(moves)],
+                "content": f"第 {i + 1} 镜的画面内容。",
+                "speaker_ref": "guan_zhang" if i == shots - 2 else "",
+                "dialogue": "有问题想问你。" if i == shots - 2 else "",
+                "sfx": "门锁转动声" if i == 1 else "",
+            }
+            for i in range(shots)
+        ],
+    }
+
+
 _BUILDERS = {
     "RouterDecision": _router,
     "StoryOutline": _story,
     "VisualPlan": _visual,
     "DirectorPlan": _director,
     "QAReport": _qa,
+    "PlotIndex": _plot_index,
+    "Screenplay": _screenplay,
+    "CharacterSheets": _character_sheets,
+    "SceneSheets": _scene_sheets,
+    "Storyboard": _storyboard,
 }
 
 

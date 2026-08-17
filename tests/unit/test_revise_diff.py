@@ -76,9 +76,9 @@ def test_downstream_is_marked_stale() -> None:
 
     不说这件事，用户会以为改完就同步了，直到成片里对不上。
     """
-    assert downstream_of("story") == ["visual"]
-    assert downstream_of("visual") == []
-    assert REVISABLE_ROLES == ("story", "visual")
+    assert downstream_of("screenplay") == ["characters", "scenes", "storyboard"]
+    assert downstream_of("storyboard") == []
+    assert REVISABLE_ROLES == ("plot_index", "screenplay", "characters", "scenes", "storyboard")
 
 
 def test_revise_input_carries_the_whole_current_output() -> None:

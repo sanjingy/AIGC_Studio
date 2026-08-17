@@ -24,15 +24,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agents import registry
 from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
+from apps.api.modules.agent import orchestrator, runner
 from apps.api.modules.agent import repository as repo
-from apps.api.modules.agent import runner
 from apps.api.modules.project import service as project_service
 
 log = get_logger(__name__)
 
 # 可修订的阶段产出，以及它们的上下游顺序。
 # 顺序用来判断"改了上游，下游是不是过期了"。
-REVISABLE_ROLES = ("story", "visual")
+#
+# routing 不在内：那是调度决策不是内容，改路线应该重跑而不是改字段。
+REVISABLE_ROLES = orchestrator.PRODUCING_STAGES
 
 MAX_INSTRUCTION_CHARS = 2000
 
@@ -193,7 +195,9 @@ async def revise(
             message=f"还没有 {target_role} 的产出，先生成一版再改",
         )
 
-    spec = registry.default_for(target_role)
+    spec = registry.get(orchestrator.spec_id_for(target_role))
+    if spec is None:
+        raise AppError("common.internal", message=f"阶段 {target_role} 的 Agent 不存在")
 
     # 先把用户这句话记下来再去跑模型。跑失败时对话里也该留着
     # "我提过这个要求"，否则用户会以为自己没发出去。
@@ -215,7 +219,7 @@ async def revise(
         project_id=project_id,
         spec=spec,
         user_input=build_revise_input(current, instruction),
-        variables=_variables_for(state),
+        variables=orchestrator.variables_for(target_role, state),
         system_suffix=REVISE_CONTRACT,
     )
     output = result.output.model_dump(mode="json")
@@ -267,11 +271,3 @@ def _summarize(changed: list[str], stale: list[str]) -> str:
     if stale:
         head += f"。下游产出（{'、'.join(stale)}）是基于旧版生成的，需要重新生成才会同步。"
     return head
-
-
-def _variables_for(state: dict[str, Any]) -> dict[str, Any]:
-    router = state.get("router", {})
-    return {
-        "target_duration_seconds": router.get("estimated_duration_seconds", 60),
-        "target_shots": router.get("estimated_shots", 12),
-    }

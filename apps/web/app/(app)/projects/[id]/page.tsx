@@ -17,9 +17,12 @@ import {
 
 const STAGE_STEPS = [
   { key: "routing", label: "路线" },
-  { key: "story", label: "故事" },
-  { key: "await_setup", label: "确认设定" },
-  { key: "visual", label: "视觉" },
+  { key: "plot_index", label: "情节目录" },
+  { key: "screenplay", label: "剧本" },
+  { key: "await_setup", label: "确认剧本" },
+  { key: "characters", label: "角色" },
+  { key: "scenes", label: "场景" },
+  { key: "storyboard", label: "分镜" },
   { key: "await_storyboard", label: "确认分镜" },
   { key: "done", label: "完成" },
 ];
@@ -69,9 +72,17 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
   const pending = approvals.find((a) => a.status === "pending");
 
-  const story = runs.find((r) => r.role === "story" && r.output_json)?.output_json;
-  const router = runs.find((r) => r.role === "router" && r.output_json)?.output_json;
-  const visual = runs.find((r) => r.role === "visual" && r.output_json)?.output_json;
+  // 按 agent_id 取，不按 role——同一个 role 下现在有多个 Agent。
+  // runs 按 created_at 倒序，find 拿到的就是最新一版（含聊天修订后的）。
+  const outputOf = (agentId: string) =>
+    runs.find((r) => r.agent_id === agentId && r.output_json)?.output_json;
+
+  const router = outputOf("router.default.v1");
+  const plotIndex = outputOf("story.plot_index.v1");
+  const screenplay = outputOf("story.screenplay.v1");
+  const characters = outputOf("visual.character.v1");
+  const scenes = outputOf("visual.scene.v1");
+  const storyboard = outputOf("visual.storyboard.v1");
 
   // 阶段由已有产出推导，不额外维护一份前端状态——
   // 状态的唯一权威在后端（ADR-008），前端再存一份必然对不上。
@@ -79,19 +90,28 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     ? pending.gate === "setup"
       ? "await_setup"
       : "await_storyboard"
-    : visual
+    : storyboard
       ? "done"
-      : story
-        ? "visual"
-        : router
-          ? "story"
-          : "routing";
+      : scenes
+        ? "storyboard"
+        : characters
+          ? "scenes"
+          : screenplay
+            ? "characters"
+            : plotIndex
+              ? "screenplay"
+              : router
+                ? "plot_index"
+                : "routing";
   const stageIndex = STAGE_STEPS.findIndex((s) => s.key === stage);
 
   // 有产出才能改。顺序与生产顺序一致，聊天框默认选最靠后的那个
   const revisable: ReviseTarget[] = [
-    ...(story ? (["story"] as const) : []),
-    ...(visual ? (["visual"] as const) : []),
+    ...(plotIndex ? (["plot_index"] as const) : []),
+    ...(screenplay ? (["screenplay"] as const) : []),
+    ...(characters ? (["characters"] as const) : []),
+    ...(scenes ? (["scenes"] as const) : []),
+    ...(storyboard ? (["storyboard"] as const) : []),
   ];
 
   return (
@@ -159,7 +179,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       {pending && (
         <Panel className="border-primary/40">
           <PanelHeader
-            title={pending.gate === "setup" ? "确认设定" : "确认分镜"}
+            title={pending.gate === "setup" ? "确认剧本" : "确认分镜"}
             meta="通过后才会继续消耗 Credits"
           />
           <div className="flex flex-col gap-3 p-3">
@@ -204,21 +224,22 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       )}
 
       {/* 产出 */}
-      {story && (
+      {plotIndex && (
         <Panel>
-          <PanelHeader title={String(story.title)} meta={`${story.acts?.length ?? 0} 幕`} />
+          <PanelHeader
+            title="情节目录"
+            meta={`${plotIndex.nodes?.length ?? 0} 个节点 · ${plotIndex.scene_count ?? 0} 场景 · 台词约 ${plotIndex.dialogue_chars ?? 0} 字`}
+          />
           <div className="flex flex-col gap-2 p-3">
-            <p className="text-sm text-fg-muted">{String(story.logline)}</p>
-            <p className="text-xs text-fg-subtle">核心冲突：{String(story.central_conflict)}</p>
-            <ol className="mt-1 flex flex-col gap-1.5">
-              {(story.acts ?? []).map((a: any) => (
-                <li key={a.index} className="rounded-md bg-surface-2 px-2.5 py-2">
-                  <div className="flex items-baseline gap-2">
-                    <span className="tnum text-xs text-fg-subtle">{a.index}</span>
-                    <span className="text-sm font-medium">{a.title}</span>
-                    <span className="text-xs text-fg-subtle">{a.mood}</span>
-                  </div>
-                  <p className="mt-0.5 text-xs text-fg-muted">{a.summary}</p>
+            <p className="text-sm text-fg-muted">{String(plotIndex.logline ?? "")}</p>
+            <p className="text-xs text-fg-subtle">
+              核心冲突：{String(plotIndex.central_conflict ?? "")}
+            </p>
+            <ol className="mt-1 grid grid-cols-1 gap-1 sm:grid-cols-2">
+              {(plotIndex.nodes ?? []).map((n: any) => (
+                <li key={n.index} className="flex gap-2 text-xs">
+                  <span className="tnum w-5 shrink-0 text-fg-subtle">{n.index}</span>
+                  <span className="text-fg-muted">{n.summary}</span>
                 </li>
               ))}
             </ol>
@@ -226,35 +247,186 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         </Panel>
       )}
 
-      {visual && (
+      {screenplay && (
         <Panel>
           <PanelHeader
-            title="视觉设定"
-            meta={`${visual.characters?.length ?? 0} 角色 · ${visual.shots?.length ?? 0} 镜`}
+            title={`《${screenplay.title}》`}
+            meta={`${screenplay.episodes?.length ?? 0} 集 · 覆盖 ${screenplay.node_coverage?.length ?? 0} 个节点`}
           />
           <div className="flex flex-col gap-3 p-3">
-            {(visual.characters ?? []).map((c: any) => (
-              <div key={c.ref} className="rounded-md bg-surface-2 px-2.5 py-2">
+            <p className="text-sm text-fg-muted">{String(screenplay.synopsis ?? "")}</p>
+            {(screenplay.episodes ?? []).map((ep: any) => (
+              <div key={ep.index} className="flex flex-col gap-2">
                 <div className="text-sm font-medium">
-                  {c.name}
-                  <span className="ml-2 text-xs text-fg-subtle">{c.ref}</span>
+                  第 {ep.index} 集 {ep.title}
                 </div>
+                {(ep.scenes ?? []).map((sc: any) => (
+                  <div key={sc.id} className="rounded-md bg-surface-2 px-2.5 py-2">
+                    <div className="text-xs text-fg-subtle">
+                      {sc.id}　【{sc.location} - {sc.time_mood}】
+                    </div>
+                    <div className="mt-1 flex flex-col gap-0.5 text-xs">
+                      {(sc.beats ?? []).map((b: any, i: number) => (
+                        <p key={i} className="text-fg-muted">
+                          {b.kind === "action" && `△${b.text}`}
+                          {b.kind === "sfx" && `【音效：${b.text}】`}
+                          {b.kind === "vo" && (
+                            <>
+                              <span className="text-fg">{b.character_ref}（VO）</span>：{b.text}
+                            </>
+                          )}
+                          {b.kind === "dialogue" && (
+                            <>
+                              <span className="text-fg">
+                                {b.character_ref}
+                                {b.emotion && `（${b.emotion}）`}
+                              </span>
+                              ：{b.text}
+                            </>
+                          )}
+                        </p>
+                      ))}
+                      {sc.hook && <p className="text-primary">【钩子】{sc.hook}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+
+      {characters && (
+        <Panel>
+          <PanelHeader
+            title="角色档案"
+            meta={`${characters.characters?.length ?? 0} 个角色`}
+          />
+          <div className="flex flex-col gap-2 p-3">
+            {(characters.characters ?? []).map((c: any) => (
+              <div key={c.ref} className="rounded-md bg-surface-2 px-2.5 py-2">
+                <div className="flex flex-wrap items-baseline gap-2 text-sm">
+                  <span className="font-medium">{c.name}</span>
+                  <span className="text-xs text-fg-subtle">{c.ref}</span>
+                  <span className="rounded bg-surface px-1.5 py-0.5 text-xs text-fg-subtle">
+                    {c.camp}
+                  </span>
+                  <span className="text-xs text-fg-subtle">{(c.personality ?? []).join("・")}</span>
+                </div>
+                {c.present_state && (
+                  <p className="mt-0.5 text-xs text-fg-subtle">当前状态：{c.present_state}</p>
+                )}
                 <p className="mt-0.5 text-xs text-fg-muted">
-                  {[c.age_range, c.hair, c.eyes, c.face, c.build, c.outfit, c.distinctive]
+                  {[
+                    c.ethnicity,
+                    c.age_range,
+                    c.build,
+                    c.face,
+                    c.hair,
+                    c.eyes,
+                    c.skin,
+                    c.outfit,
+                    c.shoes,
+                    c.accessories,
+                    c.distinctive,
+                  ]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
+                {(c.inferred ?? []).length > 0 && (
+                  <p className="mt-0.5 text-xs text-fg-subtle">
+                    推断字段：{(c.inferred ?? []).join("、")}
+                  </p>
+                )}
               </div>
             ))}
-            <ol className="flex flex-col gap-1">
-              {(visual.shots ?? []).slice(0, 12).map((s: any) => (
-                <li key={s.index} className="flex gap-2 text-xs">
-                  <span className="tnum w-6 shrink-0 text-fg-subtle">{s.index}</span>
-                  <span className="w-12 shrink-0 text-fg-subtle">{s.shot_size}</span>
-                  <span className="text-fg-muted">{s.content}</span>
-                </li>
-              ))}
-            </ol>
+          </div>
+        </Panel>
+      )}
+
+      {scenes && (
+        <Panel>
+          <PanelHeader
+            title="场景档案"
+            meta={`${scenes.scenes?.length ?? 0} 个场景 · ${scenes.era ?? ""}`}
+          />
+          <div className="flex flex-col gap-2 p-3">
+            {(scenes.scenes ?? []).map((sc: any) => (
+              <div key={sc.ref} className="rounded-md bg-surface-2 px-2.5 py-2">
+                <div className="flex flex-wrap items-baseline gap-2 text-sm">
+                  <span className="font-medium">{sc.name}</span>
+                  <span className="text-xs text-fg-subtle">{sc.ref}</span>
+                  <span className="text-xs text-fg-subtle">{sc.time_slot}</span>
+                </div>
+                <p className="mt-0.5 text-xs text-fg-muted">{sc.setting}</p>
+                <p className="mt-0.5 text-xs text-fg-subtle">光影：{sc.lighting}</p>
+                {sc.camera_axis && (
+                  <p className="mt-0.5 text-xs text-fg-subtle">
+                    摄影主轴：{sc.camera_axis.position} → {sc.camera_axis.facing} →{" "}
+                    {sc.camera_axis.far_end}
+                  </p>
+                )}
+                {(sc.fixed_references ?? []).length > 0 && (
+                  <p className="mt-0.5 text-xs text-fg-subtle">
+                    固定参照物：{(sc.fixed_references ?? []).join("；")}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+
+      {storyboard && (
+        <Panel>
+          <PanelHeader
+            title="分镜表"
+            meta={`${storyboard.nodes?.length ?? 0} 个节点 · ${storyboard.shots?.length ?? 0} 个镜号`}
+          />
+          {/* 宽表在自己的容器里横向滚动，页面本身不横向滚 */}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[860px] text-xs">
+              <thead>
+                <tr className="border-b border-border text-left text-fg-subtle">
+                  <th className="px-3 py-1.5 font-medium">镜号</th>
+                  <th className="px-2 py-1.5 font-medium">节点</th>
+                  <th className="px-2 py-1.5 font-medium">景别</th>
+                  <th className="px-2 py-1.5 font-medium">角度</th>
+                  <th className="px-2 py-1.5 font-medium">运镜</th>
+                  <th className="px-2 py-1.5 font-medium">画面内容</th>
+                  <th className="px-2 py-1.5 font-medium">出场人物</th>
+                  <th className="px-2 py-1.5 font-medium">场景</th>
+                  <th className="px-2 py-1.5 font-medium">对白 / 音效</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(storyboard.shots ?? []).map((s: any) => (
+                  <tr key={s.index} className="border-b border-border align-top last:border-0">
+                    <td className="tnum px-3 py-1.5">{s.index}</td>
+                    <td className="tnum px-2 py-1.5 text-fg-subtle">{s.node_index}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">{s.shot_size}</td>
+                    <td className="px-2 py-1.5 text-fg-subtle">{s.angle || "—"}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap text-fg-subtle">
+                      {s.camera_move || "—"}
+                    </td>
+                    <td className="px-2 py-1.5 text-fg-muted">{s.content}</td>
+                    <td className="px-2 py-1.5 text-fg-subtle">
+                      {(s.character_refs ?? []).join("、") || "—"}
+                    </td>
+                    <td className="px-2 py-1.5 text-fg-subtle">{s.scene_ref}</td>
+                    <td className="px-2 py-1.5 text-fg-muted">
+                      {s.dialogue && (
+                        <div>
+                          {s.speaker_ref}：{s.dialogue}
+                        </div>
+                      )}
+                      {s.sfx && <div className="text-fg-subtle">【{s.sfx}】</div>}
+                      {!s.dialogue && !s.sfx && "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </Panel>
       )}

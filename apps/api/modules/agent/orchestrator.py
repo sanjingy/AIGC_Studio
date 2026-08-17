@@ -24,16 +24,49 @@ from apps.api.modules.project import service as project_service
 
 log = get_logger(__name__)
 
-Stage = Literal["routing", "story", "visual", "await_setup", "await_storyboard", "done"]
+Stage = Literal[
+    "routing",
+    "plot_index",
+    "screenplay",
+    "await_setup",
+    "characters",
+    "scenes",
+    "storyboard",
+    "await_storyboard",
+    "done",
+]
 
 # 阶段推进图。写成数据而不是散落的 if/else——
 # "下一步是什么"必须只有一处答案。
+#
+# 顺序照搬三份提示词的工作流，每一步只干一件事：
+#
+#   情节目录 → 剧本改编 → 【剧本确认】
+#   → 角色档案 → 场景档案 → 分镜表 → 【分镜确认】
+#
+# 曾经这里只有 story 和 visual 两步，一个 Agent 一次性吐出角色+场景+分镜。
+# 结果是分镜只有"景别 + 一句话画面"，没有节点清单、没有运镜、没有对白、
+# 没有出场人物——因为一次调用里塞不下三份提示词的要求。
 _NEXT: dict[Stage, Stage] = {
-    "routing": "story",
-    "story": "await_setup",
-    "await_setup": "visual",
-    "visual": "await_storyboard",
+    "routing": "plot_index",
+    "plot_index": "screenplay",
+    "screenplay": "await_setup",
+    "await_setup": "characters",
+    "characters": "scenes",
+    "scenes": "storyboard",
+    "storyboard": "await_storyboard",
     "await_storyboard": "done",
+}
+
+# 每个生产阶段跑哪个 Agent。**钉死到具体 id**，不按 role 取默认——
+# 同一个 role 下现在有多个 Agent，`default_for` 只能取一个。
+_SPEC_OF: dict[Stage, str] = {
+    "routing": "router.default.v1",
+    "plot_index": "story.plot_index.v1",
+    "screenplay": "story.screenplay.v1",
+    "characters": "visual.character.v1",
+    "scenes": "visual.scene.v1",
+    "storyboard": "visual.storyboard.v1",
 }
 
 # 哪些阶段是阻塞门（01_ProductSpec.md §5，默认 3 道）
@@ -41,6 +74,40 @@ _GATE_OF: dict[Stage, str] = {
     "await_setup": "setup",
     "await_storyboard": "storyboard",
 }
+
+# 门被打回时退回哪个阶段重做
+_REDO_FROM: dict[Stage, Stage] = {
+    "await_setup": "screenplay",
+    "await_storyboard": "storyboard",
+}
+
+# 产出存进 current_state_json 的哪个键。
+# 除了 routing 沿用历史键名 "router"，其余与阶段同名。
+_STATE_KEY: dict[Stage, str] = {"routing": "router"}
+
+
+def _key(stage: Stage) -> str:
+    return _STATE_KEY.get(stage, stage)
+
+
+# 供聊天修订复用：改某个阶段的产出，要用产出它的那个 Agent，
+# 且要拿到同一套模板变量。两边各写一份必然漂移。
+PRODUCING_STAGES: tuple[str, ...] = (
+    "plot_index",
+    "screenplay",
+    "characters",
+    "scenes",
+    "storyboard",
+)
+
+
+def spec_id_for(stage: str) -> str:
+    return _SPEC_OF[stage]  # type: ignore[index]
+
+
+def variables_for(stage: str, state: dict[str, Any]) -> dict[str, Any]:
+    return _variables_for(stage, state)
+
 
 # 原始素材的存储上限，与 AdvanceIn.user_input 的上限一致
 MAX_SOURCE_CHARS = 20_000
@@ -105,8 +172,13 @@ async def advance(
             log.info("agent.gate_opened", project_id=str(project_id), gate=gate)
         return Advance(stage=stage, ran_role=None, gate_opened=gate, blocked=True, output=None)
 
-    role = {"routing": "router", "story": "story", "visual": "visual"}[stage]
-    spec = registry.default_for(role)
+    spec_id = _SPEC_OF[stage]
+    spec = registry.get(spec_id)
+    if spec is None:
+        from apps.api.core.errors import AppError
+
+        raise AppError("common.internal", message=f"阶段 {stage} 引用的 Agent {spec_id} 不存在")
+    role = stage
 
     result = await runner.run_agent(
         db,
@@ -123,7 +195,7 @@ async def advance(
 
     # Router 要求澄清时原地停住，不要带着错误的路线往下跑——
     # 猜错路线会让用户白跑一整条生产链
-    if role == "router" and output.get("requires_clarification"):
+    if stage == "routing" and output.get("requires_clarification"):
         state["router"] = output
         await _save(db, org_id=org_id, project_id=project_id, state=state)
         return Advance(
@@ -134,7 +206,7 @@ async def advance(
             output=output,
         )
 
-    state[role] = output
+    state[_key(stage)] = output
     state["stage"] = _NEXT[stage]
     await _save(db, org_id=org_id, project_id=project_id, state=state)
 
@@ -185,7 +257,7 @@ async def resolve_gate(
         state["stage"] = _NEXT[stage]
     elif decision == "changes_requested":
         # 退回产出这批内容的那个阶段重做
-        state["stage"] = {"await_setup": "story", "await_storyboard": "visual"}[stage]
+        state["stage"] = _REDO_FROM[stage]
     else:
         state["stage"] = stage  # rejected：停住不动
 
@@ -209,79 +281,176 @@ async def _save(
     await db.commit()
 
 
-def _input_for(role: str, state: dict[str, Any]) -> str:
+def _plot_index_block(state: dict[str, Any]) -> str:
+    """情节目录 + 角色称呼映射表，供剧本阶段逐节点覆盖。"""
+    plot = state.get("plot_index", {})
+    lines = [f"题材：{plot.get('genre', '')}", "", "情节目录："]
+    lines += [f"{n.get('index')}. {n.get('summary')}" for n in plot.get("nodes", [])]
+
+    aliases = [c for c in plot.get("characters", []) if c.get("aliases")]
+    if aliases:
+        lines += ["", "角色称呼映射表（台词归属必须按这张表换算回真名）："]
+        lines += [f"{c['name']} = {' / '.join(c['aliases'])}" for c in aliases]
+    return "\n".join(lines)
+
+
+def _screenplay_block(state: dict[str, Any]) -> str:
+    """剧本正文，展开成纯文本。
+
+    下游拿到的必须是**完整剧本**而不是摘要：分镜要按场次逐条拆镜号，
+    只给一句 logline 的话镜头内容只能靠编。
+    """
+    script = state.get("screenplay", {})
+    lines = [f"《{script.get('title', '')}》", str(script.get("synopsis", "")), ""]
+
+    for ep in script.get("episodes", []):
+        lines.append(f"第 {ep.get('index')} 集 {ep.get('title', '')}")
+        for sc in ep.get("scenes", []):
+            lines.append(f"  {sc.get('id')} 【{sc.get('location')} - {sc.get('time_mood')}】")
+            for b in sc.get("beats", []):
+                kind = b.get("kind")
+                who = b.get("character_ref", "")
+                emotion = f"（{b['emotion']}）" if b.get("emotion") else ""
+                if kind == "action":
+                    lines.append(f"    △{b.get('text')}")
+                elif kind == "sfx":
+                    lines.append(f"    【音效：{b.get('text')}】")
+                elif kind == "vo":
+                    lines.append(f"    {who}(VO)：{b.get('text')}")
+                else:
+                    lines.append(f"    {who}{emotion}：{b.get('text')}")
+            if sc.get("hook"):
+                lines.append(f"    【钩子】{sc['hook']}")
+    return "\n".join(lines)
+
+
+def _input_for(stage: str, state: dict[str, Any]) -> str:
     """给每个阶段拼输入。
 
-    **每个阶段都要能看到原始素材。** 曾经这里只给 Story 发
+    **每个阶段都要能看到它该看的上游产出。** 曾经这里只给 Story 发
     "路线：X\\n请产出故事结构。"——用户上传的小说在 Router 之后就丢了，
     Story 只能凭空编一个故事出来。表现就是"生成的内容和我上传的小说
     完全不搭架"，而且它编得像模像样，不看输入根本看不出哪里错了。
     """
     source = str(state.get("source", "")).strip()
+    route = state.get("router", {}).get("route", "")
 
-    if role == "router":
+    if stage == "routing":
         return source
 
-    if role == "story":
-        route = state.get("router", {}).get("route", "")
-        if not source:
-            return f"路线：{route}\n请产出故事结构。"
+    if stage == "plot_index":
+        return f"路线：{route}\n\n【原著全文】\n{source}"
+
+    if stage == "screenplay":
         return (
             f"路线：{route}\n\n"
-            f"【原始素材】\n{source}\n\n"
-            "请基于上面的原始素材产出故事结构。"
-            "人物姓名、地点、关键情节必须来自素材本身，"
-            "**不要另编一个新故事**。素材只是片段时，"
-            "就为这个片段做结构，不要脑补后续剧情。"
+            f"{_plot_index_block(state)}\n\n"
+            f"【原著全文】\n{source}\n\n"
+            "请逐节点改编为短剧剧本。人物姓名、地点、台词必须来自原著，"
+            "**不要另编一个新故事**，也不要脑补原著里没有的后续剧情。"
         )
 
-    if role == "visual":
-        story = state.get("story", {})
-        lines = [
-            f"故事：{story.get('title', '')}",
-            str(story.get("logline", "")),
-            f"核心冲突：{story.get('central_conflict', '')}",
-            "",
-            "分幕：",
-        ]
-        lines += [
-            f"{a.get('index')}. {a.get('title')}（{a.get('mood')}） {a.get('summary')}"
-            for a in story.get("acts", [])
-        ]
-        if source:
-            # 节选而非全文：角色外貌与场景细节多在开头，而这一段要额外
-            # 花一遍输入 token。上限单列成常量，测出不够再调。
-            lines += ["", "【原始素材节选】", source[:SOURCE_EXCERPT_CHARS]]
-        lines += [
-            "",
-            "请产出角色、场景与分镜。",
-            "角色姓名与外貌、场景名称必须与素材一致，不要改名也不要新增人物。",
-        ]
-        return "\n".join(lines)
+    if stage == "characters":
+        return (
+            f"{_screenplay_block(state)}\n\n"
+            f"【原著节选】\n{source[:SOURCE_EXCERPT_CHARS]}\n\n"
+            "请为剧本中出现的每个角色建立视觉档案。"
+            "ref 用剧本里已有的 character_ref，不要另起名字。"
+        )
+
+    if stage == "scenes":
+        scene_names = sorted(
+            {
+                sc.get("location", "")
+                for ep in state.get("screenplay", {}).get("episodes", [])
+                for sc in ep.get("scenes", [])
+                if sc.get("location")
+            }
+        )
+        return (
+            f"{_screenplay_block(state)}\n\n"
+            f"剧本涉及的地点：{'、'.join(scene_names)}\n\n"
+            f"【原著节选】\n{source[:SOURCE_EXCERPT_CHARS]}\n\n"
+            "请为每个地点建立场景档案。"
+        )
+
+    if stage == "storyboard":
+        chars = state.get("characters", {}).get("characters", [])
+        scenes = state.get("scenes", {}).get("scenes", [])
+        return "\n".join(
+            [
+                _screenplay_block(state),
+                "",
+                "可用角色 ref：" + "、".join(f"{c.get('ref')}={c.get('name')}" for c in chars),
+                "可用场景 ref：" + "、".join(f"{s.get('ref')}={s.get('name')}" for s in scenes),
+                "",
+                "请先列分镜节点清单，再逐节点拆镜号。",
+                "character_refs 和 scene_ref 只能用上面列出的 ref，不要新造。",
+            ]
+        )
 
     return ""
 
 
-def _variables_for(role: str, state: dict[str, Any]) -> dict[str, Any]:
+# 题材 → 时代背景 → 默认人种。
+# 中文剧本的角色默认东亚面孔；不给这个默认值，出图模型会按训练分布
+# 画成欧美面孔，而"人种错了"是用户第一眼就会发现的问题。
+_ERA_RULES: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (("古装", "仙侠", "武侠", "宫斗", "架空"), "古代东方", "中国古人，东亚面孔"),
+    (("西方奇幻", "魔法", "骑士"), "西方奇幻", "欧洲面孔"),
+    (("科幻", "未来", "赛博"), "未来世界", "按角色名判断"),
+)
+_ERA_DEFAULT = ("现代中国", "中国现代人，东亚面孔")
+
+
+def _era_of(state: dict[str, Any]) -> tuple[str, str]:
+    genre = str(state.get("plot_index", {}).get("genre", ""))
+    for keywords, era, ethnicity in _ERA_RULES:
+        if any(k in genre for k in keywords):
+            return era, ethnicity
+    return _ERA_DEFAULT
+
+
+def _variables_for(stage: str, state: dict[str, Any]) -> dict[str, Any]:
     router = state.get("router", {})
+    era, ethnicity = _era_of(state)
+    plot = state.get("plot_index", {})
     return {
         "target_duration_seconds": router.get("estimated_duration_seconds", 60),
         "target_shots": router.get("estimated_shots", 12),
+        "era": era,
+        "default_ethnicity": ethnicity,
+        "plot_index": _plot_index_block(state) if plot else "（无）",
     }
 
 
 def _gate_summary(state: dict[str, Any], gate: str) -> dict[str, Any]:
     """给前端展示用的门摘要。只放数字和标题，不放大段内容。"""
     if gate == "setup":
-        story = state.get("story", {})
-        return {
-            "title": story.get("title"),
-            "logline": story.get("logline"),
-            "acts": len(story.get("acts", [])),
+        script = state.get("screenplay", {})
+        plot = state.get("plot_index", {})
+        scenes = sum(len(ep.get("scenes", [])) for ep in script.get("episodes", []))
+        covered = {
+            c.get("node_index")
+            for c in script.get("node_coverage", [])
+            if c.get("scene_id") or c.get("merged_into")
         }
-    visual = state.get("visual", {})
+        nodes = len(plot.get("nodes", []))
+        return {
+            "title": script.get("title"),
+            "synopsis": script.get("synopsis"),
+            "episodes": len(script.get("episodes", [])),
+            "scenes": scenes,
+            # 情节覆盖率是"改编有没有漏掉原著情节"的可核对指标。
+            # 模型自己写"✅ 已覆盖"没有约束力，这里数的是结构化引用。
+            "nodes_total": nodes,
+            "nodes_covered": len(covered),
+        }
+
+    storyboard = state.get("storyboard", {})
     return {
-        "characters": len(visual.get("characters", [])),
-        "scenes": len(visual.get("scenes", [])),
-        "shots": len(visual.get("shots", [])),
+        "characters": len(state.get("characters", {}).get("characters", [])),
+        "scenes": len(state.get("scenes", {}).get("scenes", [])),
+        "nodes": len(storyboard.get("nodes", [])),
+        "shots": len(storyboard.get("shots", [])),
     }

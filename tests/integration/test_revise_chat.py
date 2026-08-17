@@ -48,17 +48,19 @@ async def test_revise_returns_the_same_schema(alice: AsyncClient) -> None:
 
     r = await alice.post(
         f"{P}/{pid}/revise",
-        json={"target_role": "story", "instruction": "把基调改得更压抑一些"},
+        json={"target_role": "screenplay", "instruction": "把基调改得更压抑一些"},
     )
     assert r.status_code == 200, r.text
     body = r.json()
 
-    assert body["target_role"] == "story"
+    assert body["target_role"] == "screenplay"
     assert body["revision"] == 1
-    # StoryOutline 的必填字段一个都不能少
+    # Screenplay 的必填字段一个都不能少
     out = body["output"]
-    assert out["title"] and out["logline"] and out["central_conflict"]
-    assert out["acts"] and all("index" in a and "mood" in a for a in out["acts"])
+    assert out["title"] and out["synopsis"]
+    assert out["episodes"] and out["node_coverage"]
+    scenes = [sc for ep in out["episodes"] for sc in ep["scenes"]]
+    assert scenes and all(sc["beats"] for sc in scenes)
 
 
 async def test_state_is_written_back_to_the_project(alice: AsyncClient, db: AsyncSession) -> None:
@@ -74,13 +76,13 @@ async def test_state_is_written_back_to_the_project(alice: AsyncClient, db: Asyn
     body = (
         await alice.post(
             f"{P}/{pid}/revise",
-            json={"target_role": "story", "instruction": "冲突再强一点"},
+            json={"target_role": "screenplay", "instruction": "冲突再强一点"},
         )
     ).json()
 
     await db.commit()  # 丢掉本会话的快照，强制重读
     project = await project_service.get_project(db, org_id=org_id, project_id=uuid.UUID(pid))
-    assert project.current_state_json["story"] == body["output"]
+    assert project.current_state_json["screenplay"] == body["output"]
 
 
 async def test_revision_number_increments(alice: AsyncClient) -> None:
@@ -90,7 +92,7 @@ async def test_revision_number_increments(alice: AsyncClient) -> None:
     for expected in (1, 2, 3):
         r = await alice.post(
             f"{P}/{pid}/revise",
-            json={"target_role": "story", "instruction": f"第 {expected} 次修改"},
+            json={"target_role": "screenplay", "instruction": f"第 {expected} 次修改"},
         )
         assert r.json()["revision"] == expected
 
@@ -99,7 +101,7 @@ async def test_conversation_records_both_sides(alice: AsyncClient) -> None:
     pid = await _with_story(alice)
     await alice.post(
         f"{P}/{pid}/revise",
-        json={"target_role": "story", "instruction": "主角改成女性"},
+        json={"target_role": "screenplay", "instruction": "主角改成女性"},
     )
 
     msgs = (await alice.get(f"{P}/{pid}/conversation")).json()
@@ -123,13 +125,18 @@ async def test_revise_contract_reaches_the_model(alice: AsyncClient, db: AsyncSe
     from apps.api.modules.agent.models import AgentRun, AgentStep
 
     pid = await _with_story(alice)
-    await alice.post(f"{P}/{pid}/revise", json={"target_role": "story", "instruction": "改基调"})
+    await alice.post(
+        f"{P}/{pid}/revise", json={"target_role": "screenplay", "instruction": "改基调"}
+    )
 
     runs = list(
         (
             await db.execute(
                 select(AgentRun)
-                .where(AgentRun.project_id == uuid.UUID(pid), AgentRun.role == "story")
+                .where(
+                    AgentRun.project_id == uuid.UUID(pid),
+                    AgentRun.agent_id == "story.screenplay.v1",
+                )
                 .order_by(AgentRun.created_at.desc())
             )
         ).scalars()
@@ -147,11 +154,13 @@ async def test_old_versions_stay_in_agent_runs(alice: AsyncClient) -> None:
     pid = await _with_story(alice)
     before = (await alice.get(f"{P}/{pid}/agent-runs")).json()
 
-    await alice.post(f"{P}/{pid}/revise", json={"target_role": "story", "instruction": "改一下"})
+    await alice.post(
+        f"{P}/{pid}/revise", json={"target_role": "screenplay", "instruction": "改一下"}
+    )
     after = (await alice.get(f"{P}/{pid}/agent-runs")).json()
 
     assert len(after) == len(before) + 1
-    story_runs = [r for r in after if r["role"] == "story" and r["output_json"]]
+    story_runs = [r for r in after if r["agent_id"] == "story.screenplay.v1" and r["output_json"]]
     assert len(story_runs) >= 2, "原始版本必须还在"
 
 
@@ -164,9 +173,9 @@ async def test_upstream_revision_marks_downstream_stale(alice: AsyncClient) -> N
     await _approve_all(alice, pid)
 
     r = await alice.post(
-        f"{P}/{pid}/revise", json={"target_role": "story", "instruction": "换个结局"}
+        f"{P}/{pid}/revise", json={"target_role": "screenplay", "instruction": "换个结局"}
     )
-    assert r.json()["stale_roles"] == ["visual"]
+    assert r.json()["stale_roles"] == ["characters", "scenes", "storyboard"]
 
 
 async def test_downstream_revision_has_no_stale(alice: AsyncClient) -> None:
@@ -174,7 +183,7 @@ async def test_downstream_revision_has_no_stale(alice: AsyncClient) -> None:
     await _approve_all(alice, pid)
 
     r = await alice.post(
-        f"{P}/{pid}/revise", json={"target_role": "visual", "instruction": "镜头再紧一点"}
+        f"{P}/{pid}/revise", json={"target_role": "storyboard", "instruction": "镜头再紧一点"}
     )
     assert r.json()["stale_roles"] == []
 
@@ -185,7 +194,7 @@ async def test_downstream_revision_has_no_stale(alice: AsyncClient) -> None:
 async def test_cannot_revise_what_does_not_exist_yet(alice: AsyncClient) -> None:
     pid = await _project(alice)
     r = await alice.post(
-        f"{P}/{pid}/revise", json={"target_role": "story", "instruction": "改一下"}
+        f"{P}/{pid}/revise", json={"target_role": "screenplay", "instruction": "改一下"}
     )
     assert r.status_code == 404
 
@@ -201,7 +210,9 @@ async def test_unrevisable_role_is_rejected(alice: AsyncClient) -> None:
 
 async def test_empty_instruction_is_rejected(alice: AsyncClient) -> None:
     pid = await _with_story(alice)
-    r = await alice.post(f"{P}/{pid}/revise", json={"target_role": "story", "instruction": "   "})
+    r = await alice.post(
+        f"{P}/{pid}/revise", json={"target_role": "screenplay", "instruction": "   "}
+    )
     assert r.status_code in (400, 422)
 
 
@@ -209,7 +220,7 @@ async def test_overlong_instruction_is_rejected(alice: AsyncClient) -> None:
     pid = await _with_story(alice)
     r = await alice.post(
         f"{P}/{pid}/revise",
-        json={"target_role": "story", "instruction": "改" * 3000},
+        json={"target_role": "screenplay", "instruction": "改" * 3000},
     )
     assert r.status_code == 422
 
@@ -220,6 +231,8 @@ async def test_overlong_instruction_is_rejected(alice: AsyncClient) -> None:
 async def test_revise_is_org_scoped(alice: AsyncClient, bob: AsyncClient) -> None:
     pid = await _with_story(alice)
 
-    r = await bob.post(f"{P}/{pid}/revise", json={"target_role": "story", "instruction": "偷改"})
+    r = await bob.post(
+        f"{P}/{pid}/revise", json={"target_role": "screenplay", "instruction": "偷改"}
+    )
     assert r.status_code == 404
     assert (await bob.get(f"{P}/{pid}/conversation")).json() == []

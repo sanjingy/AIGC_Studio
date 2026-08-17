@@ -117,7 +117,12 @@ export type AgentRun = {
 
 export type Balance = { balance: number; reserved: number; total: number };
 
-export type ReviseTarget = "story" | "visual";
+export type ReviseTarget =
+  | "plot_index"
+  | "screenplay"
+  | "characters"
+  | "scenes"
+  | "storyboard";
 
 export type Revise = {
   target_role: ReviseTarget;

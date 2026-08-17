@@ -13,8 +13,11 @@ import {
 } from "@/lib/api";
 
 const TARGET_LABEL: Record<ReviseTarget, string> = {
-  story: "故事",
-  visual: "视觉",
+  plot_index: "情节目录",
+  screenplay: "剧本",
+  characters: "角色",
+  scenes: "场景",
+  storyboard: "分镜",
 };
 
 /**
@@ -116,7 +119,7 @@ export function ReviseChat({
       <div className="flex max-h-[380px] flex-col gap-2.5 overflow-y-auto p-3">
         {messages.length === 0 && (
           <p className="py-4 text-center text-xs text-fg-subtle">
-            试试「把主角改成女性，年龄调到 30 岁上下」或「第二幕节奏太慢，压缩成一场戏」
+            试试「第 3 个节点漏了，补上」「主角改成女性，30 岁上下」「第 5 镜改成过肩镜头」
           </p>
         )}
 

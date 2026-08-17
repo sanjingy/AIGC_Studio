@@ -69,10 +69,23 @@ docker compose exec api python scripts/validation_slice.py --dry-run
 | S8 | 一致性引擎：风格锁定、提示词合成、embedding 度量、验证切片 |
 
 **S9 Skill 层（M1 之后补，ADR-020~024）**：`skills/` 声明式生产模板。
-默认 Skill `skill.novel_to_anime.v1` 把主线拆成 26 个阶段 + 5 道门，
-配套 5 个新 Agent（情节目录 / 剧本改编 / 角色档案 / 场景档案 / 分镜）。
-**只有声明和校验，运行时尚未接线**——所以它现在是 `draft`，
-`orchestrator.py` 仍走原来那条硬编码的 5 阶段路径。
+默认 Skill `skill.novel_to_anime.v1` 把主线拆成 26 个阶段 + 5 道门。
+
+**S10 编排器改走三份提示词的步骤**：
+
+```
+路线 → 情节目录 → 剧本 →【确认剧本】→ 角色档案 → 场景档案 → 分镜 →【确认分镜】
+```
+
+对应 5 个 Agent：`story.plot_index.v1` / `story.screenplay.v1` /
+`visual.character.v1` / `visual.scene.v1` / `visual.storyboard.v1`，
+在 `orchestrator._SPEC_OF` 里**钉死到具体 id**（同 role 下有多个 Agent，
+`default_for` 只能取一个）。分镜产出 9 列：镜号/节点/景别/角度/运镜/
+画面内容/出场人物/场景/对白+音效。
+
+`story.default.v1` 与 `visual.default.v1` 已不在主链路上，暂留作
+Skill 层的 role 兜底。**Skill 运行时仍未接线**，阶段图还硬编码在
+`orchestrator._NEXT` 里，只是顺序已与 Skill 声明一致。
 
 **前端**：`/login`、`/dashboard`、`/projects/[id]`、`/tasks` 已接真实接口。
 出图有后端无 UI。

@@ -54,7 +54,7 @@ class AgentRunOut(BaseModel):
 
 
 class ReviseIn(BaseModel):
-    target_role: Literal["story", "visual"]
+    target_role: Literal["plot_index", "screenplay", "characters", "scenes", "storyboard"]
     instruction: str = Field(min_length=1, max_length=2000)
 
 
