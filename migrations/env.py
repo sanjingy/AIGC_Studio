@@ -27,6 +27,7 @@ from apps.api.modules.agent import models as _agent_models  # noqa: F401
 from apps.api.modules.asset import models as _asset_models  # noqa: F401
 from apps.api.modules.auth import models as _auth_models  # noqa: F401
 from apps.api.modules.billing import models as _billing_models  # noqa: F401
+from apps.api.modules.consistency import models as _consistency_models  # noqa: F401
 from apps.api.modules.project import models as _project_models  # noqa: F401
 from apps.api.modules.task import models as _task_models  # noqa: F401
 
@@ -39,6 +40,17 @@ if config.config_file_name is not None:
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 target_metadata = Base.metadata
+
+
+def _render_item(type_: str, obj: object, autogen_context: object) -> object:
+    """让 autogenerate 为第三方列类型带上 import。
+
+    默认只会写出 `pgvector.sqlalchemy.vector.VECTOR(...)` 却不加 import，
+    生成的迁移一执行就 NameError。这个钩子补上模块导入。
+    """
+    if type_ == "type" and obj.__class__.__module__.startswith("pgvector"):
+        autogen_context.imports.add("import pgvector.sqlalchemy")  # type: ignore[attr-defined]
+    return False  # 交回默认渲染
 
 
 def _include_object(_obj: object, name: str | None, type_: str, *_a: object) -> bool:
@@ -55,6 +67,7 @@ def run_migrations_offline() -> None:
         compare_type=True,
         compare_server_default=True,
         include_object=_include_object,
+        render_item=_render_item,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -67,6 +80,7 @@ def _do_run_migrations(connection: Connection) -> None:
         compare_type=True,
         compare_server_default=True,
         include_object=_include_object,
+        render_item=_render_item,
     )
     with context.begin_transaction():
         context.run_migrations()

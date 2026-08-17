@@ -60,16 +60,25 @@ async def test_sse_rejects_bad_ticket(alice: AsyncClient) -> None:
 
 
 async def test_relay_moves_outbox_to_stream(alice: AsyncClient) -> None:
-    """发件箱 → Redis Stream。中继坏了等于所有前端永远转圈。"""
+    """发件箱 → Redis Stream。中继坏了等于所有前端永远转圈。
+
+    断言"事件最终到了流里"而不是"本次调用搬了几条"——
+    Worker 里的常驻中继会与本用例抢跑，它先搬完的话
+    relay_once() 返回 0，但结果同样是对的。
+    """
+    import asyncio
+
     pid = await _project(alice)
     await alice.post(T, json={"type": "mock.echo", "project_id": pid, "input": {}})
 
-    moved = await relay_once()
-    assert moved >= 1
+    for _ in range(20):
+        await relay_once()
+        entries = await stream.read_since(project_id=pid, last_id="0", count=50)
+        if any(f["type"] == "task.created" for _id, f in entries):
+            return
+        await asyncio.sleep(0.1)
 
-    entries = await stream.read_since(project_id=pid, last_id="0", count=50)
-    types = [f["type"] for _id, f in entries]
-    assert "task.created" in types
+    raise AssertionError("task.created 没有出现在事件流里")
 
 
 async def test_event_is_never_published_twice(alice: AsyncClient) -> None:

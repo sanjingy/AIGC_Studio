@@ -35,7 +35,18 @@ make up
 | S5 | 计费 Ledger | ✅ |
 | S6 | AI Gateway | ✅ |
 | S7 | Agent 编排 | ✅ |
-| S8 | 一致性 + 验证切片 | ⬜ |
+| S8 | 一致性 + 验证切片 | ✅ |
+
+## 验证切片
+
+M1 的关键验证点（ADR-016）。会产生真实上游费用，约 ¥3/次。
+
+```bash
+docker compose exec api python scripts/validation_slice.py --dry-run   # 只看提示词
+docker compose exec api python scripts/validation_slice.py --shots 10  # 真实跑
+```
+
+实测结论见 [`17_ConsistencyEngine.md`](aigc_studio_docs/17_ConsistencyEngine.md) §8.1。
 
 ## 技术栈
 

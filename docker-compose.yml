@@ -29,6 +29,7 @@ x-backend: &backend
     # Agent spec 目录也挂载：加/改第三方 Agent 不该需要重建镜像
     - ./agents:/app/agents
     - ./adapters:/app/adapters
+    - ./scripts:/app/scripts
     - ./migrations:/app/migrations
     - ./tests:/app/tests
     # 配置文件也挂进来：改 lint / 迁移配置不该需要重建镜像
