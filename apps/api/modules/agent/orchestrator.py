@@ -42,6 +42,13 @@ _GATE_OF: dict[Stage, str] = {
     "await_storyboard": "storyboard",
 }
 
+# 原始素材的存储上限，与 AdvanceIn.user_input 的上限一致
+MAX_SOURCE_CHARS = 20_000
+
+# 传给 Visual 的素材节选长度。Story 拿全文，Visual 只拿开头——
+# 角色外貌与场景细节多在开头，而全文要再花一遍输入 token。
+SOURCE_EXCERPT_CHARS = 6_000
+
 
 @dataclass(frozen=True, slots=True)
 class Advance:
@@ -72,6 +79,14 @@ async def advance(
     state: dict[str, Any] = dict(project.current_state_json or {})
     stage = current_stage(state)
 
+    # 原始素材立刻落库，且在跑任何 Agent 之前。
+    # 它是后续每个阶段的依据；只传给 Router 然后丢掉，就是
+    # "生成的内容和上传的小说没关系"的成因。先存再跑还有一个好处：
+    # Router 调用失败时用户不用把整篇小说重新贴一遍。
+    if user_input.strip() and state.get("source") != user_input[:MAX_SOURCE_CHARS]:
+        state["source"] = user_input[:MAX_SOURCE_CHARS]
+        await _save(db, org_id=org_id, project_id=project_id, state=state)
+
     if stage == "done":
         return Advance(stage="done", ran_role=None, gate_opened=None, blocked=False, output=None)
 
@@ -98,7 +113,10 @@ async def advance(
         org_id=org_id,
         project_id=project_id,
         spec=spec,
-        user_input=user_input or _input_for(role, state),
+        # 一律从 state 拼输入，不直接用 user_input。
+        # 直接用会让"素材"和"这一步要干什么"混成一句话，且后续阶段
+        # （user_input 为空）走的是另一条代码路径——两条路径必然漂移。
+        user_input=_input_for(role, state),
         variables=_variables_for(role, state),
     )
     output = result.output.model_dump(mode="json")
@@ -192,11 +210,55 @@ async def _save(
 
 
 def _input_for(role: str, state: dict[str, Any]) -> str:
+    """给每个阶段拼输入。
+
+    **每个阶段都要能看到原始素材。** 曾经这里只给 Story 发
+    "路线：X\\n请产出故事结构。"——用户上传的小说在 Router 之后就丢了，
+    Story 只能凭空编一个故事出来。表现就是"生成的内容和我上传的小说
+    完全不搭架"，而且它编得像模像样，不看输入根本看不出哪里错了。
+    """
+    source = str(state.get("source", "")).strip()
+
+    if role == "router":
+        return source
+
     if role == "story":
-        return f"路线：{state.get('router', {}).get('route')}\n请产出故事结构。"
+        route = state.get("router", {}).get("route", "")
+        if not source:
+            return f"路线：{route}\n请产出故事结构。"
+        return (
+            f"路线：{route}\n\n"
+            f"【原始素材】\n{source}\n\n"
+            "请基于上面的原始素材产出故事结构。"
+            "人物姓名、地点、关键情节必须来自素材本身，"
+            "**不要另编一个新故事**。素材只是片段时，"
+            "就为这个片段做结构，不要脑补后续剧情。"
+        )
+
     if role == "visual":
         story = state.get("story", {})
-        return f"故事：{story.get('title')}\n{story.get('logline')}\n请产出角色、场景与分镜。"
+        lines = [
+            f"故事：{story.get('title', '')}",
+            str(story.get("logline", "")),
+            f"核心冲突：{story.get('central_conflict', '')}",
+            "",
+            "分幕：",
+        ]
+        lines += [
+            f"{a.get('index')}. {a.get('title')}（{a.get('mood')}） {a.get('summary')}"
+            for a in story.get("acts", [])
+        ]
+        if source:
+            # 节选而非全文：角色外貌与场景细节多在开头，而这一段要额外
+            # 花一遍输入 token。上限单列成常量，测出不够再调。
+            lines += ["", "【原始素材节选】", source[:SOURCE_EXCERPT_CHARS]]
+        lines += [
+            "",
+            "请产出角色、场景与分镜。",
+            "角色姓名与外貌、场景名称必须与素材一致，不要改名也不要新增人物。",
+        ]
+        return "\n".join(lines)
+
     return ""
 
 

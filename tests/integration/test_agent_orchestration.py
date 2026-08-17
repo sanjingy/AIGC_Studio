@@ -132,6 +132,95 @@ async def test_full_run_to_completion(alice: AsyncClient) -> None:
     assert {"router", "story", "visual"} <= roles
 
 
+# ------------------------------------------------------------------ 原始素材传递
+
+# 一个不可能被模型自己编出来的串。断言它出现在下游输入里，
+# 才能证明素材是真的传下去了，而不是碰巧写得像。
+MARKER = "警视厅附属犯罪资料馆"
+SOURCE = (
+    f"寺田聪站在锈迹斑斑的铁门前。门旁柱子上依稀可见「{MARKER}」的斑驳字样。"
+    "馆长绯色冴子一袭白衣，肤色苍白，黑色长发。"
+    "把这篇小说做成 5 分钟悬疑漫剧。"
+)
+
+
+async def _sent_to(db: AsyncSession, pid: str, role: str) -> str:
+    """某个角色最后一次运行实际收到的输入。
+
+    `input_json` 不走 API——它可能装着两万字原文，挂在列表接口上
+    每次刷新都要传一遍。
+    """
+    from sqlalchemy import select
+
+    stmt = (
+        select(AgentRun)
+        .where(AgentRun.project_id == uuid.UUID(pid), AgentRun.role == role)
+        .order_by(AgentRun.created_at.desc())
+        .limit(1)
+    )
+    run = (await db.execute(stmt)).scalars().one()
+    return str(run.input_json["user_input"])
+
+
+async def test_source_material_reaches_the_story_agent(
+    alice: AsyncClient, db: AsyncSession
+) -> None:
+    """用户上传的原文必须传到 Story。
+
+    曾经这里只发"路线：X\\n请产出故事结构。"——小说在 Router 之后就丢了，
+    Story 凭空编一个故事出来，而且编得像模像样，不看输入根本看不出错在哪。
+    这是 need.md 里"生成的故事和我上传的完全不搭架"的根因。
+    """
+    pid = await _project(alice)
+    await _advance(alice, pid, SOURCE)
+
+    assert MARKER in await _sent_to(db, pid, "story"), "Story 没收到原始素材"
+
+
+async def test_source_material_is_persisted(alice: AsyncClient, db: AsyncSession) -> None:
+    """素材落库，且在跑 Agent 之前落。
+
+    存不下来，后面每个阶段都得靠用户重新贴一遍。
+    """
+    from apps.api.modules.project import service as project_service
+
+    pid = await _project(alice)
+    org_id = uuid.UUID((await alice.get("/api/v1/auth/me")).json()["org_id"])
+    await _advance(alice, pid, SOURCE)
+
+    await db.commit()
+    project = await project_service.get_project(db, org_id=org_id, project_id=uuid.UUID(pid))
+    assert MARKER in project.current_state_json["source"]
+
+
+async def test_visual_gets_the_whole_story_not_just_the_logline(
+    alice: AsyncClient, db: AsyncSession
+) -> None:
+    """Visual 要拿到完整分幕和素材节选。
+
+    只给标题和一句话 logline，角色姓名和场景只能靠猜——
+    猜出来的名字和剧本对不上，一致性引擎后面全是错的。
+    """
+    pid = await _project(alice)
+    await _advance(alice, pid, SOURCE)
+
+    pending = await _pending(alice, pid)
+    assert pending
+    await alice.post(f"{P}/{pid}/approvals/{pending['id']}", json={"decision": "approved"})
+    await _advance(alice, pid)
+
+    sent = await _sent_to(db, pid, "visual")
+    assert "分幕：" in sent, "没带上分幕，Visual 只能看到一句 logline"
+    assert MARKER in sent, "没带上素材节选"
+
+
+async def test_router_still_sees_the_raw_text(alice: AsyncClient, db: AsyncSession) -> None:
+    pid = await _project(alice)
+    await _advance(alice, pid, SOURCE)
+
+    assert MARKER in await _sent_to(db, pid, "router")
+
+
 # ------------------------------------------------------------------ 状态无内存依赖
 
 
