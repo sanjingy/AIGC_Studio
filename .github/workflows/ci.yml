@@ -51,7 +51,7 @@ jobs:
           ruff format --check .
 
       - name: Typecheck (mypy)
-        run: mypy apps worker packages
+        run: mypy apps worker packages agents adapters skills
 
       - name: Migrations up & down
         # 只 upgrade 不验证 downgrade，等于没测回滚（09_Database.md 第 14 节）

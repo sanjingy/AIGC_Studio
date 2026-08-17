@@ -1,0 +1,235 @@
+# 小说 → 5 分钟悬疑漫剧。平台的主线生产线。
+#
+# 阶段顺序上有一处刻意与常见做法不同：**语音合成排在视觉资产之前**。
+# 剧本定稿时台词就定了，此刻合成能拿到每句的真实时长，
+# 分镜表的时长和 15 秒批次从第一次算就是真值，不需要事后回填。
+# 先出画面再配音必然音画错位（ADR-011）。
+#
+# status 为 draft：Skill 运行时尚未接线（ADR-020），
+# 接线并跑通验证切片后改 active。
+
+id: skill.novel_to_anime.v1
+name: 小说改漫剧
+description: 上传小说，产出 5 分钟悬疑漫剧成片。
+status: draft
+route: NOVEL_TO_ANIME
+
+input:
+  text: optional
+  files: required
+  accept_extensions: [".txt", ".md"]
+
+model_policy:
+  # 用户可在项目级按能力覆盖模型；Agent 仍然只声明能力（ADR-002 不变）
+  user_selectable: [text_generation, image_generation, text_to_speech, image_to_video]
+  # 推理模型的思考 token 计入输出预算，用在分类和结构化抽取上
+  # 会返回空内容且不报错
+  no_reasoning_roles: [router, qa]
+
+consistency:
+  default_tier: L1
+  protagonist_tier: L1
+
+export:
+  enabled: true
+  layout_version: 1
+
+stages:
+  # ------------------------------------------------------- 一、文本层
+  - id: plot_index
+    name: 情节目录
+    kind: agent
+    role: story
+    agent: story.plot_index.v1
+    revisable: true
+    export: 01_script
+
+  - id: estimate
+    name: 规模与报价
+    kind: compute
+    handler: script.estimate_production
+    export: 01_script
+
+  - id: screenplay
+    name: 剧本改编
+    kind: agent
+    role: story
+    agent: story.screenplay.v1
+    revisable: true
+    export: 01_script
+
+  - id: gate_script
+    name: 剧本定稿
+    kind: gate
+    gate: script
+    # 不可关闭：后面每一分钱都花在这份剧本上，
+    # 用户没看过就往下跑，错了要从头再来
+    required: true
+
+  # ------------------------------------------------------- 二、语音（音频优先）
+  - id: voice
+    name: 台词合成
+    kind: generate
+    capability: text_to_speech
+    export: 02_audio
+    review:
+      # 试听是整集听一次，不是逐句审。没有可计算的音质指标，
+      # 不开放全自动——那只会变成"没人听过就发出去了"
+      default: manual
+      allow_auto: false
+
+  # ------------------------------------------------------- 三、视觉资产层
+  - id: style_lock
+    name: 画风锁定
+    kind: compute
+    handler: consistency.lock_style
+
+  - id: character_sheets
+    name: 角色档案
+    kind: agent
+    role: visual
+    agent: visual.character.v1
+    revisable: true
+    export: 03_assets/characters
+
+  - id: scene_sheets
+    name: 场景档案
+    kind: agent
+    role: visual
+    agent: visual.scene.v1
+    revisable: true
+    export: 03_assets/scenes
+
+  - id: portrait_prompts
+    name: 立绘提示词合成
+    kind: compute
+    handler: consistency.compose_portrait_prompts
+    export: 03_assets/characters
+
+  - id: portraits
+    name: 角色基准立绘
+    kind: generate
+    capability: image_generation
+    export: 03_assets/characters
+    review:
+      # 默认半自动：整图 embedding 里构图差异和身份差异是同一个量级，
+      # 单一阈值必然误判，中间地带交人看（consistency/metrics.py 有实测数据）
+      default: assisted
+      allow_auto: true
+      metric: character_similarity
+      threshold_key: consistency.character_similarity
+      max_attempts: 3
+
+  - id: scene_prompts
+    name: 场景概念图提示词合成
+    kind: compute
+    handler: consistency.compose_scene_prompts
+    export: 03_assets/scenes
+
+  - id: scene_concepts
+    name: 场景概念图
+    kind: generate
+    capability: image_generation
+    export: 03_assets/scenes
+    review:
+      # 场景没有基准图可比，现在没有可用的自动判据
+      default: manual
+      allow_auto: false
+
+  - id: gate_assets
+    name: 资产确认
+    kind: gate
+    gate: assets
+    required: false
+
+  - id: freeze
+    name: 角色资产冻结
+    kind: compute
+    handler: consistency.freeze_characters
+
+  # ------------------------------------------------------- 四、分镜层
+  - id: storyboard
+    name: 分镜设计
+    kind: agent
+    role: visual
+    agent: visual.storyboard.v1
+    revisable: true
+    export: 04_storyboard
+
+  - id: durations
+    name: 时长回填
+    kind: compute
+    handler: storyboard.assign_durations
+    export: 04_storyboard
+
+  - id: batches
+    name: 批次切分
+    kind: compute
+    handler: storyboard.batch_shots
+    export: 04_storyboard
+
+  - id: anchors
+    name: 空间锚点卡
+    kind: compute
+    handler: storyboard.resolve_anchors
+    export: 04_storyboard
+
+  - id: gate_anchor
+    name: 锚点卡确认
+    kind: gate
+    gate: anchor
+    # 默认开着但可关：确认成本极低（看一屏文字），
+    # 错了的代价是整场戏的空间关系全乱
+    required: false
+
+  - id: shot_prompts
+    name: 镜头提示词合成
+    kind: compute
+    handler: consistency.compose_shot_prompts
+    export: 04_storyboard
+
+  - id: keyframes
+    name: 关键帧
+    kind: generate
+    capability: image_generation
+    export: 04_storyboard/shots
+    review:
+      default: assisted
+      allow_auto: true
+      metric: character_similarity
+      threshold_key: consistency.character_similarity
+      max_attempts: 3
+
+  - id: gate_storyboard
+    name: 分镜确认
+    kind: gate
+    gate: storyboard
+    required: false
+
+  # ------------------------------------------------------- 五、成片（M2）
+  - id: clips
+    name: 图生视频
+    kind: generate
+    capability: image_to_video
+    export: 04_storyboard/clips
+    review:
+      default: manual
+      allow_auto: false
+
+  - id: assemble
+    name: 时间线装配
+    kind: compute
+    handler: timeline.assemble
+    export: 05_render
+
+  - id: render
+    name: 渲染
+    kind: compute
+    handler: timeline.render
+    export: 05_render
+
+  - id: gate_final
+    name: 成片确认
+    kind: gate
+    gate: final
+    required: true

@@ -26,8 +26,9 @@ x-backend: &backend
     - ./apps:/app/apps
     - ./packages:/app/packages
     - ./worker:/app/worker
-    # Agent spec 目录也挂载：加/改第三方 Agent 不该需要重建镜像
+    # Agent / Skill spec 目录也挂载：加/改第三方声明不该需要重建镜像
     - ./agents:/app/agents
+    - ./skills:/app/skills
     - ./adapters:/app/adapters
     - ./scripts:/app/scripts
     - ./migrations:/app/migrations

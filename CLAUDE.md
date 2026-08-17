@@ -45,7 +45,7 @@ cd apps/web && npm run dev
 
 ```bash
 docker compose exec api pytest -q                       # 全量测试
-docker compose exec api ruff check . && docker compose exec api mypy apps worker packages agents adapters
+docker compose exec api ruff check . && docker compose exec api mypy apps worker packages agents adapters skills
 docker compose exec api alembic revision --autogenerate -m "xxx"
 docker compose exec api alembic upgrade head
 docker compose exec api python scripts/validation_slice.py --dry-run
@@ -67,6 +67,12 @@ docker compose exec api python scripts/validation_slice.py --dry-run
 | S6 | AI Gateway：DeepSeek + 万相、failover、熔断、真实价格入库 |
 | S7 | Agent 编排：声明式 AgentSpec、可插拔第三方 Agent、3 道审核门 |
 | S8 | 一致性引擎：风格锁定、提示词合成、embedding 度量、验证切片 |
+
+**S9 Skill 层（M1 之后补，ADR-020~024）**：`skills/` 声明式生产模板。
+默认 Skill `skill.novel_to_anime.v1` 把主线拆成 26 个阶段 + 5 道门，
+配套 5 个新 Agent（情节目录 / 剧本改编 / 角色档案 / 场景档案 / 分镜）。
+**只有声明和校验，运行时尚未接线**——所以它现在是 `draft`，
+`orchestrator.py` 仍走原来那条硬编码的 5 阶段路径。
 
 **前端**：`/login`、`/dashboard`、`/projects/[id]`、`/tasks` 已接真实接口。
 出图有后端无 UI。
@@ -96,7 +102,9 @@ docker compose exec api python scripts/validation_slice.py --dry-run
 | 包 `__init__.py` 不导入 router | 会撞循环导入 |
 | 密钥不进代码、不进日志、不进 `input_json` | — |
 | Agent 不许自己写风格词 | 画风漂移头号来源 |
-| 第三方 Agent 只能是 YAML，不能是代码 | 等于把服务器交出去 |
+| 第三方 Agent / Skill 只能是 YAML，不能是代码 | 等于把服务器交出去 |
+| Skill 的 `handler` 只能取白名单里的，`export` 路径按段白名单校验 | 前者是任意能力，后者会往用户磁盘任意位置写 |
+| 阈值、废片率不写进会被分发的 YAML，只写键名 | 待定的数字冻进发布物，改数要发版 |
 | 新 Agent 必须有 eval 用例才能上线 | 提示词退化不会让测试变红 |
 
 ---
@@ -171,6 +179,9 @@ apps/api/modules/       auth / project / asset / task / realtime /
 agents/                 Agent spec（YAML）+ registry + 输出 schema
   builtin/              平台内置，随代码发布
   custom/               第三方，丢 YAML 进去即生效，热加载
+skills/                 Skill spec（YAML）+ registry —— 生产模板层
+  builtin/              novel_to_anime.yaml 是主线默认 Skill
+  custom/               第三方，同上
 adapters/providers/     DeepSeek / DashScope
 worker/                 Arq Worker + jobs
 scripts/                validation_slice.py（会花真钱）

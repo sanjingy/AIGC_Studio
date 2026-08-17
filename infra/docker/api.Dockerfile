@@ -15,9 +15,9 @@ RUN apt-get update \
 # editable 安装要求包目录在安装时就存在，所以先建空壳，稍后再 COPY 真实代码
 # 覆盖上去（editable 指向 /app 路径，内容后到没关系）。
 COPY pyproject.toml README.md ./
-RUN mkdir -p apps worker packages agents adapters \
+RUN mkdir -p apps worker packages agents adapters skills \
     && touch apps/__init__.py worker/__init__.py packages/__init__.py \
-             agents/__init__.py adapters/__init__.py \
+             agents/__init__.py adapters/__init__.py skills/__init__.py \
     && pip install --no-cache-dir -e ".[dev]"
 
 COPY alembic.ini ./
@@ -25,6 +25,7 @@ COPY apps ./apps
 COPY worker ./worker
 COPY packages ./packages
 COPY agents ./agents
+COPY skills ./skills
 COPY adapters ./adapters
 COPY migrations ./migrations
 COPY tests ./tests

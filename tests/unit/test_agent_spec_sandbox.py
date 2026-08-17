@@ -213,6 +213,18 @@ def test_all_builtin_specs_are_valid() -> None:
     assert {"router", "director", "story", "visual", "qa"} <= roles
 
 
+def test_default_for_role_is_stable() -> None:
+    """加新的内置 Agent 不能改变现有编排的行为。
+
+    `default_for` 取的是该 role 的第一个候选，而候选顺序来自文件名排序——
+    新增一个 `story_xxx.yaml` 如果排到了 `story.yaml` 前面，
+    整条生产线会在没人察觉的情况下换掉一个 Agent。
+    Skill 层会钉死具体 id，但在它接线之前，这条靠测试守住。
+    """
+    for role in ("router", "director", "story", "visual", "qa"):
+        assert registry.default_for(role).id == f"{role}.default.v1"
+
+
 def test_builtin_specs_go_through_the_same_validation() -> None:
     """内置不享受特权。
 

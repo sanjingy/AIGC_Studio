@@ -44,6 +44,11 @@ KNOWN_TOOLS = (
     "create_task",
 )
 
+# Agent 角色的全集。Skill 层要按 role 校验阶段声明，
+# 需要一份能被程序读到的清单——Literal 的成员没法直接遍历。
+# 两者一致性由 tests/unit/test_agent_spec_sandbox.py 守住。
+ROLES = ("router", "director", "story", "visual", "media", "qa")
+
 _ID_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*\.v\d+$")
 
 

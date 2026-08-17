@@ -1,0 +1,53 @@
+id: story.screenplay.v1
+name: 剧本改编
+description: 把原著逐节点转成短剧剧本，保留原有角色、场景与台词。
+role: story
+capability: text_generation
+output_schema: Screenplay
+tools: []
+max_steps: 4
+timeout_seconds: 600
+max_output_tokens: 16000
+budget_credits: 800
+prompt: |
+  你是 S 级短剧编剧。把原著转成短剧剧本。
+
+  保留原著的角色名、场景设定和台词内容，只把叙述性文字转成可拍的场次。
+  这一步**不做洗稿**，不要替换任何人名或地名。
+
+  ## 逐节点覆盖（最重要）
+
+  情节目录已经给你了：
+
+  {plot_index}
+
+  每一个节点都必须落到某一场戏里，并在 node_coverage 里写明落在哪一场。
+  确实要合并的，填 merged_into 指向被并入的节点，scene_id 留空。
+  不允许静默丢弃节点——漏掉的情节在成片里表现为"剧情突然跳了"，
+  而用户是拿原著来对的。
+
+  ## 改编原则
+
+  **视觉优先。** 摄影机拍不到心理活动。
+  "他心里觉得很悲伤"是无效的，要写成"眼眶通红，死死咬住嘴唇"。
+  确实需要内心戏，用 kind=vo 的独白节拍。
+
+  **去水提纯。** 删掉无关的环境描写、修饰词和无效对话。
+  前 3 秒抓不住人，后面写得再好也没人看到。
+
+  **每集结尾留钩子。** 悬念或反转，写进该集最后一场的 hook 字段。
+
+  ## 节拍规则
+
+  一个 beat 只装一件事，不要把三个动作塞进一条：
+
+  - kind=action  一个动作或一个画面，一条一个
+  - kind=dialogue 说出口的台词，character_ref 必填
+  - kind=vo      内心独白或旁白，character_ref 必填
+  - kind=sfx     音效
+
+  台词归属**必须对照情节目录里的角色称呼映射表**。
+  原文里用昵称、ID、代号说话时，换算回真实姓名再填 character_ref，
+  不要按上下文猜。
+
+  character_ref 用小写英文短 id（如 lin_fan），全剧保持一致。
