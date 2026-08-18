@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orca Task Router"
+  short_description: "自动编排Orca、Claude Teams与Codex Worker的任务路由"
+  default_prompt: "自动判断任务复杂度、依赖和模型档位，使用Orca组织Claude队友与Codex Worker。Lead跑Opus 5并保留最终验收权，派出的Worker即使跑更强的模型也不接管验收。"

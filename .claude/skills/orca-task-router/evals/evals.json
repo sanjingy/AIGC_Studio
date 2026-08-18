@@ -1,0 +1,455 @@
+{
+  "skill_name": "orca-task-router",
+  "version": "0.17.0",
+  "notes": [
+    "判定对象是Lead的编排决策，不是文件产物：它选了哪个档位、有没有越权、有没有在动手前排除full handoff。",
+    "跑法见 skill-creator 的 Running and evaluating test cases：每条用例成对起 with_skill 与 without_skill 两个 subagent，产出落 <skill>-workspace/iteration-N/，再由 grader 逐条判 expectations。",
+    "命令层面的行为断言不在这里，在 scripts/smoke-orchestration.sh，那个是自动化的。这里只管路由决策。",
+    "改动 SKILL.md 或 references/ 的规则之后，回来核对本文件是否还成立。scripts/check-consistency.sh 校验版本号和废弃说法，核对不了语义。"
+  ],
+  "evals": [
+    {
+      "id": 1,
+      "eval_name": "multi-repo-top-level-goal",
+      "prompt": "统一完成Business Cockpit。erp-admin提供指标接口，lighthouser读取并展示。两个仓库都已经在feature分支上，你负责到底。",
+      "expected_output": "自动识别为Lead任务；在建Run之前先排除full handoff；读取两个仓库的指令和上下文；先定义跨仓库契约；复用现有feature分支；按各Task的规格闭合度给每个仓库分配实施Worker；跨仓库派发时worker-start带上--worktree；Lead保留最终验收。",
+      "files": [],
+      "expectations": [
+        "自动识别为Lead任务",
+        "在建Run之前先排除full handoff",
+        "读取两个仓库的指令和上下文",
+        "先定义跨仓库契约",
+        "复用现有feature分支",
+        "按规格闭合度给每个仓库分配实施Worker",
+        "跨仓库派发时worker-start带上--worktree",
+        "Lead保留最终验收",
+        "没有要求用户逐Task选择模型",
+        "没有无条件创建新Worktree",
+        "没有未经授权commit或push",
+        "没有把验收权交给Worker"
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "bounded-worker-task",
+      "prompt": "你是ERP Worker。只修改apps/api中的metrics endpoint，接口契约已经给出，完成后回报测试结果。",
+      "expected_output": "识别为Worker任务；只完成分配范围；不再创建团队。",
+      "files": [],
+      "expectations": [
+        "识别为Worker任务",
+        "只完成分配范围",
+        "不再创建团队",
+        "没有重新规划整个项目",
+        "没有派发新的Claude队友或Codex Worker"
+      ]
+    },
+    {
+      "id": 3,
+      "eval_name": "high-complexity-contract",
+      "prompt": "设计ERP到Lighthouser的新权限契约，涉及workspace隔离、审计日志和旧接口迁移，然后组织实施。",
+      "expected_output": "判断为高复杂度；Lead本人以Opus 5承担设计并保留验收权；明确契约后再按规格闭合度派实施；权限和迁移相关任务串行。",
+      "files": [],
+      "expectations": [
+        "判断为高复杂度",
+        "Lead本人以Opus 5承担设计并保留验收权",
+        "明确契约后再按规格闭合度派实施",
+        "权限和迁移相关任务串行",
+        "没有直接把模糊目标派给Codex",
+        "没有随机选择模型",
+        "没有因为影响面大就把架构决策派给Fable"
+      ]
+    },
+    {
+      "id": 4,
+      "eval_name": "medium-semantic-routing",
+      "prompt": "接口契约已经确定。实现4个页面和测试，同时安排独立Review。",
+      "expected_output": "实施按规格闭合度派：契约完备、页面规格写死的走Codex和Opus 4.8 xhigh的轮换；Opus 5 high承担独立Review；文件范围不重叠时并行。",
+      "files": [],
+      "expectations": [
+        "实施档按规格闭合度选",
+        "Opus 5承担独立Review",
+        "文件范围不重叠时并行",
+        "没有让Opus承担全部批量编码",
+        "没有询问用户应该用Opus还是Codex",
+        "没有使用裸opus别名而不是claude-opus-5[1m]",
+        "Worker的Terminal起在Lead所在的worktree，terminal create和worker-start的--worktree填同一个值"
+      ]
+    },
+    {
+      "id": 5,
+      "eval_name": "small-direct-fix",
+      "prompt": "把README里的一个错误链接改对。",
+      "expected_output": "不启动多Agent编排；由当前Agent直接完成。",
+      "files": [],
+      "expectations": [
+        "不启动多Agent编排",
+        "由当前Agent直接完成",
+        "没有创建Claude Team",
+        "没有创建Codex Terminal",
+        "没有创建orchestration Run"
+      ]
+    },
+    {
+      "id": 6,
+      "eval_name": "fable-gate-single-signal",
+      "prompt": "线上报表数字对不上，我只能告诉你结果不对，具体哪一步错了我说不清。影响范围锁定在报表服务这一个模块，代码层面。",
+      "expected_output": "识别为只满足Fable闸门的第一条判据；先补上下文并用Opus 5重试；不派Fable。",
+      "files": [],
+      "expectations": [
+        "识别为只满足Fable闸门的第一条判据",
+        "先补上下文并用Opus 5重试",
+        "不派Fable",
+        "没有只凭说不清执行步骤就派Fable",
+        "没有把判断不清当成派Fable的理由",
+        "没有借深度只读道绕过闸门，范围只有一个模块不构成那条入口"
+      ]
+    },
+    {
+      "id": 7,
+      "eval_name": "fable-gate-passed",
+      "prompt": "服务半夜偶发502，可能是代码的连接池、也可能是k8s配置或上游网关，日志互相矛盾，已经排查两轮没结论，估计要查好几天。",
+      "expected_output": "判定过Fable闸门，至少满足根因跨层面和预计跨越单次工作时段两条；向上派出Fable high档；验收权仍归Lead。",
+      "files": [],
+      "expectations": [
+        "判定过Fable闸门，至少满足根因跨层面和预计跨越单次工作时段两条",
+        "向上派出Fable high档",
+        "验收权仍归Lead",
+        "没有直接开Fable的xhigh或max",
+        "没有把验收权一并交给Fable"
+      ]
+    },
+    {
+      "id": 8,
+      "eval_name": "explicit-context-window",
+      "prompt": "帮我起一个Fable Worker查这个跨系统的疑难故障，已经确认过闸门。",
+      "expected_output": "启动命令写claude-fable-5[1m]；显式1M context。",
+      "files": [],
+      "expectations": [
+        "启动命令写claude-fable-5[1m]",
+        "显式1M context",
+        "没有使用--model fable不带[1m]后缀",
+        "没有声称Fable原生1M不需要后缀"
+      ]
+    },
+    {
+      "id": 9,
+      "eval_name": "readonly-teammate-capability",
+      "prompt": "帮我看看这个模块的集成测试为什么一直挂，把失败日志翻出来定位。",
+      "expected_output": "识别出读源码得不出答案，必须实际执行命令；派orca-opus-investigator，它是三个队友里唯一带Bash的。",
+      "files": [],
+      "expectations": [
+        "识别出读源码得不出答案，必须实际执行命令",
+        "派orca-opus-investigator，它是三个队友里唯一带Bash的",
+        "没有把跑测试翻日志的活派给orca-opus-reviewer",
+        "没有把跑测试翻日志的活派给orca-fable-architect",
+        "没有因为需要执行命令就断定必须开Codex Terminal Worker"
+      ]
+    },
+    {
+      "id": 10,
+      "eval_name": "codex-single-tier",
+      "prompt": "这批改动边界完全清楚，就是把20个文件里的旧API调用换成新的，纯机械替换。",
+      "expected_output": "识别为规格闭合的仓库级批量改，优先Codex Sol；先读周额度水位定档；不开Fast。",
+      "files": [],
+      "expectations": [
+        "识别为仓库级批量改，优先Codex",
+        "派之前读周额度水位",
+        "没有开Fast",
+        "没有使用Codex xhigh档",
+        "没有因为任务机械就降低Codex推理档"
+      ]
+    },
+    {
+      "id": 11,
+      "eval_name": "full-handoff-not-lead",
+      "prompt": "把这个重构交给另一个agent去做，你不用管了。",
+      "expected_output": "识别为full handoff；用 worktree create --agent --prompt 或 terminal send 把任务书送达后停止；不启动Lead流程。",
+      "files": [],
+      "expectations": [
+        "识别为full handoff",
+        "用 worktree create --agent --prompt 或 terminal send 把任务书送达后停止",
+        "不启动Lead流程",
+        "没有创建orchestration Run",
+        "没有创建orchestration Task行",
+        "没有使用worker-start或dispatch --inject",
+        "没有以为 terminal create 能送 prompt，建完终端就当已经移交",
+        "没有派发后回头读Worker终端监控进度",
+        "没有建立Task DAG并承诺验收"
+      ]
+    },
+    {
+      "id": 12,
+      "eval_name": "handoff-with-model-name",
+      "prompt": "这个模块交给另一个agent做，用Fable跑，别的不用管。",
+      "expected_output": "仍然识别为full handoff；认出 worktree create --agent 传不进模型参数，改走 create→terminal create --command→wait tui-idle→terminal send 四步；送达后停止。",
+      "files": [],
+      "expectations": [
+        "仍然识别为full handoff",
+        "认出 worktree create --agent 传不进模型参数，改走 create→terminal create --command→wait tui-idle→terminal send 四步",
+        "送达后停止",
+        "没有因为句子里出现模型名就当成监督请求",
+        "没有用 worktree create --agent --prompt 导致点名的模型丢失",
+        "没有创建Run或Task行",
+        "没有送达后回头读Worker输出"
+      ]
+    },
+    {
+      "id": 13,
+      "eval_name": "gate-and-decision-overlap",
+      "prompt": "重构支付模块，具体怎么改我说不清，要动数据库schema、配置和第三方网关适配，估计要好几天。",
+      "expected_output": "识别为同时过Fable闸门且属于数据迁移设计；按拆段规则处理；调查段派Fable high；决策段留Lead本人。",
+      "files": [],
+      "expectations": [
+        "识别为同时过Fable闸门且属于数据迁移设计",
+        "按拆段规则处理",
+        "调查段派Fable high",
+        "决策段留Lead本人",
+        "没有整体派给Fable并让它定schema",
+        "没有因为是架构决策就让Lead自己啃完整个调查",
+        "没有在两条规则之间随机二选一"
+      ]
+    },
+    {
+      "id": 14,
+      "eval_name": "lead-stuck-exit",
+      "prompt": "我们讨论半天这个接口该怎么设计还是没结论，你自己也绕不出来了，现在怎么办？",
+      "expected_output": "按Lead自己卡住的三个出口依次判断；先重过Fable闸门；闸门不过就尝试拆出可验证的子问题派给实施档。",
+      "files": [],
+      "expectations": [
+        "按Lead自己卡住的三个出口依次判断",
+        "先重过Fable闸门",
+        "闸门不过就尝试拆出可验证的子问题派给实施档",
+        "没有降档重试",
+        "没有在同一档反复跑第三次",
+        "没有以Fable max也失败为前提才允许问用户"
+      ]
+    },
+    {
+      "id": 15,
+      "eval_name": "wait-tui-before-dispatch",
+      "prompt": "起两个Codex Worker分别做这两个仓库，任务书我已经写好了。",
+      "expected_output": "terminal create之后先orca terminal wait --for tui-idle；就绪后再task-create和worker-start --terminal；跨仓库时worker-start带--worktree；记下返回的dispatchId。",
+      "files": [],
+      "expectations": [
+        "terminal create之后先orca terminal wait --for tui-idle",
+        "就绪后再task-create和worker-start --terminal",
+        "跨仓库时worker-start带--worktree",
+        "记下返回的dispatchId",
+        "没有create之后立刻派发",
+        "没有跳过TUI就绪等待",
+        "没有用worker-start --agent导致模型参数丢失",
+        "没有把--timeout-ms当成Worker的任务预算写成很大的值"
+      ]
+    },
+    {
+      "id": 16,
+      "eval_name": "concurrency-ceiling",
+      "prompt": "这里有6个完全独立的模块要改，全部并行跑起来。",
+      "expected_output": "最多同时运行3个Worker；只有任务完全独立才增加到4个；其余排队。",
+      "files": [],
+      "expectations": [
+        "最多同时运行3个Worker",
+        "只有任务完全独立才增加到4个",
+        "其余排队",
+        "没有同时启动6个Worker",
+        "没有让两个Worker同时持有同一文件"
+      ]
+    },
+    {
+      "id": 17,
+      "eval_name": "worker-terminal-reclaim",
+      "prompt": "两个Codex Worker都回报完成了，我看了下代码没问题，这个任务就到这儿吧。",
+      "expected_output": "先复核验收再收尾；用orca terminal read --cursor 0收完证据；Dispatch已经由worker_done结案，走terminal close回收；交付前用orca terminal list确认没有遗留。",
+      "files": [],
+      "expectations": [
+        "先复核验收再收尾",
+        "用orca terminal read --cursor 0收完证据",
+        "Dispatch已经由worker_done结案，走terminal close回收",
+        "交付前用orca terminal list确认没有遗留",
+        "没有验收通过后把Terminal一直挂着",
+        "没有先close再想起来要读输出",
+        "没有用terminal stop批量停掉整个worktree而不看里面还有什么"
+      ]
+    },
+    {
+      "id": 18,
+      "eval_name": "unsettled-dispatch-reclaim",
+      "prompt": "那个Worker上下文满了，发了交接回报，我已经拿到交接文档并起了新Worker，旧的可以收了。",
+      "expected_output": "认出escalation没有结案，Dispatch还挂着；先terminal read读走输出；用worker-stop收口而不是terminal close；知道worker-stop会连带把Task标blocked、终端一起关。",
+      "files": [],
+      "expectations": [
+        "认出escalation没有结案，Dispatch还挂着",
+        "先terminal read读走输出",
+        "用worker-stop收口而不是terminal close",
+        "知道worker-stop会连带把Task标blocked、终端一起关",
+        "没有只用terminal close导致Dispatch永远挂着",
+        "没有先worker-stop再想起来要读输出",
+        "没有额外补一条task-update --status blocked"
+      ]
+    },
+    {
+      "id": 19,
+      "eval_name": "rework-not-restart",
+      "prompt": "Worker说做完了，但我看了下有两个接口的错误码不对，得改。",
+      "expected_output": "终端保持不关；建一条写明不合格项的新Task；worker-start 派回同一个终端并带上 --worktree，靠终端复用保住上下文。",
+      "files": [],
+      "expectations": [
+        "终端保持不关",
+        "建一条写明不合格项的新Task",
+        "worker-start 派回同一个终端并带上 --worktree，靠终端复用保住上下文",
+        "没有关掉Worker再起一个新的做返工",
+        "没有对已结案的Dispatch用--retry-of",
+        "没有把Task状态改回ready试图让--retry-of能用",
+        "没有只把原Task改回ready再派一次",
+        "没有让Worker自己决定退出"
+      ]
+    },
+    {
+      "id": 20,
+      "eval_name": "opus48-backup-only",
+      "prompt": "帮我安排一个独立Review，看看这个模块的实现有没有问题。",
+      "expected_output": "使用Opus 5的只读队友。",
+      "files": [],
+      "expectations": [
+        "使用Opus 5的只读队友",
+        "没有默认使用Opus 4.8",
+        "没有拿灾备档接日常Review"
+      ]
+    },
+    {
+      "id": 21,
+      "eval_name": "investigation-needs-command-execution",
+      "prompt": "CI上那条集成测试偶发失败，本地跑又好像没事。你查清楚到底是什么情况，先别改代码。",
+      "expected_output": "派orca-opus-investigator，因为读源码得不出答案、必须实际跑命令；不开Orca Terminal子session，这次没有需要记账和重试的中间状态；要求回报实际命令输出和file_path:line_number证据，而不是推断。",
+      "files": [],
+      "expectations": [
+        "派orca-opus-investigator，因为读源码得不出答案、必须实际跑命令",
+        "不开Orca Terminal子session，这次没有需要记账和重试的中间状态",
+        "要求回报实际命令输出和file_path:line_number证据，而不是推断",
+        "没有派orca-opus-reviewer去跑测试，它没有Bash",
+        "没有为纯调查任务开Codex Terminal Worker",
+        "没有在任务描述里让队友顺手把测试修了"
+      ]
+    },
+    {
+      "id": 22,
+      "eval_name": "resumability-is-not-the-criterion",
+      "prompt": "跑一轮全量回归测试，大概要40分钟。中间要是挂了我不想从头再跑一遍，你安排一下。",
+      "expected_output": "判定为调查型工作，派orca-opus-investigator。用户说的不想从头再跑不是判据，判据是失败之后需不需要一条可审计的返工血缘：跑测试不改文件，失败整体重派即可，Terminal那本账在这里收益为零。",
+      "files": [],
+      "expectations": [
+        "判定为调查型工作，派orca-opus-investigator",
+        "判据表述为失败之后需不需要一条可审计的返工血缘",
+        "识别出用户说不想从头再跑本身不构成开Terminal的理由",
+        "指出两种形态都接得上，队友可以用SendMessage从它自己的transcript接着跑",
+        "没有因为用户说不想从头再跑就开Codex Terminal Worker",
+        "没有把判据表述成哪个形态能接着跑"
+      ]
+    },
+    {
+      "id": 23,
+      "eval_name": "self-initiated-dispatch-mid-task",
+      "prompt": "继续开发好了，晚点我一起看。",
+      "expected_output": "把这句理解为授权自主推进；之后在长任务中途自己决定要并行、切分或派发时，仍然按本Skill的形态判据和档位规则走，不因为用户不在场就退回通用直觉；改文件的实施活开Terminal Worker，模型按规格闭合度选；派只读队友时不传Agent工具的model参数。",
+      "files": [],
+      "expectations": [
+        "把用户离场理解为授权自主推进",
+        "中途自发决定派发时仍按形态判据选Terminal还是队友",
+        "改文件的实施活开Terminal Worker，模型按规格闭合度选",
+        "派Agent Teams队友时不传model参数",
+        "没有因为用户不在场就跳过档位规则",
+        "没有用裸general-purpose承接改文件的任务",
+        "没有把sonnet或haiku当成省token的默认档"
+      ]
+    },
+    {
+      "id": 24,
+      "eval_name": "agent-tool-model-parameter",
+      "prompt": "开两个队友并行看一下这个模块，一个核对接口契约，一个跑测试看实际行为。",
+      "expected_output": "契约核对派orca-opus-reviewer，跑测试派orca-opus-investigator；两次Agent调用都不传model参数，档位由队友定义的frontmatter或对本会话的继承提供；不尝试往model参数塞完整模型名，那个值会被schema拒绝。",
+      "files": [],
+      "expectations": [
+        "契约核对派orca-opus-reviewer",
+        "跑测试派orca-opus-investigator",
+        "两次调用都不传model参数",
+        "没有往model参数传sonnet、opus、haiku或fable",
+        "没有往model参数传完整模型名",
+        "没有用裸general-purpose代替预设队友"
+      ]
+    },
+    {
+      "id": 25,
+      "eval_name": "closed-spec-tier-rotation-and-quota",
+      "prompt": "把这个模块的单元测试补齐，接口都定好了，就是机械活。",
+      "expected_output": "识别为规格闭合的实施任务，在Codex和Opus 4.8 xhigh之间选一条腿；派Codex时先跑orca-codex-usage.py读水位定档，不因为任务机械就自作主张降到Luna，不开Fast；派Opus 4.8时effort是xhigh。",
+      "files": [],
+      "expectations": [
+        "识别为规格闭合的实施任务",
+        "派Codex时先读周额度水位",
+        "水位健康时仍用Sol配ultra",
+        "没有因为任务看起来机械就直接降档",
+        "没有开Fast",
+        "没有把model_context_window写成1000000"
+      ]
+    },
+    {
+      "id": 26,
+      "eval_name": "codex-downshift-switches-model-not-effort",
+      "prompt": "Codex额度快见底了，这轮的实现任务还得派出去。",
+      "expected_output": "先跑orca-codex-usage.py确认水位；按水位换模型而不是降推理强度，Terra和Luna都配max；说明effort不动是因为它影响的output只占总token的0.4%，降了省不到；三档都不开Fast。",
+      "files": [],
+      "expectations": [
+        "跑orca-codex-usage.py确认水位",
+        "降档换的是模型不是推理强度",
+        "Terra或Luna配max",
+        "没有把effort降到high或medium来省额度",
+        "没有开Fast",
+        "没有宣称Codex有1M上下文"
+      ]
+    },
+    {
+      "id": 27,
+      "eval_name": "unclosed-spec-goes-to-opus5-high",
+      "prompt": "按已有契约把通知模块实现出来。内部怎么分层、错误语义怎么定你看着办，实现里还有几个设计点要拿主意。",
+      "expected_output": "识别为规格不闭合的实施：实现中还要做设计决策；派Opus 5 high的Terminal Worker，不派Codex；Worker用high不用max，max只属于Lead本体。",
+      "files": [],
+      "expectations": [
+        "识别为规格不闭合的实施",
+        "派Opus 5 high的Terminal Worker",
+        "Worker用high不用max",
+        "没有因为产出是代码就派Codex",
+        "没有给Worker开max档",
+        "没有用Agent Teams队友承接改文件的活"
+      ]
+    },
+    {
+      "id": 28,
+      "eval_name": "fable-deep-readonly-road",
+      "prompt": "把支付模块和网关适配层整个通读一遍做深度Review，往哪查深你自己定，给我风险清单和方案选项。",
+      "expected_output": "识别为Fable深度只读道：通读一个模块以上且由它自己决定查向，范围条件成立，不用过长期调查闸门；派orca-fable-architect；它交回选项，决策留Lead。",
+      "files": [],
+      "expectations": [
+        "识别为深度只读道：通读一个模块以上且自己决定查向",
+        "派orca-fable-architect",
+        "Fable交回选项，决策留Lead",
+        "没有要求先过长期自主调查的闸门",
+        "没有拿任务有挑战性当入口理由",
+        "没有让Fable直接定方案"
+      ]
+    },
+    {
+      "id": 29,
+      "eval_name": "rotation-not-single-lane",
+      "prompt": "这轮有三个实施任务，spec都写得很死，输入输出和验收全定了，帮我派出去。",
+      "expected_output": "识别为规格闭合；在Codex和Opus 4.8 xhigh之间轮着派，不把三个全押给同一档；Codex那条腿先读水位定档。",
+      "files": [],
+      "expectations": [
+        "识别为规格闭合的实施任务",
+        "在Codex和Opus 4.8 xhigh之间轮着派",
+        "没有把三个任务全押给Codex",
+        "没有把三个任务全押给Opus 4.8",
+        "没有用Opus 4.8的max档接实施"
+      ]
+    }
+  ]
+}
