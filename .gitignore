@@ -53,3 +53,6 @@ validation/*.png
 
 # 本地截图，与项目无关
 ChatGPT Image*.png
+
+# Orca 编排产生的 worktree 目录（多 Worker 并行开发用），本地脚手架不入库
+orca/
