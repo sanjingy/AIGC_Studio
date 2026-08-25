@@ -47,6 +47,15 @@ const TONE_CLASS: Record<Tone, string> = {
   done: "border-success/25 bg-success-soft text-success",
 };
 
+/** 设计稿上徽标只写这三个字（REQ-010 截图），跟六档生产阶段文案是两回事——
+ *  卡片上给用户看的是"这个项目现在归哪一类"，不是"具体在哪一步"。
+ *  精确到六档的 STAGE_LABEL 没扔，挪进 title 提示里。 */
+const TONE_LABEL: Record<Tone, string> = {
+  idle: "草稿",
+  running: "进行中",
+  done: "已完成",
+};
+
 /** 首页只放最近这些，其余去「项目」页看。接口本身按 created_at 倒序返回。 */
 const RECENT_LIMIT = 9;
 
@@ -137,8 +146,9 @@ function ProjectCard({ project }: { project: Project }) {
               "inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-xs font-medium whitespace-nowrap",
               TONE_CLASS[tone],
             )}
+            title={STAGE_LABEL[project.status] ?? project.status}
           >
-            {STAGE_LABEL[project.status] ?? project.status}
+            {TONE_LABEL[tone]}
           </span>
           {tone === "running" && <StageProgressPlaceholder />}
         </div>
