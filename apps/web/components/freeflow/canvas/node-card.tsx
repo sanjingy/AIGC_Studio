@@ -8,7 +8,7 @@ import { NODE_TYPES_NEEDING_BACKEND } from "@/lib/freeflow/types";
 import { cn } from "@/lib/utils";
 
 import type { CanvasNode } from "./graph";
-import { INLINE_PARAM_LIMIT, NODE_TYPE_META, STATUS_META } from "./node-meta";
+import { INLINE_PARAM_LIMIT, NODE_TYPE_META, STATUS_META, type NodeOutputMeta } from "./node-meta";
 
 /** 锚点视觉：颜色一律走 token，不写死。inline style 是为了压过 React Flow
  *  自带样式表里的 `.react-flow__handle` 默认色，避免依赖 CSS 引入顺序。 */
@@ -18,6 +18,12 @@ const HANDLE_STYLE = {
   background: "var(--surface)",
   border: "1.5px solid var(--border-strong)",
 } as const;
+
+/** 分支锚点：边框用分支自己的语义色，跟旁边的文字标注一起区分"是"/"否" */
+const BRANCH_TONE: Record<NodeOutputMeta["tone"], { handleBorder: string; textClass: string }> = {
+  success: { handleBorder: "1.5px solid var(--success)", textClass: "text-success" },
+  danger: { handleBorder: "1.5px solid var(--danger)", textClass: "text-danger" },
+};
 
 /**
  * 节点卡片（REQ-020）：顶部一条状态色条 + 标题 + 最多 4 个内联参数 +
@@ -30,6 +36,7 @@ export function NodeCard({ data, selected }: NodeProps<CanvasNode>) {
   const status = STATUS_META[data.status];
   const Icon = meta.icon;
   const needsBackend = NODE_TYPES_NEEDING_BACKEND.includes(data.nodeType);
+  const outputs = meta.outputs;
 
   const inlineParams = data.params.slice(0, INLINE_PARAM_LIMIT);
   const extraParams = data.params.slice(INLINE_PARAM_LIMIT);
@@ -37,7 +44,10 @@ export function NodeCard({ data, selected }: NodeProps<CanvasNode>) {
   return (
     <div
       className={cn(
-        "w-[172px] overflow-hidden rounded-lg border bg-surface shadow-sm transition-colors duration-150",
+        // 不能用 overflow-hidden：锚点是刻意压在卡片边框上的（右边缘各出去 4~5px），
+        // 裁掉的那半圆连命中区一起没了——鼠标点在锚点上会被卡片本体吃掉，
+        // 拖出来的是"挪动节点"而不是连线。改成给状态色条自己圆角。
+        "w-[172px] rounded-lg border bg-surface shadow-sm transition-colors duration-150",
         selected ? "border-primary ring-1 ring-primary" : "border-border",
         data.disabled && "opacity-55",
       )}
@@ -45,7 +55,12 @@ export function NodeCard({ data, selected }: NodeProps<CanvasNode>) {
       <Handle type="target" position={Position.Left} style={HANDLE_STYLE} />
 
       <div
-        className={cn("h-[5px]", status.barClass, data.status === "running" && "animate-pulse-soft")}
+        // 圆角比外框小 1px（外框 8px 圆角 + 1px 边框），贴住内沿
+        className={cn(
+          "h-[5px] rounded-t-[7px]",
+          status.barClass,
+          data.status === "running" && "animate-pulse-soft",
+        )}
         aria-hidden
       />
 
@@ -108,7 +123,41 @@ export function NodeCard({ data, selected }: NodeProps<CanvasNode>) {
         </div>
       </div>
 
-      <Handle type="source" position={Position.Right} style={HANDLE_STYLE} />
+      {/* 多出口节点（条件判断，需求 3.2）逐分支画一行"标注 + 锚点"；
+          锚点的实际位置 React Flow 是量 DOM 的，所以行内绝对定位就够，
+          不需要手算 top 百分比。单出口节点仍是右侧中点一个匿名锚点。 */}
+      {outputs ? (
+        <div className="border-t border-border">
+          {outputs.map((o) => {
+            const tone = BRANCH_TONE[o.tone];
+            return (
+              <div
+                key={o.id}
+                className="relative flex h-[22px] items-center justify-end border-b border-border px-2.5 last:border-b-0"
+              >
+                <span className={cn("text-[11px] font-medium leading-none", tone.textClass)}>
+                  {o.label}
+                </span>
+                <Handle
+                  type="source"
+                  id={o.id}
+                  position={Position.Right}
+                  title={`${o.label}分支`}
+                  style={{
+                    ...HANDLE_STYLE,
+                    border: tone.handleBorder,
+                    right: -5,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                  }}
+                />
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <Handle type="source" position={Position.Right} style={HANDLE_STYLE} />
+      )}
     </div>
   );
 }
