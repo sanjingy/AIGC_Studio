@@ -1,7 +1,23 @@
-import { GlobalPlaceholder } from "@/components/freeflow/global-nav-rail";
+import { HomeProjectGrid } from "@/components/freeflow/home-project-grid";
+import { HomeQuickStart } from "@/components/freeflow/home-quick-start";
+import { HomeTemplateGrid } from "@/components/freeflow/home-template-grid";
 
-// TODO(Worker A)：01 首页——最近项目网格 + 快速开始四卡 + 推荐模板网格。
-// 见需求文档「屏幕 01」、REQ-010/011。
+/**
+ * 01 首页（需求文档「屏幕 01」、REQ-010/011）。
+ *
+ * 三段从上往下：最近项目 → 快速开始 → 推荐模板。前两段接真实接口
+ * （`projects.list()` / `projects.create()`），第三段是示例数据，
+ * 因为后端没有模板表——各自在组件里写清楚了哪一段是真的。
+ *
+ * 页面本身不取数，三段各自是 client 组件、各自取数：一段挂了另外两段
+ * 照常显示，也不用为了一个 useEffect 把整页变成 client。
+ */
 export default function FreeflowHomePage() {
-  return <GlobalPlaceholder title="首页" />;
+  return (
+    <div className="mx-auto flex max-w-[1200px] flex-col gap-6">
+      <HomeProjectGrid />
+      <HomeQuickStart />
+      <HomeTemplateGrid />
+    </div>
+  );
 }
