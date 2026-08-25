@@ -25,11 +25,23 @@ import type { FreeflowNode, FreeflowNodeStatus, FreeflowNodeType } from "@/lib/f
 
 type NodeParam = FreeflowNode["params"][number];
 
+/** 命名输出锚点。只有多出口节点（目前只有条件判断）需要声明；
+ *  不声明的节点走单个匿名右侧锚点，连线的 `sourceHandle` 为 null。 */
+export type NodeOutputMeta = {
+  /** React Flow 的 handle id，会原样落进 `FreeflowEdge.sourceHandle` */
+  id: string;
+  label: string;
+  /** 锚点与文字的颜色 token，用来在视觉上区分分支 */
+  tone: "success" | "danger";
+};
+
 export type NodeTypeMeta = {
   label: string;
   icon: LucideIcon;
   /** 从图标栏/右键菜单新建时带上的默认业务参数（REQ-020：业务层参数，不暴露 CFG/Sampler/Seed） */
   defaultParams: NodeParam[];
+  /** 多出口节点的分支锚点，按声明顺序自上而下排。省略 = 单出口 */
+  outputs?: readonly NodeOutputMeta[];
 };
 
 export const NODE_TYPE_META: Record<FreeflowNodeType, NodeTypeMeta> = {
@@ -109,9 +121,15 @@ export const NODE_TYPE_META: Record<FreeflowNodeType, NodeTypeMeta> = {
     defaultParams: [{ label: "说明", value: "请确认上一步产出" }],
   },
   condition: {
+    // 需求 3.2：条件判断要有"是/否"两个分支出口。可视化条件构造器还没做，
+    // 表达式仍是一个展示用参数——先把分支端口和连线语义立住。
     label: "条件判断",
     icon: GitBranch,
     defaultParams: [{ label: "表达式", value: "上一步产出.字数 > 5000" }],
+    outputs: [
+      { id: "true", label: "是", tone: "success" },
+      { id: "false", label: "否", tone: "danger" },
+    ],
   },
   loop: {
     label: "循环",
@@ -156,3 +174,9 @@ export const INLINE_PARAM_LIMIT = 4;
 
 /** 拖拽时写进 dataTransfer 的键，图标栏和画布约定用它传节点类型 */
 export const NODE_DRAG_MIME = "application/x-freeflow-node-type";
+
+/** 该节点类型合法的输出锚点 id 集合；单出口节点返回 null（只接受空 handle）。 */
+export function outputHandleIds(type: FreeflowNodeType): Set<string> | null {
+  const outputs = NODE_TYPE_META[type].outputs;
+  return outputs ? new Set(outputs.map((o) => o.id)) : null;
+}

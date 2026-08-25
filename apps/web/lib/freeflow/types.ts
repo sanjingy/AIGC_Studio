@@ -35,12 +35,20 @@ export type FreeflowNode = {
   status: FreeflowNodeStatus;
   statusText: string;
   position: { x: number; y: number };
+  /** 右键菜单「禁用」：留在图里、留着连线，但运行时跳过。
+   *  可选——老数据没有这个字段，读回来按未禁用处理。 */
+  disabled?: boolean;
 };
 
 export type FreeflowEdge = {
   id: string;
   source: string;
   target: string;
+  /** 源/目标节点上的**命名锚点** id（React Flow 的 `sourceHandle`/`targetHandle`）。
+   *  条件判断这类多出口节点靠它区分"是"/"否"分支（见 `NODE_TYPE_META[].outputs`）。
+   *  可选：单出口节点不填，等同旧行为；老数据缺这两个字段也能原样读回来。 */
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
 };
 
 export type FreeflowGraph = {
