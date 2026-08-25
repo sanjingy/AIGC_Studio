@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Lock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import type { Project } from "@/lib/api";
+import { ApiRequestError, type Project } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 import { ConfirmDialog } from "./feedback";
@@ -21,8 +21,8 @@ import { ConfirmDialog } from "./feedback";
  * - 项目类型：只读展示真值（route_type），不是编的
  * - 分辨率/帧率/默认模型/存储位置：后端连列都没有，一律禁用态 + 示例值
  * - 描述：本地 state 真交互（字数统计是真的），但不持久化，写明
- * - 删除项目：确认流程做全（要输入项目名匹配），但确认按钮永远禁用，
- *   因为没有删除接口——不去调一个不存在的 endpoint
+ * - 删除项目：`DELETE /projects/{id}` 后端一直都在（软删，见
+ *   `lib/api.ts` 的 `projects.remove`），确认流程真的会调用它
  */
 
 const SECTIONS = [
@@ -54,14 +54,38 @@ const MOCK_FIELDS: { label: string; value: string }[] = [
 
 const DESC_LIMIT = 500;
 
-export function ProjectSettings({ project }: { project: Project | null }) {
+export function ProjectSettings({
+  project,
+  onDelete,
+}: {
+  project: Project | null;
+  /** 真的会删——由页面层传下来，这里只管确认交互和错误展示。 */
+  onDelete: () => Promise<void>;
+}) {
   const [section, setSection] = useState<SectionKey>("basic");
   const [description, setDescription] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [typed, setTyped] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const title = project?.title ?? "";
   const nameMatches = typed.trim() === title && title.length > 0;
+
+  async function confirmAndDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await onDelete();
+      // 成功之后页面会跳走（onDelete 里 router.push），这里不用再关弹窗——
+      // 组件即将被卸载，setConfirmDelete(false) 反而可能落在卸载后的树上。
+    } catch (err) {
+      setDeleteError(
+        err instanceof ApiRequestError ? err.error.user_message : "删除失败，请稍后重试",
+      );
+      setDeleting(false);
+    }
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-[640px] flex-col gap-4 p-6">
@@ -151,7 +175,8 @@ export function ProjectSettings({ project }: { project: Project | null }) {
             <div className="min-w-0">
               <div className="text-sm font-medium text-fg">删除项目</div>
               <div className="mt-0.5 text-xs text-fg-subtle">
-                删除后不可恢复，所有素材与产出一并清除
+                软删除：从列表中移除，产出数据不会立刻物理清除（跟 Skill
+                删除是同一套模式）
               </div>
             </div>
             <Button
@@ -160,6 +185,7 @@ export function ProjectSettings({ project }: { project: Project | null }) {
               className="border-danger text-danger"
               onClick={() => {
                 setTyped("");
+                setDeleteError(null);
                 setConfirmDelete(true);
               }}
             >
@@ -173,29 +199,31 @@ export function ProjectSettings({ project }: { project: Project | null }) {
         open={confirmDelete}
         title="删除项目"
         description={`这一步不可撤销。请输入项目名称「${title}」以确认。`}
-        confirmLabel="永久删除"
+        confirmLabel={deleting ? "删除中…" : "永久删除"}
         tone="danger"
-        // 名称匹配之前禁用是交互要求；匹配之后仍然禁用，是因为后端根本
-        // 没有删除接口——与其去调一个不存在的 endpoint 拿 404，不如直说。
-        confirmDisabled
-        disabledReason={
-          nameMatches
-            ? "名称已匹配，但删除接口未接入：lib/api.ts 的 projects 没有 DELETE，后端也没有这条路由。"
-            : "输入的名称与项目名不一致。（另外：删除接口本身也还未接入。）"
-        }
+        confirmDisabled={!nameMatches || deleting}
+        disabledReason={!nameMatches ? "输入的名称与项目名不一致。" : undefined}
         onCancel={() => setConfirmDelete(false)}
-        onConfirm={() => setConfirmDelete(false)}
+        onConfirm={confirmAndDelete}
       >
         <input
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
           placeholder={title}
           aria-label="输入项目名称以确认删除"
+          disabled={deleting}
           className={cn(
             "h-8 w-full rounded-md border bg-surface px-2.5 text-sm text-fg placeholder:text-fg-subtle",
             nameMatches ? "border-success" : "border-border-strong",
           )}
         />
+        {/* 失败原因独立展示，不挂在 disabledReason 上——那个只在
+            confirmDisabled 时渲染，而失败之后按钮要重新可点以便重试。 */}
+        {deleteError && (
+          <p role="alert" className="mt-2 rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
+            {deleteError}
+          </p>
+        )}
       </ConfirmDialog>
     </div>
   );

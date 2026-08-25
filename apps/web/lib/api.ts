@@ -203,6 +203,10 @@ export const projects = {
 
   get: (id: string) => apiFetch<Project>(`/projects/${id}`),
 
+  /** 软删除——后端早就有这条路由（`repo.soft_delete`，`deleted_at` 打时间戳，
+   *  列表查询已经在过滤），只是这层封装一直没补。 */
+  remove: (id: string) => apiFetch<void>(`/projects/${id}`, { method: "DELETE" }),
+
   /** 推进到下一个审核门。真实 LLM 调用，会花 Credits。 */
   advance: (id: string, userInput: string) =>
     apiFetch<Advance>(`/projects/${id}/advance?to_gate=true`, {
