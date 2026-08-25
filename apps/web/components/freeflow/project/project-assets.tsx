@@ -13,13 +13,12 @@ import { cn, formatBytes } from "@/lib/utils";
  * 比全局素材库简单：只列当前项目的东西，不做文件夹、不做上传、不做删除
  * ——那几件事属于全局素材库那一页（Worker A），做两份必然分叉。
  *
- * 两个已知限制，写在这里免得后面被当成 bug：
+ * 项目筛选在**后端**做：`assets.library({ projectId })` 走
+ * `/assets/library?project_id=`。以前是拿全量再前端筛，接口 limit 写死 100，
+ * 项目多、素材多的时候这一页会漏——改回前端筛就会把那个 bug 一起改回来。
  *
- * 1. `/assets/library` **没有 project_id 过滤参数**，只有 type / folder_id。
- *    所以项目筛选是前端做的，而接口 limit 写死 100——项目多、素材多的时候
- *    这一页会漏。真正接线时要给接口加 project_id 参数，不是在前端翻页。
- * 2. 角色/场景是结构化产出（ProfileEntry），不是文件，不占存储容量
- *    （REQ-031）。所以它们没有缩略图，只列条目。
+ * 一个仍在的限制：角色/场景是结构化产出（ProfileEntry），不是文件，
+ * 不占存储容量（REQ-031）。所以它们没有缩略图，只列条目。
  */
 
 type Kind = "all" | "image" | "video" | "audio" | "character" | "scene";
@@ -47,27 +46,22 @@ export function ProjectAssets({ projectId }: { projectId: string }) {
 
   const load = useCallback(async () => {
     try {
-      setLibrary(await assetsApi.library());
+      setLibrary(await assetsApi.library({ projectId }));
       setError(null);
     } catch (e) {
       setError(e instanceof ApiRequestError ? e.error.user_message : "加载失败");
     }
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     setLoading(true);
     void load().finally(() => setLoading(false));
   }, [load]);
 
-  const files = useMemo(
-    () => (library?.assets ?? []).filter((a) => a.project_id === projectId),
-    [library, projectId],
-  );
-
-  const profiles = useMemo(
-    () => (library?.profiles ?? []).filter((p) => p.project_id === projectId),
-    [library, projectId],
-  );
+  // 已经是这个项目的了，不再前端筛一遍。仍然过一层 useMemo：下面几个
+  // 派生列表以它们为依赖，每次渲染换一个数组引用等于把 memo 白做。
+  const files = useMemo(() => library?.assets ?? [], [library]);
+  const profiles = useMemo(() => library?.profiles ?? [], [library]);
 
   // 角色/场景不是文件，选中它们时文件区整块空掉，由下面的档案区接手
   const visibleFiles = useMemo(() => {

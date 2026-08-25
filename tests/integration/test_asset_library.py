@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 
+import httpx
 import pytest
 from httpx import AsyncClient
 
@@ -278,3 +279,106 @@ async def test_profiles_keep_only_latest_revision(alice: AsyncClient) -> None:
     ]
     assert len(entries) == 1
     assert entries[0]["output"]["characters"][0]["name"] == "第三版"
+
+
+async def _ready_asset(client: AsyncClient, filename: str, project_id: str | None = None) -> str:
+    """走完整三段式直传拿一个 ready 的资产。
+
+    资产库只列 ready 的，只签票（pending）在列表里根本看不到。
+    """
+    body = filename.encode() + b"-bytes"
+    payload: dict[str, object] = {
+        "filename": filename,
+        "mime_type": "image/png",
+        "size_bytes": len(body),
+    }
+    if project_id:
+        payload["project_id"] = project_id
+    r = await client.post(f"{A}/upload-url", json=payload)
+    assert r.status_code == 201, r.text
+    ticket = r.json()
+    async with httpx.AsyncClient(timeout=30) as raw:
+        put = await raw.put(
+            ticket["upload_url"], content=body, headers={"Content-Type": "image/png"}
+        )
+    assert put.status_code in (200, 204), put.text
+    done = await client.post(f"{A}/{ticket['asset']['id']}/complete")
+    assert done.status_code == 200, done.text
+    return str(ticket["asset"]["id"])
+
+
+# ------------------------------------------------------- 按项目筛（project_id）
+
+
+async def test_library_project_id_filters_assets_and_profiles(alice: AsyncClient) -> None:
+    """项目内素材页要的是"这个项目有什么"。
+
+    以前这一步在前端做：拿全量再筛。接口 limit 100 一到就会漏，
+    而漏掉的素材在界面上和"没有这个素材"分不开。
+    """
+    me = await _me(alice)
+    p1 = await _project(alice, "被筛的项目")
+    p2 = await _project(alice, "另一个项目")
+
+    mine = await _ready_asset(alice, "in-project.png", p1)
+    other = await _ready_asset(alice, "other-project.png", p2)
+    loose = await _ready_asset(alice, "no-project.png")
+
+    await _seed_profile_run(
+        org_id=me["org_id"],
+        project_id=p1,
+        agent_id="visual.scene.v1",
+        output={"scenes": [{"ref": "S1", "name": "该出现"}]},
+    )
+    await _seed_profile_run(
+        org_id=me["org_id"],
+        project_id=p2,
+        agent_id="visual.scene.v1",
+        output={"scenes": [{"ref": "S2", "name": "不该出现"}]},
+    )
+
+    body = (await alice.get(f"{A}/library", params={"project_id": p1})).json()
+
+    ids = {a["id"] for a in body["assets"]}
+    assert ids == {mine}
+    assert other not in ids
+    assert loose not in ids  # 不挂项目的素材也不属于这个项目
+
+    assert {p["project_id"] for p in body["profiles"]} == {p1}
+
+    # 配额是账号级的，按项目筛不该把它也筛小——那会让"还能存多少"变成
+    # 一个随当前页面变化的数字。
+    assert body["usage"]["used_bytes"] == (await alice.get(f"{A}/usage")).json()["used_bytes"]
+
+
+async def test_library_without_project_id_lists_all_projects(alice: AsyncClient) -> None:
+    """不传就是原来的"全部"，不能因为加了参数改变默认行为。"""
+    p1 = await _project(alice, "甲")
+    p2 = await _project(alice, "乙")
+    a1 = await _ready_asset(alice, "甲.png", p1)
+    a2 = await _ready_asset(alice, "乙.png", p2)
+
+    ids = {a["id"] for a in (await alice.get(f"{A}/library")).json()["assets"]}
+    assert {a1, a2} <= ids
+
+
+async def test_library_project_id_cross_tenant_returns_404(
+    alice: AsyncClient, bob: AsyncClient
+) -> None:
+    """跨租户的 project_id 落 404，与其它带项目 id 的入口一致。
+
+    返空列表会把"不存在"和"存在但空"混成一件事；403 则等于确认了这个
+    id 存在，可以被拿来枚举。
+    """
+    pid = await _project(alice, "alice 的项目")
+    assert (await bob.get(f"{A}/library", params={"project_id": pid})).status_code == 404
+
+
+async def test_library_project_id_excludes_standalone_characters(alice: AsyncClient) -> None:
+    """独立角色档案不挂任何项目，按项目筛时一条都不返回。
+
+    把它们塞进每个项目会让"这个项目有什么"这句话失真。
+    """
+    pid = await _project(alice, "只看这个项目")
+    body = (await alice.get(f"{A}/library", params={"project_id": pid})).json()
+    assert body["characters"] == []

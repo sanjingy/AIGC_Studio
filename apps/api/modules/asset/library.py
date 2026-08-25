@@ -119,6 +119,7 @@ async def get_library(
     limit: int = 40,
     cursor: datetime | None = None,
     folder_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> Library:
     """我的资产库。
 
@@ -126,12 +127,30 @@ async def get_library(
     与加文件夹之前完全一致。给了 `folder_id` 就只列这个文件夹里的东西，
     此时不分页——文件夹的容量由 `repo.MAX_FOLDER_ITEMS` 封顶，
     先分页再按归类过滤会得到一页空结果，那比不分页糟得多。
+
+    `project_id=None` 是"全部项目"，即加这个参数之前的语义。给了就只列
+    那个项目里的东西：项目内素材页要的是"这个项目有什么"，靠前端在一页
+    100 条里筛的话，素材一多就会漏。**独立角色档案不挂任何项目**
+    （`character.generate_from_reference` 就是这么定义的），所以按项目筛
+    时它们一条都不返回——把它们塞进每个项目才是错的。
+
+    用量与文件夹列表不受 `project_id` 影响：配额是账号级的（见
+    `repo.sum_owned_bytes` 的注释），文件夹也是跨项目的侧边栏。
     """
     usage = await asset_service.quota_usage(db, org_id=org_id, owner_user_id=owner_user_id)
 
     folders, folder_of = await folder_index(db, org_id=org_id, owner_user_id=owner_user_id)
 
-    projects = await _owned_projects(db, org_id=org_id, owner_user_id=owner_user_id)
+    if project_id is None:
+        projects = await _owned_projects(db, org_id=org_id, owner_user_id=owner_user_id)
+    else:
+        # 指定了项目就先验它属于本租户。跨租户在这里与其它带 id 的入口
+        # 一致地落到 404（`project_service.get_project`），不是空列表——
+        # 空列表和"存在但没东西"分不开，而 403 会确认这个 id 存在。
+        project = await project_service.get_project(db, org_id=org_id, project_id=project_id)
+        # 同 org 里别人的项目不属于"我的资产库"。不 404（它对本租户确实
+        # 存在），只是这一屏里没有它的东西。
+        projects = [project] if project.owner_user_id == owner_user_id else []
     titles = {p.id: p.title for p in projects}
 
     if folder_id is None:
@@ -139,6 +158,7 @@ async def get_library(
             db,
             org_id=org_id,
             owner_user_id=owner_user_id,
+            project_id=project_id,
             asset_type=asset_type,
             limit=limit,
             cursor=cursor,
@@ -150,8 +170,12 @@ async def get_library(
             agent_ids=list(PROFILE_AGENTS),
         )
         runs = _latest_per_project(runs)
-        entries = await repo.list_character_entries(
-            db, org_id=org_id, owner_user_id=owner_user_id, limit=repo.MAX_CHARACTER_ENTRIES
+        entries = (
+            []
+            if project_id is not None
+            else await repo.list_character_entries(
+                db, org_id=org_id, owner_user_id=owner_user_id, limit=repo.MAX_CHARACTER_ENTRIES
+            )
         )
     else:
         picked = await repo.list_folder_items(
@@ -164,14 +188,21 @@ async def get_library(
         assets = await repo.list_assets_by_ids(db, org_id=org_id, asset_ids=ids.get("asset", []))
         if asset_type:
             assets = [a for a in assets if a.type == asset_type]
+        if project_id is not None:
+            assets = [a for a in assets if a.project_id == project_id]
         next_cursor = None
         # 按 id 取，不走"每个项目最新一版"——用户归类的可能正是某个旧版本，
         # 用最新一版去过滤会让它在自己的文件夹里凭空消失。
         runs = await agent_service.list_runs_by_ids(
             db, org_id=org_id, run_ids=ids.get("profile", [])
         )
-        entries = await repo.list_character_entries_by_ids(
-            db, org_id=org_id, entry_ids=ids.get("character", [])
+        # 独立角色档案不挂项目，按项目筛时同样一条都不返回。
+        entries = (
+            []
+            if project_id is not None
+            else await repo.list_character_entries_by_ids(
+                db, org_id=org_id, entry_ids=ids.get("character", [])
+            )
         )
 
     profiles = [

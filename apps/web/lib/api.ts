@@ -127,6 +127,8 @@ export type AgentRun = {
   error_code: string | null;
   output_json: Record<string, any> | null;
   created_at: string;
+  /** 还在跑时为 null。与 created_at 相减就是耗时，前端不另存开始时间。 */
+  finished_at: string | null;
 };
 
 export type Balance = { balance: number; reserved: number; total: number };
@@ -363,11 +365,18 @@ export type Library = {
 };
 
 export const assets = {
-  /** 不带 folderId 是"全部"视图；带上就只列那个文件夹里的东西。 */
-  library: (opts: { type?: string; folderId?: string } = {}) => {
+  /**
+   * 不带 folderId 是"全部"视图；带上就只列那个文件夹里的东西。
+   *
+   * 不带 projectId 是"全部项目"；带上就只列那个项目里的东西（项目内素材
+   * 页用）。**筛选在后端做**——前端拿全量再筛的话，limit 100 一到就会漏。
+   * 按项目筛时后端不返回独立角色档案：它们不挂任何项目。
+   */
+  library: (opts: { type?: string; folderId?: string; projectId?: string } = {}) => {
     const q = new URLSearchParams({ limit: "100" });
     if (opts.type) q.set("type", opts.type);
     if (opts.folderId) q.set("folder_id", opts.folderId);
+    if (opts.projectId) q.set("project_id", opts.projectId);
     return apiFetch<Library>(`/assets/library?${q}`);
   },
 

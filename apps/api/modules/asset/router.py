@@ -139,6 +139,7 @@ async def get_library(
     limit: int = Query(40, ge=1, le=100),
     cursor: str | None = None,
     folder_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> LibraryOut:
     """我的资产库：二进制资产 + 角色/场景档案 + 独立角色档案 + 文件夹 + 用量。
 
@@ -147,6 +148,10 @@ async def get_library(
 
     不带 folder_id 是"全部"视图（按项目分组展示由前端做）；
     带上就只列那个文件夹里的东西。
+
+    不带 project_id 是"全部项目"，与加这个参数之前完全一致；带上就只列
+    那个项目里的东西（项目内素材页用）。跨租户的 project_id 走
+    `project_service.get_project` 落 404，与其它带项目 id 的入口一致。
     """
     result = await library.get_library(
         db,
@@ -156,6 +161,7 @@ async def get_library(
         limit=limit,
         cursor=_decode_cursor(cursor),
         folder_id=folder_id,
+        project_id=project_id,
     )
     return LibraryOut(
         usage=_usage_out(result.usage),
