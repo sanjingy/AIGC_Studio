@@ -27,11 +27,6 @@ import { Notice, useNotice } from "./feedback";
  * 所以进行中的行画的是不确定进度条，并明说"进度未落库"，不编一个数字。
  */
 
-/** 后端 AgentRunOut（apps/api/modules/agent/schemas.py）有 finished_at，
- *  `lib/api.ts` 的 AgentRun 类型还没补上这一列。这里就地窄化而不去改共享文件
- *  ——共享基座这一轮是冻结的。真正接线时应该把它加进 lib/api.ts。 */
-type RunRow = AgentRun & { finished_at?: string | null };
-
 type Bucket = "all" | "running" | "waiting" | "done" | "failed";
 
 const TABS: { key: Bucket; label: string }[] = [
@@ -95,7 +90,7 @@ const ROLE_LABEL: Record<string, string> = {
   director: "导演编排",
 };
 
-function elapsed(from: string, to: string | null | undefined, now: number): string | null {
+function elapsed(from: string, to: string | null, now: number): string | null {
   const start = new Date(from).getTime();
   const end = to ? new Date(to).getTime() : now;
   const sec = Math.max(0, Math.round((end - start) / 1000));
@@ -106,7 +101,7 @@ function elapsed(from: string, to: string | null | undefined, now: number): stri
 }
 
 export function TaskCenter({ projectId }: { projectId: string }) {
-  const [rows, setRows] = useState<RunRow[]>([]);
+  const [rows, setRows] = useState<AgentRun[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [bucket, setBucket] = useState<Bucket>("all");
@@ -236,10 +231,10 @@ export function TaskCenter({ projectId }: { projectId: string }) {
   );
 }
 
-function RunRowView({ run, now }: { run: RunRow; now: number }) {
+function RunRowView({ run, now }: { run: AgentRun; now: number }) {
   const b = bucketOf(run.status);
   const tokens = run.tokens_in + run.tokens_out;
-  const time = elapsed(run.created_at, run.finished_at ?? null, now);
+  const time = elapsed(run.created_at, run.finished_at, now);
   const reason = run.error_code ? FAIL_REASON[run.error_code] : null;
 
   return (
