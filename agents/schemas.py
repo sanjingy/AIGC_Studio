@@ -9,9 +9,18 @@ spec 里的 `output_schema` 就是这里的类名。
 
 from __future__ import annotations
 
-from typing import Literal
+import hashlib
+import re
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+import structlog
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+log: structlog.stdlib.BoundLogger = structlog.get_logger(__name__)
+
+# 与 CharacterSheet.ref / SceneSheet.ref 上的 Field(pattern=...) 是同一条规则。
+# 改这里就要同步改那边，否则兜底会造出一个字段校验仍然不认的 ref。
+REF_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
 
 ROUTE_TYPES = Literal[
     "NOVEL_TO_ANIME",
@@ -305,8 +314,85 @@ class SceneSheet(_Strict):
     )
 
 
+def fallback_character_ref(name: str, index: int) -> str:
+    """给非法 ref 造一个合法替身。
+
+    后缀取人名的哈希，不取角色在列表里的下标。下标看着更简单，但它跨次
+    不稳定：同一个项目重跑角色阶段（revise 打回重做、加了一个角色、模型
+    换了个排序），同一个人物这次落在第 2 位下次落在第 3 位，ref 就从
+    `char_2` 变成 `char_3`。一致性引擎 `upsert_characters()` 按 ref 认人，
+    换了 ref 就当成新角色——库里同一个人出现两份 CharacterProfile，
+    而空出来的 `char_2` 还会被另一个人的外貌覆盖进去。
+    哈希后缀让"同一个人名 → 同一个 ref"，把这条路堵死。
+
+    人名也拿不到时（缺失或空串）才退回位置下标——此时没有任何可用于
+    稳定的信息，位置是唯一剩下的东西。
+    """
+    key = name.strip()
+    if not key:
+        return f"char_{index + 1}"
+    return f"char_{hashlib.blake2s(key.encode('utf-8'), digest_size=4).hexdigest()}"
+
+
 class CharacterSheets(_Strict):
     characters: list[CharacterSheet] = Field(min_length=1, max_length=30)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _rescue_refs(cls, data: Any) -> Any:
+        """非法 ref 在字段校验之前改写成兜底 ref。
+
+        提示词已经写明 ref 只能是小写 ASCII 标识符，但模型遇到中文、日文
+        假名、生僻字人名时仍会把原名直接塞进 ref（实测"绯色冴子"三次重试
+        都是同一个错）。少一个合法 ref 就让整份角色档案校验失败、角色阶段
+        500、项目卡死——代价和收益完全不成比例。这里宁可给一个不好看但能用的
+        ref，把失败降级成一条 warning。
+        """
+        if not isinstance(data, dict):
+            return data
+        characters = data.get("characters")
+        if not isinstance(characters, list):
+            return data
+
+        def normalized(item: object) -> str | None:
+            if not isinstance(item, dict):
+                return None
+            raw = item.get("ref")
+            if not isinstance(raw, str):
+                return None
+            candidate = raw.strip().lower()
+            return candidate if REF_PATTERN.match(candidate) else None
+
+        # 合法 ref 先占位，兜底 ref 不能撞上它们
+        taken = {ref for item in characters if (ref := normalized(item)) is not None}
+
+        rescued: list[Any] = []
+        for index, item in enumerate(characters):
+            candidate = normalized(item)
+            if candidate is not None:
+                rescued.append(item if item.get("ref") == candidate else {**item, "ref": candidate})
+                continue
+            if not isinstance(item, dict):
+                rescued.append(item)
+                continue
+
+            name = item.get("name")
+            ref = fallback_character_ref(name if isinstance(name, str) else "", index)
+            if ref in taken:
+                # 同名角色出现两次才会走到这里。加下标让它们各占一个 ref，
+                # 否则两个人会被一致性引擎合并成一个。
+                ref = f"{ref}_{index + 1}"
+            taken.add(ref)
+            log.warning(
+                "agent.character_ref_rescued",
+                name=name,
+                original_ref=item.get("ref"),
+                ref=ref,
+                index=index,
+            )
+            rescued.append({**item, "ref": ref})
+
+        return {**data, "characters": rescued}
 
 
 class SceneSheets(_Strict):

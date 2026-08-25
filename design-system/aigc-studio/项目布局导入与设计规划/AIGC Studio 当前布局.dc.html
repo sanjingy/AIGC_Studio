@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<style>
+:root{
+--bg:oklch(0.9842 0.0034 247.86);--surface:oklch(1 0 0);--surface-2:oklch(0.9683 0.0069 247.9);--surface-3:oklch(0.947 0.0097 252.81);
+--border:oklch(0.9288 0.0126 255.51);--border-strong:oklch(0.869 0.0198 252.89);
+--fg:oklch(0.2077 0.0398 265.75);--fg-muted:oklch(0.4455 0.0374 257.28);--fg-subtle:oklch(0.4924 0.0345 257.79);
+--primary:oklch(0.5109 0.0861 186.39);--primary-hover:oklch(0.4308 0.0714 187.5);--primary-fg:oklch(1 0 0);--primary-soft:oklch(0.9636 0.0129 185.1);
+--running:oklch(0.5553 0.1455 49);--running-soft:oklch(0.9677 0.0237 79.74);
+--success:oklch(0.5273 0.1371 150.07);--success-soft:oklch(0.9632 0.0189 157.87);
+--danger:oklch(0.5054 0.1905 27.52);--danger-soft:oklch(0.9566 0.0185 17.48);
+}
+html.dark{
+--bg:oklch(0.2077 0.0398 265.75);--surface:oklch(0.2449 0.0388 264.35);--surface-2:oklch(0.2795 0.0368 260.03);--surface-3:oklch(0.3717 0.0392 257.29);
+--border:oklch(0.3717 0.0392 257.29);--border-strong:oklch(0.4455 0.0374 257.28);
+--fg:oklch(0.9842 0.0034 247.86);--fg-muted:oklch(0.7107 0.0351 256.79);--fg-subtle:oklch(0.6847 0.0386 257.41);
+--primary:oklch(0.7845 0.1325 181.91);--primary-hover:oklch(0.7038 0.123 182.5);--primary-fg:oklch(0.2077 0.0398 265.75);--primary-soft:oklch(0.32 0.04 184);
+--running:oklch(0.8369 0.1644 84.43);--running-soft:oklch(0.33 0.05 75);
+--success:oklch(0.7227 0.192 149.58);--success-soft:oklch(0.31 0.05 150);
+--danger:oklch(0.7106 0.1661 22.22);--danger-soft:oklch(0.33 0.06 25);
+}
+html,body{margin:0;padding:0;height:100%}
+body{background:var(--bg);color:var(--fg);font-size:13px;line-height:18px;-webkit-font-smoothing:antialiased;font-family:"Plus Jakarta Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif}
+*{box-sizing:border-box}
+button{font:inherit}
+a{color:var(--primary);text-decoration:none}
+a:hover{color:var(--primary-hover)}
+@keyframes pulse-soft{0%,100%{opacity:1}50%{opacity:.45}}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</helmet>
+<div style="display:flex;height:100dvh;overflow:hidden">
+
+  <nav aria-label="主导航" style="display:flex;flex-direction:column;width:180px;flex-shrink:0;border-right:1px solid var(--border);background:var(--surface)">
+    <div style="display:flex;align-items:center;gap:8px;height:48px;border-bottom:1px solid var(--border);padding:0 12px">
+      <i data-lucide="clapperboard" width="16" height="16" style="color:var(--primary)"></i>
+      <span style="font-size:13px;font-weight:600;letter-spacing:-0.01em">AIGC Studio</span>
+    </div>
+    <ul style="display:flex;flex-direction:column;gap:2px;padding:8px;margin:0;list-style:none">
+      <li><button onClick="{{ goDashboard }}" style="{{ navDashboard }}"><i data-lucide="layout-grid" width="16" height="16"></i>项目</button></li>
+      <li><button onClick="{{ goTasks }}" style="{{ navTasks }}"><i data-lucide="list-checks" width="16" height="16"></i>任务中心</button></li>
+      <li><button onClick="{{ goAssets }}" style="{{ navAssets }}"><i data-lucide="folder-open" width="16" height="16"></i>资产库</button></li>
+      <li><button onClick="{{ goKeys }}" style="{{ navKeys }}"><i data-lucide="key-round" width="16" height="16"></i>模型密钥</button></li>
+    </ul>
+  </nav>
+
+  <div style="display:flex;min-width:0;flex:1;flex-direction:column">
+    <header style="display:flex;height:48px;flex-shrink:0;align-items:center;gap:12px;border-bottom:1px solid var(--border);background:var(--surface);padding:0 16px">
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+        <div style="display:flex;align-items:baseline;gap:6px;border-radius:6px;background:var(--surface-2);padding:4px 10px">
+          <span style="font-size:12px;color:var(--fg-subtle)">Credits</span>
+          <span style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums">48,650</span>
+          <span style="font-size:12px;color:var(--running);font-variant-numeric:tabular-nums">+1,200 预扣</span>
+        </div>
+        <button title="充值 ¥500（S5 只记账，未接支付通道）" style="display:flex;cursor:pointer;align-items:center;gap:4px;border-radius:6px;border:1px solid var(--border-strong);background:transparent;padding:4px 8px;font-size:12px;color:var(--fg-muted)">
+          <i data-lucide="plus" width="12" height="12"></i>充值
+        </button>
+        <button onClick="{{ toggleTheme }}" aria-label="切换主题" style="display:flex;width:28px;height:28px;cursor:pointer;align-items:center;justify-content:center;border-radius:6px;border:none;background:transparent;color:var(--fg-muted)">
+          <i data-lucide="moon" width="16" height="16"></i>
+        </button>
+        <button aria-label="退出登录" style="display:flex;width:28px;height:28px;cursor:pointer;align-items:center;justify-content:center;border-radius:6px;border:none;background:transparent;color:var(--fg-muted)">
+          <i data-lucide="log-out" width="16" height="16"></i>
+        </button>
+      </div>
+    </header>
+
+    <main style="min-height:0;flex:1;overflow-y:auto;padding:16px">
+
+      <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="项目" style="margin:0 auto;display:flex;max-width:900px;flex-direction:column;gap:16px">
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding:8px 12px">
+            <div style="display:flex;min-width:0;align-items:baseline;gap:8px"><h2 style="margin:0;font-size:13px;line-height:18px;font-weight:600;color:var(--fg)">新建项目</h2></div>
+          </div>
+          <form style="display:flex;align-items:flex-end;gap:12px;padding:12px">
+            <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+              <label for="new-title" style="font-size:13px;font-weight:500;color:var(--fg)">项目名</label>
+              <input id="new-title" placeholder="雾港迷案" style="height:36px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:0 10px;font-size:14px;color:var(--fg);font-family:inherit">
+            </div>
+            <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:36px;cursor:pointer;align-items:center;justify-content:center;gap:8px;border-radius:6px;border:1px solid transparent;background:var(--primary);padding:0 14px;font-size:14px;font-weight:500;color:var(--primary-fg)">
+              <i data-lucide="plus" width="14" height="14"></i>创建
+            </button>
+          </form>
+        </div>
+
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding:8px 12px">
+            <div style="display:flex;min-width:0;align-items:baseline;gap:8px">
+              <h2 style="margin:0;font-size:13px;line-height:18px;font-weight:600;color:var(--fg)">我的项目</h2>
+              <span style="font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">3 个</span>
+            </div>
+          </div>
+          <ul style="margin:0;padding:0;list-style:none">
+            <li style="border-bottom:1px solid var(--border)"><a href="#" onClick="{{ goProject }}" style="display:flex;align-items:center;gap:12px;padding:10px 12px;color:inherit">
+              <span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500">雾港迷案</span>
+              <span style="flex-shrink:0;font-size:12px;color:var(--fg-subtle)">comic_drama</span>
+              <span style="width:64px;flex-shrink:0;font-size:12px;color:var(--fg-muted)">生产中</span>
+              <span style="width:64px;flex-shrink:0;text-align:right;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">¥12.40</span>
+              <i data-lucide="arrow-right" width="14" height="14" style="flex-shrink:0;color:var(--fg-subtle)"></i>
+            </a></li>
+            <li style="border-bottom:1px solid var(--border)"><a href="#" onClick="{{ goProject }}" style="display:flex;align-items:center;gap:12px;padding:10px 12px;color:inherit">
+              <span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500">深空信使</span>
+              <span style="flex-shrink:0;font-size:12px;color:var(--fg-subtle)">未定路线</span>
+              <span style="width:64px;flex-shrink:0;font-size:12px;color:var(--fg-muted)">草稿</span>
+              <span style="width:64px;flex-shrink:0;text-align:right;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">—</span>
+              <i data-lucide="arrow-right" width="14" height="14" style="flex-shrink:0;color:var(--fg-subtle)"></i>
+            </a></li>
+            <li><a href="#" onClick="{{ goProject }}" style="display:flex;align-items:center;gap:12px;padding:10px 12px;color:inherit">
+              <span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500">山雨来时</span>
+              <span style="flex-shrink:0;font-size:12px;color:var(--fg-subtle)">short_drama</span>
+              <span style="width:64px;flex-shrink:0;font-size:12px;color:var(--fg-muted)">已完成</span>
+              <span style="width:64px;flex-shrink:0;text-align:right;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">¥38.05</span>
+              <i data-lucide="arrow-right" width="14" height="14" style="flex-shrink:0;color:var(--fg-subtle)"></i>
+            </a></li>
+          </ul>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isTasks }}">
+      <div data-screen-label="任务中心" style="margin:0 auto;display:flex;max-width:1000px;flex-direction:column;gap:16px">
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding:8px 12px">
+            <div style="display:flex;min-width:0;align-items:baseline;gap:8px">
+              <h2 style="margin:0;font-size:13px;line-height:18px;font-weight:600;color:var(--fg)">任务中心</h2>
+              <span style="font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">4 条 · 1 个进行中</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <span style="white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--fg-subtle)">
+                <span style="width:6px;height:6px;border-radius:9999px;background:var(--success)"></span>实时
+              </span>
+              <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;gap:6px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:0 10px;font-size:12px;font-weight:500;color:var(--fg)">跑一个任务</button>
+              <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;gap:6px;border-radius:6px;border:1px solid transparent;background:transparent;padding:0 10px;font-size:12px;font-weight:500;color:var(--fg-muted)">跑一个失败任务</button>
+            </div>
+          </div>
+          <ul style="margin:0;padding:0;list-style:none">
+            <li style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid var(--border)">
+              <span style="white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:4px;border-radius:9999px;border:1px solid color-mix(in oklch, var(--running) 25%, transparent);background:var(--running-soft);padding:2px 8px;font-size:12px;font-weight:500;white-space:nowrap;color:var(--running)"><i data-lucide="loader-2" width="12" height="12" style="animation:spin 1s linear infinite"></i>生成中</span>
+              <span style="width:112px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--fg-muted);font-variant-numeric:tabular-nums">render.shot</span>
+              <div style="min-width:0;flex:1"><div style="height:4px;overflow:hidden;border-radius:9999px;background:var(--surface-2)"><div style="height:100%;width:62%;background:var(--running)"></div></div></div>
+              <span style="width:40px;flex-shrink:0;text-align:right;font-size:12px;color:var(--fg-muted);font-variant-numeric:tabular-nums">62%</span>
+              <span style="width:64px;flex-shrink:0;text-align:right;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">—</span>
+            </li>
+            <li style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid var(--border)">
+              <span style="white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:4px;border-radius:9999px;border:1px solid color-mix(in oklch, var(--success) 25%, transparent);background:var(--success-soft);padding:2px 8px;font-size:12px;font-weight:500;white-space:nowrap;color:var(--success)"><i data-lucide="check" width="12" height="12"></i>已完成</span>
+              <span style="width:112px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--fg-muted);font-variant-numeric:tabular-nums">render.character</span>
+              <div style="min-width:0;flex:1"><div style="height:4px;overflow:hidden;border-radius:9999px;background:var(--surface-2)"><div style="height:100%;width:100%;background:var(--success)"></div></div></div>
+              <span style="width:40px;flex-shrink:0;text-align:right;font-size:12px;color:var(--fg-muted);font-variant-numeric:tabular-nums">100%</span>
+              <span style="width:64px;flex-shrink:0;text-align:right;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">¥1.80</span>
+            </li>
+            <li style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid var(--border)">
+              <span style="white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:4px;border-radius:9999px;border:1px solid color-mix(in oklch, var(--danger) 25%, transparent);background:var(--danger-soft);padding:2px 8px;font-size:12px;font-weight:500;white-space:nowrap;color:var(--danger)"><i data-lucide="x" width="12" height="12"></i>失败</span>
+              <span style="width:112px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--fg-muted);font-variant-numeric:tabular-nums">mock.fail</span>
+              <div style="min-width:0;flex:1"><div style="height:4px;overflow:hidden;border-radius:9999px;background:var(--surface-2)"><div style="height:100%;width:30%;background:var(--danger)"></div></div></div>
+              <span style="width:40px;flex-shrink:0;text-align:right;font-size:12px;color:var(--fg-muted);font-variant-numeric:tabular-nums">30%</span>
+              <span style="width:64px;flex-shrink:0;text-align:right;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">—</span>
+              <span style="width:160px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--danger)">UPSTREAM_TIMEOUT</span>
+            </li>
+            <li style="display:flex;align-items:center;gap:12px;padding:10px 12px">
+              <span style="white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:4px;border-radius:9999px;border:1px solid var(--border);background:var(--surface-2);padding:2px 8px;font-size:12px;font-weight:500;white-space:nowrap;color:var(--fg-muted)"><i data-lucide="clock" width="12" height="12"></i>排队中</span>
+              <span style="width:112px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--fg-muted);font-variant-numeric:tabular-nums">mock.echo</span>
+              <div style="min-width:0;flex:1"><div style="height:4px;overflow:hidden;border-radius:9999px;background:var(--surface-2)"><div style="height:100%;width:0%;background:var(--success)"></div></div></div>
+              <span style="width:40px;flex-shrink:0;text-align:right;font-size:12px;color:var(--fg-muted);font-variant-numeric:tabular-nums">0%</span>
+              <span style="width:64px;flex-shrink:0;text-align:right;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">—</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isAssets }}">
+      <div data-screen-label="资产库" style="margin:0 auto;display:flex;max-width:1000px;flex-direction:column;gap:16px">
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding:8px 12px">
+            <div style="display:flex;min-width:0;align-items:baseline;gap:8px">
+              <h2 style="margin:0;font-size:13px;line-height:18px;font-weight:600;color:var(--fg)">资产库容量</h2>
+              <span style="font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">1.6 GB / 10 GB · 16%</span>
+            </div>
+          </div>
+          <div style="padding:12px">
+            <div style="height:8px;overflow:hidden;border-radius:9999px;background:var(--surface-2)"><div style="height:100%;width:16%;background:var(--primary)"></div></div>
+            <p style="margin:8px 0 0;font-size:12px;color:var(--fg-subtle)">只有图片、视频这类文件占用容量；角色档案与场景档案不计入。</p>
+          </div>
+        </div>
+
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 12px">
+            <button aria-pressed="true" style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;gap:6px;border-radius:6px;border:1px solid transparent;background:var(--primary);padding:0 10px;font-size:12px;color:var(--primary-fg)"><span>全部</span></button>
+            <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;gap:6px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:0 10px;font-size:12px;color:var(--fg)"><span>主角设定</span><span style="opacity:.7;font-variant-numeric:tabular-nums">6</span></button>
+            <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;gap:6px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:0 10px;font-size:12px;color:var(--fg)"><span>码头场景</span><span style="opacity:.7;font-variant-numeric:tabular-nums">4</span></button>
+            <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;gap:6px;border-radius:6px;border:1px solid transparent;background:transparent;padding:0 10px;font-size:12px;font-weight:500;color:var(--fg-muted)"><i data-lucide="plus" width="14" height="14"></i>新建文件夹</button>
+          </div>
+        </div>
+
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding:8px 12px">
+            <div style="display:flex;min-width:0;align-items:baseline;gap:8px">
+              <h2 style="margin:0;font-size:13px;line-height:18px;font-weight:600;color:var(--fg)">从描述创建角色</h2>
+              <span style="font-size:12px;color:var(--fg-subtle)">不需要先建项目</span>
+            </div>
+            <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;gap:6px;border-radius:6px;border:1px solid transparent;background:var(--primary);padding:0 10px;font-size:12px;font-weight:500;color:var(--primary-fg)">生成角色档案</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;padding:12px">
+            <label for="char-ref" style="font-size:12px;color:var(--fg-muted)">写一段角色设定：外貌、性格、处境都可以。写得越具体，出来的档案越能直接拿去出图。</label>
+            <textarea id="char-ref" rows="4" placeholder="例：三十出头的女法医，常年值夜班，说话很短。左眉有一道旧疤，习惯把头发全部束起来，穿洗得发白的深蓝工装。" style="width:100%;resize:vertical;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:8px 10px;font-size:13px;line-height:18px;color:var(--fg);font-family:inherit"></textarea>
+            <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px">
+              <p style="margin:0;font-size:12px;color:var(--fg-subtle)">会调用一次模型并扣除 Credits。</p>
+              <span style="font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">0 / 6000</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding:8px 12px">
+            <div style="display:flex;min-width:0;align-items:baseline;gap:8px">
+              <h2 style="margin:0;font-size:13px;line-height:18px;font-weight:600;color:var(--fg)">图片与视频</h2>
+              <span style="font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">4 个文件</span>
+            </div>
+          </div>
+          <ul style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px;margin:0;list-style:none">
+            <li style="overflow:hidden;border-radius:6px;border:1px solid var(--border);background:var(--surface-2)">
+              <div style="display:flex;aspect-ratio:1;align-items:center;justify-content:center;background:var(--surface-3)"><i data-lucide="image" width="32" height="32" style="color:var(--fg-subtle)"></i></div>
+              <div style="padding:6px 8px">
+                <p style="margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--fg)">char_lin_base.png</p>
+                <p style="margin:2px 0 0;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">1.2 MB · 2026/8/22</p>
+                <div style="margin-top:4px"><select aria-label="归到文件夹" style="height:24px;max-width:144px;cursor:pointer;border-radius:4px;border:1px solid var(--border);background:var(--surface);padding:0 4px;font-size:12px;color:var(--fg-muted);font-family:inherit"><option>未分类</option><option>主角设定</option></select></div>
+              </div>
+            </li>
+            <li style="overflow:hidden;border-radius:6px;border:1px solid var(--border);background:var(--surface-2)">
+              <div style="display:flex;aspect-ratio:1;align-items:center;justify-content:center;background:var(--surface-3)"><i data-lucide="image" width="32" height="32" style="color:var(--fg-subtle)"></i></div>
+              <div style="padding:6px 8px">
+                <p style="margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--fg)">shot_014.png</p>
+                <p style="margin:2px 0 0;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">860 KB · 2026/8/22</p>
+                <div style="margin-top:4px"><select aria-label="归到文件夹" style="height:24px;max-width:144px;cursor:pointer;border-radius:4px;border:1px solid var(--border);background:var(--surface);padding:0 4px;font-size:12px;color:var(--fg-muted);font-family:inherit"><option>未分类</option><option>码头场景</option></select></div>
+              </div>
+            </li>
+            <li style="overflow:hidden;border-radius:6px;border:1px solid var(--border);background:var(--surface-2)">
+              <div style="display:flex;aspect-ratio:1;align-items:center;justify-content:center;background:var(--surface-3)"><i data-lucide="file-video" width="32" height="32" style="color:var(--fg-subtle)"></i></div>
+              <div style="padding:6px 8px">
+                <p style="margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--fg)">ep01_rough.mp4</p>
+                <p style="margin:2px 0 0;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">42 MB · 2026/8/21</p>
+                <div style="margin-top:4px"><select aria-label="归到文件夹" style="height:24px;max-width:144px;cursor:pointer;border-radius:4px;border:1px solid var(--border);background:var(--surface);padding:0 4px;font-size:12px;color:var(--fg-muted);font-family:inherit"><option>未分类</option></select></div>
+              </div>
+            </li>
+            <li style="overflow:hidden;border-radius:6px;border:1px solid var(--border);background:var(--surface-2)">
+              <div style="display:flex;aspect-ratio:1;align-items:center;justify-content:center;background:var(--surface-3)"><i data-lucide="music" width="32" height="32" style="color:var(--fg-subtle)"></i></div>
+              <div style="padding:6px 8px">
+                <p style="margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--fg)">bgm_harbor.wav</p>
+                <p style="margin:2px 0 0;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">18 MB · 2026/8/20</p>
+                <div style="margin-top:4px"><select aria-label="归到文件夹" style="height:24px;max-width:144px;cursor:pointer;border-radius:4px;border:1px solid var(--border);background:var(--surface);padding:0 4px;font-size:12px;color:var(--fg-muted);font-family:inherit"><option>未分类</option></select></div>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <section style="display:flex;flex-direction:column;gap:12px">
+          <h2 style="margin:0;padding:0 4px;font-size:13px;font-weight:600;color:var(--fg)">角色与场景档案<span style="margin-left:8px;font-size:12px;font-weight:400;color:var(--fg-subtle);font-variant-numeric:tabular-nums">3 份 · 2 个项目</span></h2>
+          <p style="margin:0;padding:0 4px;font-size:12px;color:var(--fg-subtle)">雾港迷案</p>
+          <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;padding:8px 12px">
+              <button style="display:flex;min-width:0;flex:1;cursor:pointer;align-items:baseline;gap:8px;border:none;background:transparent;text-align:left;padding:0">
+                <i data-lucide="chevron-right" width="14" height="14" style="flex-shrink:0;align-self:center;color:var(--fg-subtle)"></i>
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--fg)">角色档案</span>
+                <span style="flex-shrink:0;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">5 个角色</span>
+              </button>
+              <select aria-label="归到文件夹" style="height:24px;max-width:144px;cursor:pointer;border-radius:4px;border:1px solid var(--border);background:var(--surface);padding:0 4px;font-size:12px;color:var(--fg-muted);font-family:inherit"><option>未分类</option><option>主角设定</option></select>
+            </div>
+          </div>
+          <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;padding:8px 12px">
+              <button style="display:flex;min-width:0;flex:1;cursor:pointer;align-items:baseline;gap:8px;border:none;background:transparent;text-align:left;padding:0">
+                <i data-lucide="chevron-right" width="14" height="14" style="flex-shrink:0;align-self:center;color:var(--fg-subtle)"></i>
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--fg)">场景档案</span>
+                <span style="flex-shrink:0;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">7 个场景 · 现代</span>
+              </button>
+              <select aria-label="归到文件夹" style="height:24px;max-width:144px;cursor:pointer;border-radius:4px;border:1px solid var(--border);background:var(--surface);padding:0 4px;font-size:12px;color:var(--fg-muted);font-family:inherit"><option>未分类</option><option>码头场景</option></select>
+            </div>
+          </div>
+        </section>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isKeys }}">
+      <div data-screen-label="模型密钥" style="margin:0 auto;display:flex;max-width:720px;flex-direction:column;gap:12px">
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding:8px 12px">
+            <div style="display:flex;min-width:0;align-items:baseline;gap:8px">
+              <h2 style="margin:0;font-size:13px;line-height:18px;font-weight:600;color:var(--fg)">模型密钥</h2>
+              <span style="font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">1/3 已配置</span>
+            </div>
+          </div>
+          <p style="margin:0;padding:10px 12px;font-size:12px;color:var(--fg-subtle)">配置自己的上游账号后，对应能力的调用将改走你的账号计费，平台只按存储、审核这类实际发生的成本收取少量 Credits。未配置的能力使用平台默认额度。</p>
+        </div>
+
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;padding:10px 12px">
+            <div style="display:flex;min-width:0;flex-direction:column;gap:2px">
+              <span style="font-size:13px;font-weight:500;color:var(--fg)">文本生成</span>
+              <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--fg-muted)">sk-••••••••4f2a</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="border-radius:9999px;background:var(--surface-2);padding:2px 8px;font-size:12px;white-space:nowrap;color:var(--fg-subtle)">已配置 · OpenAI</span>
+              <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:0 10px;font-size:12px;font-weight:500;color:var(--fg)">更换</button>
+              <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;border-radius:6px;border:1px solid transparent;background:transparent;padding:0 10px;font-size:12px;font-weight:500;color:var(--fg-muted)">移除</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;padding:10px 12px">
+            <div style="display:flex;min-width:0;flex-direction:column;gap:2px">
+              <span style="font-size:13px;font-weight:500;color:var(--fg)">图片生成</span>
+              <span style="font-size:12px;color:var(--fg-subtle)">使用平台默认额度计费</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="border-radius:9999px;background:var(--surface-2);padding:2px 8px;font-size:12px;white-space:nowrap;color:var(--fg-subtle)">未配置</span>
+              <button aria-expanded="true" style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:0 10px;font-size:12px;font-weight:500;color:var(--fg)">配置</button>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--border);padding:10px 12px">
+            <label for="key-image" style="font-size:12px;font-weight:500;color:var(--fg)">火山引擎 API Key</label>
+            <div style="position:relative;flex:1">
+              <input id="key-image" type="password" placeholder="粘贴你的 API Key" style="height:36px;width:100%;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:0 36px 0 10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:var(--fg)">
+              <button aria-label="显示密钥" style="position:absolute;top:50%;right:6px;display:flex;width:24px;height:24px;transform:translateY(-50%);cursor:pointer;align-items:center;justify-content:center;border:none;border-radius:4px;background:transparent;color:var(--fg-subtle)"><i data-lucide="eye" width="14" height="14"></i></button>
+            </div>
+            <p style="margin:0;font-size:12px;color:var(--fg-subtle)">密钥会被加密后保存，服务端无法再读出明文；提交前可以先测试连接。配置后，图片生成的调用将改走你自己的账号计费。</p>
+            <div style="display:flex;align-items:center;gap:8px">
+              <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;gap:6px;border-radius:6px;border:1px solid transparent;background:var(--primary);padding:0 10px;font-size:12px;font-weight:500;color:var(--primary-fg);opacity:.45">保存</button>
+              <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;gap:6px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:0 10px;font-size:12px;font-weight:500;color:var(--fg);opacity:.45">测试连接</button>
+              <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;gap:6px;border-radius:6px;border:1px solid transparent;background:transparent;padding:0 10px;font-size:12px;font-weight:500;color:var(--fg-muted)">取消</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;padding:10px 12px">
+            <div style="display:flex;min-width:0;flex-direction:column;gap:2px">
+              <span style="font-size:13px;font-weight:500;color:var(--fg)">视频生成</span>
+              <span style="font-size:12px;color:var(--fg-subtle)">使用平台默认额度计费</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="border-radius:9999px;background:var(--surface-2);padding:2px 8px;font-size:12px;white-space:nowrap;color:var(--fg-subtle)">未配置</span>
+              <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:0 10px;font-size:12px;font-weight:500;color:var(--fg)">配置</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isProject }}">
+      <div data-screen-label="项目详情" style="margin:0 auto;display:flex;max-width:1000px;flex-direction:column;gap:16px">
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding:8px 12px">
+            <div style="display:flex;min-width:0;align-items:baseline;gap:8px">
+              <h2 style="margin:0;font-size:13px;line-height:18px;font-weight:600;color:var(--fg)">雾港迷案</h2>
+              <span style="font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">comic_drama · 42 镜</span>
+            </div>
+          </div>
+          <ol aria-label="生产阶段" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:8px 12px;margin:0;list-style:none">
+            <li style="display:flex;align-items:center;gap:4px"><button style="white-space:nowrap;cursor:pointer;border:none;border-radius:9999px;background:transparent;padding:2px 8px;font-size:12px;color:var(--success)"><i data-lucide="check" width="12" height="12" style="margin-right:2px;display:inline;vertical-align:-2px"></i>路线</button></li>
+            <li style="display:flex;align-items:center;gap:4px"><span style="height:1px;width:16px;background:var(--border-strong)"></span><button style="white-space:nowrap;cursor:pointer;border:none;border-radius:9999px;background:transparent;padding:2px 8px;font-size:12px;color:var(--success)"><i data-lucide="check" width="12" height="12" style="margin-right:2px;display:inline;vertical-align:-2px"></i>情节目录</button></li>
+            <li style="display:flex;align-items:center;gap:4px"><span style="height:1px;width:16px;background:var(--border-strong)"></span><button style="white-space:nowrap;cursor:pointer;border:none;border-radius:9999px;background:transparent;padding:2px 8px;font-size:12px;color:var(--success)"><i data-lucide="check" width="12" height="12" style="margin-right:2px;display:inline;vertical-align:-2px"></i>剧本</button></li>
+            <li style="display:flex;align-items:center;gap:4px"><span style="height:1px;width:16px;background:var(--border-strong)"></span><button style="white-space:nowrap;cursor:pointer;border:none;border-radius:9999px;background:transparent;padding:2px 8px;font-size:12px;color:var(--success)"><i data-lucide="check" width="12" height="12" style="margin-right:2px;display:inline;vertical-align:-2px"></i>确认剧本</button></li>
+            <li style="display:flex;align-items:center;gap:4px"><span style="height:1px;width:16px;background:var(--border-strong)"></span><button style="white-space:nowrap;cursor:pointer;border:none;border-radius:9999px;background:var(--primary-soft);padding:2px 8px;font-size:12px;font-weight:500;color:var(--primary)">角色</button></li>
+            <li style="display:flex;align-items:center;gap:4px"><span style="height:1px;width:16px;background:var(--border-strong)"></span><span style="border-radius:9999px;padding:2px 8px;font-size:12px;color:var(--fg-subtle)">场景</span></li>
+            <li style="display:flex;align-items:center;gap:4px"><span style="height:1px;width:16px;background:var(--border-strong)"></span><span style="border-radius:9999px;padding:2px 8px;font-size:12px;color:var(--fg-subtle)">分镜</span></li>
+            <li style="display:flex;align-items:center;gap:4px"><span style="height:1px;width:16px;background:var(--border-strong)"></span><span style="border-radius:9999px;padding:2px 8px;font-size:12px;color:var(--fg-subtle)">确认分镜</span></li>
+            <li style="display:flex;align-items:center;gap:4px"><span style="height:1px;width:16px;background:var(--border-strong)"></span><span style="border-radius:9999px;padding:2px 8px;font-size:12px;color:var(--fg-subtle)">完成</span></li>
+          </ol>
+        </div>
+
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;max-height:320px;flex-direction:column;gap:10px;overflow-y:auto;border-bottom:1px solid var(--border);padding:12px">
+            <div style="display:flex;justify-content:flex-end">
+              <div style="max-width:80%;border-radius:6px;background:var(--primary-soft);padding:6px 10px;font-size:13px;color:var(--fg)">把这篇小说做成 5 分钟悬疑漫剧，主角是一名侦探，故事发生在雾锁的旧码头。</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <div style="max-width:85%;border-radius:6px;background:var(--surface-2);padding:6px 10px;font-size:13px;color:var(--fg-muted)"><span style="margin-right:6px;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">v1</span>已按漫剧路线拆出 12 个情节节点，剧本 2 集 9 场，主角定为林见夏。</div>
+            </div>
+            <div style="display:flex;justify-content:flex-end">
+              <div style="max-width:80%;border-radius:6px;background:var(--primary-soft);padding:6px 10px;font-size:13px;color:var(--fg)">把女主的职业改成法医，说话更短一些。</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <div style="max-width:85%;border-radius:6px;background:var(--surface-2);padding:6px 10px;font-size:13px;color:var(--fg-muted)"><span style="margin-right:6px;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">v2</span>已改。林见夏改为市局法医，全部对白缩短，钩子保持不变。</div>
+              <ul style="display:flex;flex-wrap:wrap;gap:4px;padding-left:4px;margin:0;list-style:none">
+                <li style="border-radius:4px;background:var(--surface-2);padding:2px 6px;font-size:12px;color:var(--fg-subtle)">characters[0].occupation</li>
+                <li style="border-radius:4px;background:var(--surface-2);padding:2px 6px;font-size:12px;color:var(--fg-subtle)">episodes[0].scenes[2].beats</li>
+              </ul>
+            </div>
+          </div>
+
+          <div role="group" aria-label="改哪一步" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:10px 12px 0">
+            <span style="margin-right:4px;font-size:12px;color:var(--fg-subtle)">改</span>
+            <button style="white-space:nowrap;cursor:pointer;border:none;border-radius:6px;background:transparent;padding:2px 8px;font-size:12px;color:var(--fg-subtle)">情节目录</button>
+            <button style="white-space:nowrap;cursor:pointer;border:none;border-radius:6px;background:transparent;padding:2px 8px;font-size:12px;color:var(--fg-subtle)">剧本</button>
+            <button aria-pressed="true" style="white-space:nowrap;cursor:pointer;border:none;border-radius:6px;background:var(--primary-soft);padding:2px 8px;font-size:12px;font-weight:500;color:var(--primary)">角色</button>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:8px;padding:12px">
+            <textarea rows="2" aria-label="修改角色" placeholder="说说角色要怎么改，Enter 发送" style="resize:none;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:8px 10px;font-size:13px;line-height:18px;color:var(--fg);font-family:inherit"></textarea>
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+              <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;gap:6px;border-radius:6px;border:1px solid transparent;background:var(--primary);padding:0 10px;font-size:12px;font-weight:500;color:var(--primary-fg)"><i data-lucide="corner-down-left" width="14" height="14"></i>发送</button>
+              <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;gap:6px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:0 10px;font-size:12px;font-weight:500;color:var(--fg)"><i data-lucide="sparkles" width="14" height="14"></i>继续生成</button>
+              <span style="font-size:12px;color:var(--fg-subtle)">每次发送都是一次真实 LLM 调用，会消耗 Credits</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="group-story" style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;border-bottom:1px solid var(--border);padding:8px 12px">
+            <button style="display:flex;min-width:0;flex:1;cursor:pointer;align-items:baseline;gap:8px;border:none;background:transparent;padding:0;text-align:left">
+              <i data-lucide="chevron-right" width="14" height="14" style="flex-shrink:0;align-self:center;color:var(--fg-subtle);transform:rotate(90deg)"></i>
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--fg)">故事</span>
+              <span style="flex-shrink:0;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">12 个节点 · 9 场景 · 台词约 4200 字 · 《雾港迷案》 · 2 集 · 覆盖 12 个节点</span>
+            </button>
+          </div>
+          <div>
+            <section aria-label="情节目录" style="display:flex;flex-direction:column;gap:8px;padding:12px;border-bottom:1px solid var(--border)">
+              <p style="margin:0;font-size:13px;color:var(--fg-muted)">一名市局法医在旧码头的无名女尸案里，认出了自己失踪七年的姐姐的旧疤。</p>
+              <p style="margin:0;font-size:12px;color:var(--fg-subtle)">核心冲突：查清真相就要揭开自己家的旧案。</p>
+              <ol style="margin:4px 0 0;display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:0;list-style:none">
+                <li style="display:flex;gap:8px;font-size:12px"><span style="width:20px;flex-shrink:0;color:var(--fg-subtle);font-variant-numeric:tabular-nums">1</span><span style="color:var(--fg-muted)">雾夜码头发现无名女尸</span></li>
+                <li style="display:flex;gap:8px;font-size:12px"><span style="width:20px;flex-shrink:0;color:var(--fg-subtle);font-variant-numeric:tabular-nums">2</span><span style="color:var(--fg-muted)">林见夏在尸检中看到旧疤</span></li>
+                <li style="display:flex;gap:8px;font-size:12px"><span style="width:20px;flex-shrink:0;color:var(--fg-subtle);font-variant-numeric:tabular-nums">3</span><span style="color:var(--fg-muted)">档案室里七年前的卷宗被抽走</span></li>
+                <li style="display:flex;gap:8px;font-size:12px"><span style="width:20px;flex-shrink:0;color:var(--fg-subtle);font-variant-numeric:tabular-nums">4</span><span style="color:var(--fg-muted)">老刑警周立提醒她别再往下查</span></li>
+              </ol>
+            </section>
+            <section aria-label="剧本" style="display:flex;flex-direction:column;gap:12px;padding:12px">
+              <p style="margin:0;font-size:13px;color:var(--fg-muted)">法医林见夏在一桩码头浮尸案中撞见七年前的旧案，越查越发现真相与自己有关。</p>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="font-size:13px;font-weight:500">第 1 集 雾里的手</div>
+                <div style="border-radius:6px;background:var(--surface-2);padding:8px 10px">
+                  <div style="font-size:12px;color:var(--fg-subtle)">S1-01　【旧码头 - 夜/雾】</div>
+                  <div style="margin-top:4px;display:flex;flex-direction:column;gap:2px;font-size:12px">
+                    <p style="margin:0;color:var(--fg-muted)">△探照灯扫过水面，警戒线在风里绷紧。</p>
+                    <p style="margin:0;color:var(--fg-muted)">【音效：远处的汽笛，两声】</p>
+                    <p style="margin:0;color:var(--fg-muted)"><span style="color:var(--fg)">林见夏（平静）</span>：她在水里泡了不止一夜。</p>
+                    <p style="margin:0;color:var(--primary)">【钩子】她翻起尸体左眉时，手停住了。</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div id="group-characters" style="border:1px solid color-mix(in oklch, var(--running) 40%, transparent);background:var(--surface);border-radius:6px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;padding:8px 12px">
+            <button style="display:flex;min-width:0;flex:1;cursor:pointer;align-items:baseline;gap:8px;border:none;background:transparent;padding:0;text-align:left">
+              <i data-lucide="chevron-right" width="14" height="14" style="flex-shrink:0;align-self:center;color:var(--fg-subtle)"></i>
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--fg)">角色</span>
+              <span style="flex-shrink:0;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">5 个角色</span>
+            </button>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--running)"><span style="width:6px;height:6px;border-radius:9999px;background:var(--running)"></span>上游已更新，建议同步</span>
+              <button style="white-space:nowrap;flex-shrink:0;display:inline-flex;height:28px;cursor:pointer;align-items:center;justify-content:center;gap:6px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);padding:0 10px;font-size:12px;font-weight:500;color:var(--fg)"><i data-lucide="refresh-cw" width="14" height="14"></i>同步最新设定</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="group-scenes" style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;padding:8px 12px">
+            <button style="display:flex;min-width:0;flex:1;cursor:pointer;align-items:baseline;gap:8px;border:none;background:transparent;padding:0;text-align:left">
+              <i data-lucide="chevron-right" width="14" height="14" style="flex-shrink:0;align-self:center;color:var(--fg-subtle)"></i>
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--fg)">场景</span>
+              <span style="flex-shrink:0;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">7 个场景 · 现代</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="group-runs" style="border:1px solid var(--border);background:var(--surface);border-radius:6px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;padding:8px 12px">
+            <button style="display:flex;min-width:0;flex:1;cursor:pointer;align-items:baseline;gap:8px;border:none;background:transparent;padding:0;text-align:left">
+              <i data-lucide="chevron-right" width="14" height="14" style="flex-shrink:0;align-self:center;color:var(--fg-subtle)"></i>
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--fg)">Agent 运行</span>
+              <span style="flex-shrink:0;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">9 次</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dashboard&quot;,&quot;project&quot;,&quot;tasks&quot;,&quot;assets&quot;,&quot;keys&quot;],&quot;default&quot;:&quot;dashboard&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;default&quot;:&quot;light&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const NAV_BASE = "white-space:nowrap;display:flex;width:100%;align-items:center;gap:10px;border-radius:6px;border:none;padding:6px 10px;font-size:13px;cursor:pointer;text-align:left;";
+const NAV_ON = NAV_BASE + "background:var(--primary-soft);font-weight:500;color:var(--primary)";
+const NAV_OFF = NAV_BASE + "background:transparent;color:var(--fg-muted)";
+
+class Component extends DCLogic {
+  state = { route: null, dark: null };
+
+  get route() { return this.state.route ?? this.props.screen ?? "dashboard"; }
+  get dark() { return this.state.dark ?? this.props.theme === "dark"; }
+
+  applyTheme() {
+    document.documentElement.classList.toggle("dark", this.dark);
+  }
+  icons() {
+    if (window.lucide) window.lucide.createIcons();
+  }
+  componentDidMount() { this.applyTheme(); this.icons(); setTimeout(() => this.icons(), 400); }
+  componentDidUpdate() { this.applyTheme(); this.icons(); }
+
+  go(route) { return () => this.setState({ route }); }
+
+  renderVals() {
+    const r = this.route;
+    const nav = (key) => (r === key || (key === "dashboard" && r === "project") ? NAV_ON : NAV_OFF);
+    return {
+      isDashboard: r === "dashboard",
+      isTasks: r === "tasks",
+      isAssets: r === "assets",
+      isKeys: r === "keys",
+      isProject: r === "project",
+      navDashboard: nav("dashboard"),
+      navTasks: nav("tasks"),
+      navAssets: nav("assets"),
+      navKeys: nav("keys"),
+      goDashboard: this.go("dashboard"),
+      goTasks: this.go("tasks"),
+      goAssets: this.go("assets"),
+      goKeys: this.go("keys"),
+      goProject: (e) => { e.preventDefault(); this.setState({ route: "project" }); },
+      toggleTheme: () => this.setState({ dark: !this.dark }),
+    };
+  }
+}
+</script>
+</body>
+</html>

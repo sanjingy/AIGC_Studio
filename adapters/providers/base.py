@@ -7,7 +7,41 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Protocol
+
+from apps.api.core.logging import get_logger
+
+log = get_logger(__name__)
+
+
+class KeySource(StrEnum):
+    """这次调用用的是谁的 Key（ADR-027）。
+
+    **只有来源这个枚举可以外传**——不是 Key、不是尾号、不是密文。
+    有了它才能验证"配了自有 Key 的用户确实在用自己的 Key"这件事，
+    而不是只能看计费数字倒推：计费走的是"库里有没有这一行"，
+    真实调用走的是"解密出来的那把 Key"，这两条路径完全可能背离，
+    而背离的方向恰好是平台掏钱、用户按折扣价付款。
+    """
+
+    PLATFORM = "platform"  # 平台自己的 Key（环境变量）
+    ORG = "org"  # 该 org 自己配置的 Key（provider_credentials）
+
+
+def signal_key_source(*, provider_id: str, model_id: str, key_source: KeySource) -> None:
+    """在真正发出上游请求的那一层记下 Key 的来源。
+
+    记在适配器里而不是 Gateway 里：Gateway 记的是"我打算用哪把"，
+    适配器记的是"实际拿着哪把去请求"——中间任何一次传参错位
+    （这个仓库出过一次：DeepSeek 拿着万相的 Key）都只有后者能发现。
+    """
+    log.info(
+        "provider.call",
+        provider_id=provider_id,
+        model_id=model_id,
+        key_source=key_source.value,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +86,7 @@ class ImageResult:
 class TextProvider(Protocol):
     provider_id: str
     model_id: str
+    key_source: KeySource
 
     async def generate_text(self, request: TextRequest) -> TextResponse: ...
 
@@ -59,6 +94,7 @@ class TextProvider(Protocol):
 class ImageProvider(Protocol):
     provider_id: str
     model_id: str
+    key_source: KeySource
 
     async def generate_image(self, request: ImageRequest) -> ImageResult: ...
 
@@ -73,3 +109,16 @@ def usage_of(payload: dict[str, Any]) -> tuple[int, int, int]:
         int(usage.get("completion_tokens", 0)),
         int(detail.get("reasoning_tokens", 0)),
     )
+
+
+class KeyVerifier(Protocol):
+    """能验证一把 Key 是否可用的 Provider（ADR-025 的"测试连接"）。
+
+    验证必须走**不产生生成费用**的端点：用户点一下"测试连接"就烧一张图，
+    这个按钮就没人敢点了。返回一句可直接展示给用户的结论，
+    失败则抛 :class:`AppError`，由 Gateway 统一脱敏后转成探测结果。
+    """
+
+    provider_id: str
+
+    async def verify_key(self) -> str: ...

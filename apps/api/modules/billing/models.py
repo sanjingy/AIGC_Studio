@@ -129,3 +129,36 @@ class ModelPricing(BaseEntity):
     credit_price: Mapped[int] = mapped_column(BigInteger, nullable=False)  # 售价，Credits
 
     __table_args__ = (Index("ix_model_pricing_model", "model_id", "created_at"),)
+
+
+class ProviderCredential(OrgEntity):
+    """用户自带的上游 Key（BYOK，ADR-025）。
+
+    放在 billing 而不是 gateway：这张表存在的理由是计费——配了自己的 Key，
+    该 capability 的估价就跳过 `model_pricing` 的 provider_cost 加价，
+    只收 `pricing_rules` 里的隐性成本档位。gateway 只是它的消费方，
+    且 gateway 至今没有任何持久化层。
+
+    **只存密文**：`key_encrypted` 是 `apps/api/core/crypto.py` 的
+    AES-GCM 产物，明文只在 Gateway 解密后于内存中存在一次。
+    不回显前端、不进日志、不进 `input_json`（09_Database.md §12）。
+    """
+
+    __tablename__ = "provider_credentials"
+
+    # 与 ADR-024 / Skill 的 model_policy 用同一套 capability 概念，
+    # 例如 text_generation / image_generation。不复制一份枚举到这里：
+    # 能配哪些由 Skill 的 model_policy.user_selectable 决定。
+    capability: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_id: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+
+    created_by: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+
+    __table_args__ = (
+        # 一个 org 同一个 capability 只挂一把 Key，本轮不做多把轮换。
+        # 注意：唯一约束不排除软删行，所以"换 Key"要走原地 UPDATE，
+        # 别做成"软删旧的再插新的"——那会撞这条约束。
+        UniqueConstraint("org_id", "capability", name="uq_provider_credentials_org_capability"),
+    )

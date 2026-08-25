@@ -25,10 +25,37 @@ from apps.api.modules.asset import repository as repo
 from apps.api.modules.asset import storage
 from apps.api.modules.asset.mime import asset_type_for, sanitize_filename
 from apps.api.modules.asset.models import Asset
+from apps.api.modules.billing import service as billing_service
 
 log = get_logger(__name__)
 
 MAX_PAGE_SIZE = 100
+
+# 单用户资产库容量上限，走 pricing_rules（ADR-014）。
+# 这里只写**键名**，数值在库里（迁移 a1f3c07b52d4 灌的种子 = 1 GiB）。
+# 写成 Python 常量的话，调一次容量要发一次版；而且分发出去的代码里
+# 冻着一个随时会变的运营数字，比没有这个数字更糟。
+QUOTA_RULE_KEY = "user_storage_quota_bytes"
+
+
+@dataclass(frozen=True, slots=True)
+class QuotaUsage:
+    used_bytes: int
+    #: None = 库里没配这条规则，等于不限容量
+    quota_bytes: int | None
+
+    @property
+    def percent_used(self) -> int:
+        """整数百分比。前端画进度条用，不需要小数，也不引入浮点。"""
+        if not self.quota_bytes:
+            return 0
+        return min(100, self.used_bytes * 100 // self.quota_bytes)
+
+    @property
+    def free_bytes(self) -> int | None:
+        if self.quota_bytes is None:
+            return None
+        return max(0, self.quota_bytes - self.used_bytes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +63,53 @@ class UploadTicket:
     asset: Asset
     upload_url: str
     expires_at: datetime
+
+
+async def quota_usage(
+    db: AsyncSession, *, org_id: uuid.UUID, owner_user_id: uuid.UUID
+) -> QuotaUsage:
+    """某个用户的资产库用量与配额。"""
+    rules = await billing_service.rules(db)
+    used = await repo.sum_owned_bytes(db, org_id=org_id, owner_user_id=owner_user_id)
+    return QuotaUsage(used_bytes=used, quota_bytes=rules.get(QUOTA_RULE_KEY))
+
+
+async def ensure_quota(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    owner_user_id: uuid.UUID,
+    additional_bytes: int,
+) -> QuotaUsage:
+    """占用配额前的闸门。放行则返回**当前**用量，不放行则抛错。
+
+    调用点必须在"真正花钱/真正写对象"之前：签发直传 URL 之前、
+    调用上游出图之前。放在写完之后检查等于每次超限都白付一次上游成本。
+    """
+    usage = await quota_usage(db, org_id=org_id, owner_user_id=owner_user_id)
+
+    if usage.quota_bytes is None:
+        # 规则没配就不限容量。这里选择放行而不是拦截：配额是限制，
+        # 缺一条限制的配置不该让整条上传链路瘫痪。真正的兜底是
+        # 迁移里的种子数据 + 断言它存在的测试。
+        log.warning("asset.quota.unconfigured", rule_key=QUOTA_RULE_KEY)
+        return usage
+
+    if usage.used_bytes + additional_bytes > usage.quota_bytes:
+        raise AppError(
+            "asset.quota.exceeded",
+            message=(
+                f"quota exceeded: used={usage.used_bytes} "
+                f"+ requested={additional_bytes} > quota={usage.quota_bytes}"
+            ),
+            detail={
+                "used_bytes": usage.used_bytes,
+                "quota_bytes": usage.quota_bytes,
+                "requested_bytes": additional_bytes,
+                "free_bytes": usage.free_bytes,
+            },
+        )
+    return usage
 
 
 async def create_upload(
@@ -64,6 +138,10 @@ async def create_upload(
             message=f"size {size_bytes} exceeds {settings.s3_max_upload_bytes}",
             detail={"max_bytes": settings.s3_max_upload_bytes},
         )
+
+    # 配额闸门必须在这里，不能挪到 complete。签发直传 URL 之后字节就
+    # 在路上了，那时再说"存不下"，用户已经把一个大文件传完了。
+    await ensure_quota(db, org_id=org_id, owner_user_id=owner_user_id, additional_bytes=size_bytes)
 
     safe_name = sanitize_filename(filename)
     asset_id = uuid.uuid4()
@@ -135,6 +213,7 @@ async def register_generated(
     storage_key: str,
     mime_type: str,
     data: bytes,
+    owner_user_id: uuid.UUID | None = None,
     metadata: dict[str, object] | None = None,
 ) -> Asset:
     """登记一份**平台生成**的资产。
@@ -149,12 +228,22 @@ async def register_generated(
     """
     import hashlib
 
+    # 生成侧的归属人。Worker 目前只拿得到 org_id（任务是租户级的），
+    # 缺省沿用原有写法把 org_id 当归属人，行为不变；M2 把出图接进
+    # 生产链路时由调用方补上真实的 user_id，配额就自动按人算。
+    owner = owner_user_id or org_id
+
+    # 上游已经收过钱了，但对象还没落桶——在这里拦下来至少不会让
+    # 超配额的用户把存储撑爆。真正省钱的拦截在调用上游之前（见
+    # worker/jobs/generation.py 的预检）。
+    await ensure_quota(db, org_id=org_id, owner_user_id=owner, additional_bytes=len(data))
+
     await storage.put_bytes(key=storage_key, data=data, content_type=mime_type)
 
     row = await repo.create(
         db,
         org_id=org_id,
-        owner_user_id=org_id,
+        owner_user_id=owner,
         project_id=project_id,
         asset_type=asset_type_for(mime_type) or "image",
         filename=filename,
@@ -190,6 +279,7 @@ async def list_assets(
     asset_type: str | None = None,
     limit: int = 40,
     cursor: datetime | None = None,
+    owner_user_id: uuid.UUID | None = None,
 ) -> tuple[list[Asset], datetime | None]:
     limit = max(1, min(limit, MAX_PAGE_SIZE))
     rows = await repo.list_page(
@@ -199,6 +289,7 @@ async def list_assets(
         asset_type=asset_type,
         limit=limit + 1,
         cursor=cursor,
+        owner_user_id=owner_user_id,
     )
     has_more = len(rows) > limit
     page = rows[:limit]

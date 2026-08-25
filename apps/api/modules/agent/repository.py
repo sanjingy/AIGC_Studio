@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -92,6 +93,38 @@ async def list_runs(
         .where(
             AgentRun.org_id == org_id,
             AgentRun.project_id == project_id,
+            AgentRun.deleted_at.is_(None),
+        )
+        .order_by(AgentRun.created_at.desc())
+        .limit(limit)
+    )
+    return list((await db.execute(stmt)).scalars())
+
+
+async def list_outputs_by_agent(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_ids: Sequence[uuid.UUID],
+    agent_ids: Sequence[str],
+    limit: int,
+) -> list[AgentRun]:
+    """指定项目里、指定 Agent 产出的成功运行，新的在前。
+
+    资产库的"角色/场景档案"用它。这里不做跨项目的去重合并——
+    同名角色在两个项目里是两份独立设定，合并需要一致性引擎参与，
+    不是一个列表查询该做的判断。
+    """
+    if not project_ids or not agent_ids:
+        return []
+    stmt = (
+        select(AgentRun)
+        .where(
+            AgentRun.org_id == org_id,
+            AgentRun.project_id.in_(project_ids),
+            AgentRun.agent_id.in_(agent_ids),
+            AgentRun.status == "succeeded",
+            AgentRun.output_json.is_not(None),
             AgentRun.deleted_at.is_(None),
         )
         .order_by(AgentRun.created_at.desc())
@@ -234,3 +267,18 @@ async def resolve_approval(
     approval.resolved_by = resolved_by
     approval.comment = comment
     approval.resolved_at = datetime.now(UTC)
+
+
+async def list_runs_by_ids(
+    db: AsyncSession, *, org_id: uuid.UUID, run_ids: Sequence[uuid.UUID]
+) -> list[AgentRun]:
+    """按 id 批量取运行记录。资产库的文件夹视图用：那里要拿的是
+    "用户归了类的那一版"，不是"每个项目最新的那一版"。"""
+    if not run_ids:
+        return []
+    stmt = select(AgentRun).where(
+        AgentRun.org_id == org_id,
+        AgentRun.deleted_at.is_(None),
+        AgentRun.id.in_(list(run_ids)),
+    )
+    return list((await db.execute(stmt)).scalars())

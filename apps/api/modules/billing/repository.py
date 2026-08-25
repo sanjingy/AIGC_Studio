@@ -13,6 +13,7 @@ from apps.api.modules.billing.models import (
     CreditAccount,
     CreditTransaction,
     PricingRule,
+    ProviderCredential,
 )
 
 
@@ -155,3 +156,82 @@ async def spent_since(db: AsyncSession, *, account_id: uuid.UUID, hours: int) ->
 async def get_rules(db: AsyncSession) -> dict[str, int]:
     rows = (await db.execute(select(PricingRule))).scalars()
     return {r.key: r.value for r in rows}
+
+
+# ------------------------------------------------------------ BYOK 凭证
+
+
+async def get_credential(
+    db: AsyncSession, *, org_id: uuid.UUID, capability: str, include_deleted: bool = False
+) -> ProviderCredential | None:
+    """取某个 org 某个能力的凭证。
+
+    `include_deleted` 只给 upsert 用：唯一约束 `(org_id, capability)`
+    **不排除软删行**，所以"换 Key"必须找到那一行原地改，
+    做成"软删旧的再插新的"会直接撞约束。
+    """
+    stmt = select(ProviderCredential).where(
+        ProviderCredential.org_id == org_id,
+        ProviderCredential.capability == capability,
+    )
+    if not include_deleted:
+        stmt = stmt.where(ProviderCredential.deleted_at.is_(None))
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def list_credentials(db: AsyncSession, *, org_id: uuid.UUID) -> list[ProviderCredential]:
+    return list(
+        (
+            await db.execute(
+                select(ProviderCredential)
+                .where(
+                    ProviderCredential.org_id == org_id,
+                    ProviderCredential.deleted_at.is_(None),
+                )
+                .order_by(ProviderCredential.capability)
+            )
+        ).scalars()
+    )
+
+
+async def upsert_credential(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    capability: str,
+    provider_id: str,
+    key_encrypted: str,
+    created_by: uuid.UUID,
+) -> ProviderCredential:
+    """写入或就地更新凭证。软删过的行会被复活，不是插新行。"""
+    row = await get_credential(db, org_id=org_id, capability=capability, include_deleted=True)
+    if row is None:
+        row = ProviderCredential(
+            org_id=org_id,
+            capability=capability,
+            provider_id=provider_id,
+            key_encrypted=key_encrypted,
+            created_by=created_by,
+        )
+        db.add(row)
+    else:
+        row.provider_id = provider_id
+        row.key_encrypted = key_encrypted
+        row.created_by = created_by
+        row.deleted_at = None
+        await db.flush()
+        # `updated_at` 是服务端 onupdate 算的：UPDATE 不带 RETURNING，
+        # 这个属性在 flush 之后就是过期状态。等调用方去读它会触发一次
+        # 同步 refresh，在 async 上下文里直接抛 MissingGreenlet，
+        # 把"保存成功"变成一个 500。这里显式刷一次，把 IO 留在 async 里。
+        await db.refresh(row)
+        return row
+    await db.flush()
+    return row
+
+
+async def soft_delete_credential(db: AsyncSession, *, row: ProviderCredential) -> None:
+    """软删。密文一并清空——留着它没有任何用途，只是多一份可被翻出来的材料。"""
+    row.deleted_at = datetime.now(UTC)
+    row.key_encrypted = ""
+    await db.flush()

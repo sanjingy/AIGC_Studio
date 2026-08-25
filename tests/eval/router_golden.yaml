@@ -1,0 +1,91 @@
+# Router 层黄金测试集（22_AgentEval.md §2.1）
+#
+# 20 条人工标注的真实用户输入，覆盖全部 7 条创作路线 + 3 条「信息不足必须追问」。
+# 每条：
+#   input               —— 用户的一句话需求
+#   expect_route        —— 人工标注的正确路线；追问场景为 null（此时无路线可判）
+#   expect_clarification —— 是否应触发追问（requires_clarification）
+#
+# 指标门槛（写进 eval_suite.py，不在这里写死数字，避免「阈值冻进数据文件」）：
+#   路线判断准确率 ≥ 90%，追问召回率 ≥ 85%。
+# 这份集合刻意做得可分性强：错 1 条 = 95%（压线过），错 2 条 = 90%（跌破）。
+
+- input: "把这篇小说做成 5 分钟悬疑漫剧"
+  expect_route: NOVEL_TO_ANIME
+  expect_clarification: false
+
+- input: "我有一部十万字的推理小说，想改编成漫画风格的短剧"
+  expect_route: NOVEL_TO_ANIME
+  expect_clarification: false
+
+- input: "剧本已经写好了，帮我转成视频"
+  expect_route: SCRIPT_TO_VIDEO
+  expect_clarification: false
+
+- input: "这是我的分场剧本，按场次生成对应镜头的视频"
+  expect_route: SCRIPT_TO_VIDEO
+  expect_clarification: false
+
+- input: "把这张静态海报变成会动的镜头"
+  expect_route: IMAGE_TO_VIDEO
+  expect_clarification: false
+
+- input: "我上传一张产品图，想让它有轻微的运镜动起来"
+  expect_route: IMAGE_TO_VIDEO
+  expect_clarification: false
+
+- input: "做一个讲解相对论基本概念的科普视频"
+  expect_route: VIDEO_EXPLAINER
+  expect_clarification: false
+
+- input: "帮我做一个介绍 Python 装饰器原理的知识视频，5 分钟左右"
+  expect_route: VIDEO_EXPLAINER
+  expect_clarification: false
+
+- input: "给我们新出的保温杯做一条 30 秒的宣传片"
+  expect_route: PRODUCT_VIDEO
+  expect_clarification: false
+
+- input: "帮我这款护肤品做一条产品宣传视频，突出成分天然"
+  expect_route: PRODUCT_VIDEO
+  expect_clarification: false
+
+- input: "做一条适合抖音发的搞笑短视频，15 秒左右"
+  expect_route: SHORT_VIDEO
+  expect_clarification: false
+
+- input: "剪一条竖版短视频，配点热门 BGM 就行，主题随意"
+  expect_route: SHORT_VIDEO
+  expect_clarification: false
+
+- input: "帮我做个直播预告片，加点特效"
+  expect_route: CUSTOM
+  expect_clarification: false
+
+- input: "我想做一个婚礼纪念视频，素材是我自己拍的照片和视频片段"
+  expect_route: CUSTOM
+  expect_clarification: false
+
+- input: "做个视频"
+  expect_route: null
+  expect_clarification: true
+
+- input: "帮我搞点内容出来"
+  expect_route: null
+  expect_clarification: true
+
+- input: "我要发布一个作品"
+  expect_route: null
+  expect_clarification: true
+
+- input: "把《赤色博物馆》做成悬疑漫剧，主角是个侦探，故事发生在雾锁的旧码头，5分钟左右"
+  expect_route: NOVEL_TO_ANIME
+  expect_clarification: false
+
+- input: "这段台词已经录好音了，我要配对应的画面视频"
+  expect_route: SCRIPT_TO_VIDEO
+  expect_clarification: false
+
+- input: "帮我把这几张老照片做成会动的复古风格短片"
+  expect_route: IMAGE_TO_VIDEO
+  expect_clarification: false

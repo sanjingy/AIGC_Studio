@@ -77,6 +77,75 @@ async def ensure_style(
     return row
 
 
+async def get_style(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID
+) -> StyleProfile | None:
+    """取项目当前的风格档案。没有就返回 None，不代建——
+    "有没有跑过角色那一步"是调用方要判断的事，这里只回答事实。"""
+    return (
+        await db.execute(
+            select(StyleProfile)
+            .where(
+                StyleProfile.org_id == org_id,
+                StyleProfile.project_id == project_id,
+                StyleProfile.deleted_at.is_(None),
+            )
+            .order_by(StyleProfile.version.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def list_characters(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID
+) -> list[CharacterProfile]:
+    """项目下的角色资产包，每个 ref 只取最新一版。
+
+    带 org_id 查：跨租户拿到别人的角色档案，等于把别人的项目内容
+    拼进自己的提示词里。
+    """
+    rows = list(
+        (
+            await db.execute(
+                select(CharacterProfile)
+                .where(
+                    CharacterProfile.org_id == org_id,
+                    CharacterProfile.project_id == project_id,
+                    CharacterProfile.deleted_at.is_(None),
+                )
+                .order_by(CharacterProfile.ref, CharacterProfile.version.desc())
+            )
+        ).scalars()
+    )
+    latest: dict[str, CharacterProfile] = {}
+    for row in rows:
+        latest.setdefault(row.ref, row)
+    return list(latest.values())
+
+
+async def sync_from_characters_output(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    output: dict[str, Any],
+) -> tuple[StyleProfile, list[CharacterProfile]]:
+    """把角色档案 Agent 的产出接进一致性引擎。
+
+    这是 `visual.character.v1` 的产出（`CharacterSheets`）与本引擎之间
+    唯一的接缝。`CharacterSheet` 的外貌字段本来就是照着 `_appearance()`
+    的字段名和顺序设计的，所以这里不做任何字段翻译——一翻译就会有
+    两份字段名，改一处忘一处。
+
+    两个动作都幂等：风格已存在不覆盖，角色已冻结不覆盖。所以这个函数
+    既能在角色阶段跑完时调，也能在出图前当补齐用（存量项目从来没落过库）。
+    """
+    style = await ensure_style(db, org_id=org_id, project_id=project_id)
+    designs = [d for d in output.get("characters", []) if isinstance(d, dict)]
+    profiles = await upsert_characters(db, org_id=org_id, project_id=project_id, designs=designs)
+    return style, profiles
+
+
 async def lock_style(db: AsyncSession, style: StyleProfile) -> None:
     if style.locked_at is None:
         style.locked_at = datetime.now(UTC)

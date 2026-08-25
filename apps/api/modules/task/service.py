@@ -100,7 +100,11 @@ async def create_task(
                 raise AppError("common.conflict", message="idempotency key conflict")
             return existing, False
 
-    estimated = await pricing.estimate(db, task_type=task_type, payload=input_json or {})
+    # 带上 org_id：这个租户给该能力配了自己的 Key 时，估价要走 BYOK 档
+    # （ADR-025），不能按平台售价预扣。
+    estimated = await pricing.estimate(
+        db, task_type=task_type, payload=input_json or {}, org_id=org_id
+    )
 
     try:
         task = await repo.create(

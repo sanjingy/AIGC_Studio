@@ -53,6 +53,10 @@ class ProjectOut(BaseModel):
     status: str
     budget_cap_credits: int | None
     spent_credits: int
+    # 上游被修订后已经过期、需要同步的阶段产出。
+    # 放在项目响应上而不是只放在 revise 的返回值里：它是项目的当前状态，
+    # 刷新页面后还要能读到（ADR-008，状态的唯一权威在库里）。
+    stale_roles: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

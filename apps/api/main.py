@@ -22,9 +22,12 @@ from apps.api.core.redis import close_redis, get_redis
 from apps.api.modules.agent.router import router as agent_router
 from apps.api.modules.asset.router import router as asset_router
 from apps.api.modules.auth.router import router as auth_router
+from apps.api.modules.billing.router import credentials_router
 from apps.api.modules.billing.router import router as billing_router
+from apps.api.modules.consistency.router import router as images_router
 from apps.api.modules.project.router import router as project_router
 from apps.api.modules.realtime.router import router as realtime_router
+from apps.api.modules.skill.router import router as skill_router
 from apps.api.modules.task.router import router as task_router
 
 settings = get_settings()
@@ -139,7 +142,10 @@ app.include_router(asset_router, prefix=API_PREFIX)
 app.include_router(task_router, prefix=API_PREFIX)
 app.include_router(realtime_router, prefix=API_PREFIX)
 app.include_router(billing_router, prefix=API_PREFIX)
+app.include_router(credentials_router, prefix=API_PREFIX)
 app.include_router(agent_router, prefix=API_PREFIX)
+app.include_router(images_router, prefix=API_PREFIX)
+app.include_router(skill_router, prefix=API_PREFIX)
 
 
 # ---------------------------------------------------------------- 健康检查

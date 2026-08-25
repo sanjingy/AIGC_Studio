@@ -50,3 +50,6 @@ validation/*.png
 
 # Next.js 构建缓存
 *.tsbuildinfo
+
+# 本地截图，与项目无关
+ChatGPT Image*.png

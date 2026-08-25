@@ -226,11 +226,20 @@ async def revise(
     changed = diff_fields(current, output)
 
     state[target_role] = output
+
+    # 过期记账：下游产出是照着旧版生成的，标记为待同步；被改的这一版
+    # 刚出炉，一定是新鲜的，先前若被标过要划掉。
+    #
+    # 记进 state 而不是只放进这次的响应——响应刷新一次就没了，
+    # 用户改完上游关掉页面，隔天回来会以为下游已经跟着变了。
+    stale = [r for r in downstream_of(target_role) if r in state]
+    orchestrator.mark_stale(state, stale)
+    orchestrator.mark_fresh(state, target_role)
+
     # 整体重新赋值，不原地改字典——JSONB 原地修改 SQLAlchemy 检测不到，
     # 会静默不写库，表现为"改了但没变"。
     project.current_state_json = dict(state)
 
-    stale = [r for r in downstream_of(target_role) if r in state]
     await repo.add_message(
         db,
         org_id=org_id,

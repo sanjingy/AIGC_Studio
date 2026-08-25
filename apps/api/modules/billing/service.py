@@ -36,6 +36,11 @@ DEFAULT_RULES: dict[str, int] = {
     "image_retry_factor": 250,  # 图片废片率 ×100
     "video_retry_factor": 150,  # 视频废片率 ×100
     "overhead_rate": 3,  # 隐性成本占比，百分比
+    # 自带 Key 时每个计费单位收的隐性成本（ADR-025）。
+    # 19_UnitEconomics.md §1.5 是 ¥3–9/片（存储 + CDN + 审核 + 故障重跑计提），
+    # 一部片约 204 张图，取中位摊到每张约 ¥0.03 = 3 Credits。
+    # 与其它系数一样，真实值走 pricing_rules 热更新，这里只是缺配时的兜底。
+    "byok_unit_credits": 3,
     # 注册体验额度（19_UnitEconomics.md §5）：够走完故事→角色→分镜，
     # 外加 1 个镜头试片。按 5% 转化率算 CAC 约 ¥100，可接受。
     # 绝不能大到够生成一整部片子——那样 CAC 会变成 ¥3000。
@@ -166,10 +171,16 @@ async def reserve(
     attempt: int = 0,
     project_budget_cap: int | None = None,
     project_spent: int = 0,
+    ref_type: str = "task",
 ) -> CreditTransaction:
     """预扣。余额不足或触发熔断则抛错，任务不该开始。
 
     先扣后跑，不是跑完再扣——跑完再扣的话，余额不足时钱已经花在上游了。
+
+    `task_id` 是这笔账挂靠的业务对象 id，`ref_type` 说明它是哪一种对象。
+    绝大多数消费来自 `tasks`，但不是全部：资产库里"一段描述生成角色档案"
+    是一次同步的真实 LLM 调用，它没有 task 行，账要挂在那条档案上。
+    流水里指向一个不存在的 task 会让对账查不下去，所以类型必须记对。
     """
     if amount < 0:
         raise AppError("common.validation_failed", message="预扣金额不能为负")
@@ -197,7 +208,7 @@ async def reserve(
         amount=0,  # 只在 balance 与 reserved 之间挪，总资产不变
         reserved_delta=amount,
         idempotency_key=key,
-        ref_type="task",
+        ref_type=ref_type,
         ref_id=task_id,
     )
     await db.commit()
@@ -211,6 +222,7 @@ async def settle(
     task_id: uuid.UUID,
     actual_cost: int,
     attempt: int = 0,
+    ref_type: str = "task",
 ) -> None:
     """结算。扣掉实际成本，预扣的差额退回可用余额。
 
@@ -244,7 +256,7 @@ async def settle(
         amount=-charged,
         reserved_delta=-held,
         idempotency_key=key,
-        ref_type="task",
+        ref_type=ref_type,
         ref_id=task_id,
         note=f"reserved={held} actual={actual_cost}",
     )
@@ -252,7 +264,12 @@ async def settle(
 
 
 async def release(
-    db: AsyncSession, *, org_id: uuid.UUID, task_id: uuid.UUID, attempt: int = 0
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    task_id: uuid.UUID,
+    attempt: int = 0,
+    ref_type: str = "task",
 ) -> None:
     """释放预扣，一分不扣。用于任务失败且责任不在用户的情况。"""
     reservation = await repo.find_by_idempotency_key(db, key=_key("reserve", task_id, attempt))
@@ -271,7 +288,7 @@ async def release(
         amount=0,
         reserved_delta=-reservation.reserved_delta,
         idempotency_key=key,
-        ref_type="task",
+        ref_type=ref_type,
         ref_id=task_id,
     )
     await db.commit()

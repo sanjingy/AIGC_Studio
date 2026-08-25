@@ -3,11 +3,16 @@
 **状态存 Redis，全 Worker 共享。**
 存进程内存的话，每个 Worker 各自熔断，等于没熔断——
 8 个 Worker 会各自把上游打 5 次才认输，总共 40 次无效请求。
+
+**但"共享"的边界是账号，不是 Provider**（ADR-027）：这里所有函数收的都是
+:func:`scope` 算出来的作用域 id，平台档一个、每个自带 Key 的 org 各一个。
+理由见 `scope` 的注释。
 """
 
 from __future__ import annotations
 
 import time
+import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, cast
@@ -32,6 +37,22 @@ PROBE_INTERVAL_SECONDS = 60  # DOWN 后多久探测一次
 RECOVER_SUCCESSES = 3  # 连续成功多少次恢复
 
 
+def scope(provider_id: str, *, org_id: uuid.UUID | None = None) -> str:
+    """熔断作用域 id。平台档就是 provider_id，自带 Key 的 org 各算各的。
+
+    合起来算是错的，两个方向都错：
+
+    - 某个用户的 Key 被上游封了、欠费了、把配额打满了，连着失败 5 次就会
+      把这家 Provider 整个熔断掉——**用平台 Key 的所有其他用户跟着降级**。
+      一个人的账号问题不该有这种放大倍数。
+    - 反过来，平台自己的账号出问题时把自带 Key 的用户也拦住同样没道理：
+      他用的是另一个账号，那个账号好好的。
+
+    熔断计的是"这个账号在这家上游还能不能用"，而账号的粒度就是这里的 org。
+    """
+    return provider_id if org_id is None else f"{provider_id}@org:{org_id}"
+
+
 class State(StrEnum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"  # 权重降低但仍发探测流量
@@ -47,6 +68,7 @@ class Snapshot:
 
 
 async def snapshot(provider_id: str) -> Snapshot:
+    """`provider_id` 收的是 :func:`scope` 的结果，不一定等于 Provider 本身。"""
     raw = await _r().hgetall(Keys.circuit_breaker(provider_id))
     return Snapshot(
         state=State(raw.get("state", State.HEALTHY)),

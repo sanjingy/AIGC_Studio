@@ -87,8 +87,60 @@ docker compose exec api python scripts/validation_slice.py --dry-run
 Skill 层的 role 兜底。**Skill 运行时仍未接线**，阶段图还硬编码在
 `orchestrator._NEXT` 里，只是顺序已与 Skill 声明一致。
 
-**前端**：`/login`、`/dashboard`、`/projects/[id]`、`/tasks` 已接真实接口。
-出图有后端无 UI。
+**前端**：`/login`、`/dashboard`、`/projects/[id]`、`/tasks`、`/assets`、
+`/settings/keys` 已接真实接口。
+
+**S11 出图接上界面**：角色阶段跑完后编排器把产出写进一致性引擎
+（`ensure_style` / `upsert_characters`），角色出图入口在项目页**右栏**、
+分镜出图在分镜表的「画面」列，走 `POST /projects/{id}/images/characters/{ref}`
+和 `.../images/shots/{index}`——提示词一律由 `consistency.compose` 合成，
+前端传不了也不该传风格词。进度走项目 SSE，出图落 `assets` 表。
+场景出图和视频不在内（场景一致性还没设计）。
+
+**S12 工作台 v2 布局**：项目页从"一列面板"改成四栏工作台，
+版式见 `design-system/aigc-studio/MASTER.md` §5。要点：
+
+- 顶栏横贯整屏，面包屑是「项目 › 第 N 集」；阶段进度移到左栏「流程」，
+  **只读**（阶段图在后端 `orchestrator._NEXT` 里，前端重排不了）
+- 中栏**只有对话**：每跑完一步在对话流里留一张结果卡片，点开从右侧滑出
+  抽屉看完整内容（`output-card.tsx` / `output-drawer.tsx`）。抽屉宽 1100，
+  分镜表 10 列在里面放得下——它挤在 680 宽的对话流里只能横向滚着看
+- 左栏「流程」和右栏「看档案」用 `#group-xxx` 锚点打开抽屉。外壳在项目页
+  的上层，回调传不下去，锚点是两边都能写、页面能听的公共通道
+- 右栏可折叠：1440 屏上中栏只有 640，收起右栏把 352 还给中栏
+- 右栏是项目资产：角色可出图，场景只读列出，道具没有
+- 「集」不是后端实体，只是 `screenplay.episodes` 里的一项。项目栏里选一集
+  只筛中栏剧本视图的显示，不改变任何生产范围，所以也不能增删
+- 设计稿原件在 `design-system/aigc-studio/项目布局导入与设计规划/`
+
+稿子里有而**没做**的，都是因为后端没有对应能力，做了就是假入口：
+拖拽编排阶段（阶段图后端硬编码）、道具（`agents/schemas.py` 里没有这个
+产出）、场景出图、参考图上传（advance/revise 只收文本）、视频生成（M2）。
+
+**S13 Skill 上传（ADR-026）**：`apps/api/modules/skill/` 补上了
+service/repository/router，接口四个：
+
+```
+GET    /skills            本 org 传过的
+POST   /skills            传一份 YAML
+GET    /skills/{id}/spec  取回原文
+DELETE /skills/{id}       软删
+```
+
+几条不能改的：
+
+- 校验直接复用 `skills/spec.py`，**不新增豁免**。那套白名单（处理器、
+  导出路径、门、能力、重试上限）本来就是为不可信输入写的
+- **校验不过也是 201 入库**，`status=invalid` + 错误原文。丢掉它用户只会
+  得到"传了没反应"的黑洞。真失败只有一种：根本不是 YAML（400）
+- **上传不落 `skills/custom/`**。那个目录是进程级注册表，写进去等于对所有
+  租户生效。用户传的一律只进 `org_skills`，按 org_id 隔离
+- 前端入口在输入框的 `+` 附件菜单里，左栏「技能库」只列清单。两处都必须
+  写着**运行时尚未接线**（ADR-026 的验收标准），`runtime_wired` 由后端给，
+  不是前端写死的文案
+
+**没做**：ADR-026 里的"项目内选择 Skill"。那要给 `projects` 加一列，
+且选了也不生效，这次没碰。
 
 **M2 待办**（"出片"）：TTS → 音频优先时间线 → ffmpeg 合成，目标产出第一条完整成片。
 详见 `12_MVP_Roadmap.md`。

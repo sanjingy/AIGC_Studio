@@ -23,6 +23,9 @@ dependencies = [
     "python-multipart>=0.0.20",
     "aioboto3>=13.2",
     "pyyaml>=6.0",
+    # BYOK 的 provider_credentials.key_encrypted 走应用层 AES-GCM（ADR-025）。
+    # 标准库没有 AEAD 实现，自己写分组密码是绝对不能碰的红线。
+    "cryptography>=44.0",
 ]
 
 [project.optional-dependencies]
@@ -87,6 +90,8 @@ ban-relative-imports = "all"
 "apps.api.modules.task.models".msg = "跨模块请走 task.service"
 "apps.api.modules.billing.repository".msg = "跨模块请走 billing.service"
 "apps.api.modules.billing.models".msg = "跨模块请走 billing.service"
+"apps.api.modules.skill.repository".msg = "跨模块请走 skill.service"
+"apps.api.modules.skill.models".msg = "跨模块请走 skill.service"
 
 [tool.ruff.lint.per-file-ignores]
 # 各模块自己的文件当然可以 import 自己的 models/repository。

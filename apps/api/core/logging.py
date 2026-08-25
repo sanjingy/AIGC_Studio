@@ -33,6 +33,10 @@ SENSITIVE_KEYS = frozenset(
         "node_secret",
         "private_key",
         "encrypted_token",
+        # BYOK（ADR-025）：密文本身也不进日志。密文进了日志，
+        # 就只差一把钥匙——而钥匙和日志往往落在同一台机器上。
+        "key_encrypted",
+        "credential_encryption_key",
     }
 )
 

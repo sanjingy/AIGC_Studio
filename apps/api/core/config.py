@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     access_token_ttl_seconds: int = 1800
     refresh_token_ttl_seconds: int = 1_209_600
 
+    # 凭证密文字段（provider_credentials.key_encrypted）的对称密钥，
+    # base64 编码的 32 字节。与 SECRET_KEY 分开：两者的轮换节奏不同——
+    # 换 SECRET_KEY 只是让人重新登录，换这把钥匙要重新加密整张表。
+    # 留空时 apps/api/core/crypto.py 从 SECRET_KEY 派生（仅限非生产）。
+    credential_encryption_key: SecretStr = SecretStr("")
+
     # --- PostgreSQL ---
     postgres_host: str = "localhost"
     postgres_port: int = 5432

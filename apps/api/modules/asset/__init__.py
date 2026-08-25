@@ -6,23 +6,29 @@
 """
 
 from apps.api.modules.asset.service import (
+    QuotaUsage,
     complete_upload,
     create_upload,
     delete_asset,
     download_url,
+    ensure_quota,
     get_asset,
     list_assets,
     purge_abandoned_uploads,
+    quota_usage,
     register_generated,
 )
 
 __all__ = [
+    "QuotaUsage",
     "complete_upload",
     "create_upload",
     "delete_asset",
     "download_url",
+    "ensure_quota",
     "get_asset",
     "list_assets",
     "purge_abandoned_uploads",
+    "quota_usage",
     "register_generated",
 ]

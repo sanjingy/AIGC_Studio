@@ -9,6 +9,7 @@ import { StatusChip, type Status } from "@/components/ui/status";
 import { apiFetch, ApiRequestError } from "@/lib/api";
 import { useProjectEvents, type TaskSnapshot } from "@/lib/useProjectEvents";
 import { cn, creditsToYuan } from "@/lib/utils";
+import { PageScroll } from "@/components/shell/page-scroll";
 
 type Project = { id: string; title: string };
 
@@ -40,50 +41,52 @@ export default function TasksPage() {
 
   if (error) {
     return (
-      <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
+      <p role="alert" className="m-4 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
         {error}
       </p>
     );
   }
 
   if (!project) {
-    return <p className="text-sm text-fg-muted">还没有项目。先创建一个项目再来看任务。</p>;
+    return <p className="p-4 text-sm text-fg-muted">还没有项目。先创建一个项目再来看任务。</p>;
   }
 
   const running = tasks.filter((t) => t.status === "running").length;
 
   return (
-    <div className="mx-auto flex max-w-[1000px] flex-col gap-4">
-      <Panel>
-        <PanelHeader
-          title="任务中心"
-          meta={`${tasks.length} 条 · ${running} 个进行中`}
-          action={
-            <div className="flex items-center gap-3">
-              <LiveIndicator state={state} />
-              <Button size="sm" onClick={() => runMock("mock.echo")}>
-                跑一个任务
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => runMock("mock.fail")}>
-                跑一个失败任务
-              </Button>
-            </div>
-          }
-        />
+    <PageScroll>
+      <div className="mx-auto flex max-w-[1000px] flex-col gap-4">
+        <Panel>
+          <PanelHeader
+            title="任务中心"
+            meta={`${tasks.length} 条 · ${running} 个进行中`}
+            action={
+              <div className="flex items-center gap-3">
+                <LiveIndicator state={state} />
+                <Button size="sm" onClick={() => runMock("mock.echo")}>
+                  跑一个任务
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => runMock("mock.fail")}>
+                  跑一个失败任务
+                </Button>
+              </div>
+            }
+          />
 
-        {tasks.length === 0 ? (
-          <p className="px-3 py-8 text-center text-sm text-fg-subtle">
-            还没有任务。点上面的按钮跑一个试试。
-          </p>
-        ) : (
-          <ul className="divide-y divide-border">
-            {tasks.map((task) => (
-              <TaskRow key={task.task_id} task={task} />
-            ))}
-          </ul>
-        )}
-      </Panel>
-    </div>
+          {tasks.length === 0 ? (
+            <p className="px-3 py-8 text-center text-sm text-fg-subtle">
+              还没有任务。点上面的按钮跑一个试试。
+            </p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {tasks.map((task) => (
+                <TaskRow key={task.task_id} task={task} />
+              ))}
+            </ul>
+          )}
+        </Panel>
+      </div>
+    </PageScroll>
   );
 }
 

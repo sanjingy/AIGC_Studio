@@ -11,6 +11,7 @@ Director 是"读状态 → 决定下一步"的纯函数，不生产内容。
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -122,6 +123,47 @@ PRODUCING_STAGES: tuple[str, ...] = (
 
 def spec_id_for(stage: str) -> str:
     return _SPEC_OF[stage]  # type: ignore[index]
+
+
+# ---------------------------------------------------------------- 过期记账
+#
+# 「哪些已产出的阶段因为上游被改过而停留在旧版本」。
+#
+# 这是**记账，不是第二张阶段图**：它不参与 `_NEXT`，不影响任何阶段
+# 何时产出、门何时打开。它只回答一个问题——这份产出还新鲜吗。
+#
+# 存进 `current_state_json` 而不是只在那一次 HTTP 响应里返回：
+# 状态的唯一权威在库里（ADR-008），只放在响应里的东西刷新一次就没了，
+# 用户改完上游、关掉页面、隔天回来，会以为下游已经同步过了。
+
+STALE_ROLES_KEY = "stale_roles"
+
+
+def stale_roles(state: dict[str, Any]) -> list[str]:
+    """读记账。按生产顺序返回，且只保留真的还有产出的阶段。"""
+    raw = state.get(STALE_ROLES_KEY)
+    marked = {r for r in raw if isinstance(r, str)} if isinstance(raw, list) else set()
+    return [r for r in PRODUCING_STAGES if r in marked and r in state]
+
+
+def _write_stale(state: dict[str, Any], roles: set[str]) -> list[str]:
+    ordered = [r for r in PRODUCING_STAGES if r in roles and r in state]
+    if ordered:
+        state[STALE_ROLES_KEY] = ordered
+    else:
+        # 空列表就把键删掉，state 里不留下一堆 `"stale_roles": []` 的噪音
+        state.pop(STALE_ROLES_KEY, None)
+    return ordered
+
+
+def mark_stale(state: dict[str, Any], roles: Iterable[str]) -> list[str]:
+    """把这些阶段并入过期记账（去重，按生产顺序）。"""
+    return _write_stale(state, {*stale_roles(state), *roles})
+
+
+def mark_fresh(state: dict[str, Any], role: str) -> list[str]:
+    """这个阶段刚产出或刚被修订，一定是新鲜的——从记账里划掉。"""
+    return _write_stale(state, {r for r in stale_roles(state) if r != role})
 
 
 def variables_for(stage: str, state: dict[str, Any]) -> dict[str, Any]:
@@ -248,8 +290,13 @@ async def advance(
         )
 
     state[_key(stage)] = output
+    # 正向产出永远是新鲜的：刚跑出来的这一版就是最新的上游。
+    mark_fresh(state, stage)
     state["stage"] = _NEXT[stage]
     await _save(db, org_id=org_id, project_id=project_id, state=state)
+
+    if stage == "characters":
+        await _sync_consistency(db, org_id=org_id, project_id=project_id, output=output)
 
     return Advance(
         stage=state["stage"],
@@ -320,6 +367,51 @@ async def _save(
     # 会静默不写库，表现为"点了确认但状态没变"。
     project.current_state_json = dict(state)
     await db.commit()
+
+
+async def _sync_consistency(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, output: dict[str, Any]
+) -> None:
+    """角色档案跑完后，把它落成一致性引擎的资产包。
+
+    在这之前，`consistency_style_profiles` / `consistency_character_profiles`
+    只有 `scripts/validation_slice.py` 手工建过——正常项目流程从来没写过，
+    所以产品界面里出的图既没有风格锁定也没有角色基准。出图链路要的
+    就是这两张表。
+
+    **放在 `_save` 之后，且失败不拖累这一步本身**，理由有三条：
+
+    1. 角色阶段的产出是一次真实的 LLM 调用，钱已经花了、结果已经入库。
+       为一次写库失败把整步判失败，用户重跑就是再花一次钱。
+    2. 一致性资产包是可补的：出图端点在合成提示词之前会用同一个函数
+       再同步一次（两个动作都幂等），所以这里漏了不会变成死局。
+    3. 阶段推进的唯一真相是 `projects.current_state_json`，它在上面
+       已经提交过了。这里再抛异常只会让"状态已经推进了但接口报错"
+       这种更难解释的状态出现在用户面前。
+
+    但**不能静默**：写不进去意味着后面点"生成基准立绘"会拿到一个
+    前置条件错误，日志里必须留下真正的原因。
+    """
+    from apps.api.modules.consistency import service as consistency
+
+    try:
+        style, profiles = await consistency.sync_from_characters_output(
+            db, org_id=org_id, project_id=project_id, output=output
+        )
+        await db.commit()
+        log.info(
+            "agent.consistency_synced",
+            project_id=str(project_id),
+            style_id=str(style.id),
+            characters=len(profiles),
+        )
+    except Exception as exc:  # 兜住一切：这个 except 的存在意义就是不让它冒泡
+        await db.rollback()
+        log.error(
+            "agent.consistency_sync_failed",
+            project_id=str(project_id),
+            error=repr(exc),
+        )
 
 
 def _plot_index_block(state: dict[str, Any]) -> str:

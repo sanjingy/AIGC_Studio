@@ -26,12 +26,33 @@ log = get_logger(__name__)
 DOWNLOAD_TIMEOUT_SECONDS = 120
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
 
+# 预检用的估算值。一张 1024×1024 的 PNG 出图大约这个量级。
+# 它只用来判断"还有没有余量"，不参与任何计费，也不写进库。
+TYPICAL_IMAGE_BYTES = 2 * 1024 * 1024
+
 
 async def generate_image(payload: dict[str, Any], *, org_id: uuid.UUID) -> dict[str, Any]:
     prompt = str(payload.get("prompt", "")).strip()
     if not prompt:
         raise AppError("provider.params.invalid", message="prompt 不能为空")
 
+    # 配额预检：在调上游之前。生成完了才发现存不下，钱已经花出去了，
+    # 那一次调用就是纯亏损。这里还不知道图会有多大，所以只要求
+    # "至少还装得下一张典型出图"——精确的检查在 register_generated 里，
+    # 那时字节数是确定的。
+    raw_owner = payload.get("owner_user_id")
+    owner_user_id = uuid.UUID(str(raw_owner)) if raw_owner else None
+    async with session_scope() as db:
+        await asset_service.ensure_quota(
+            db,
+            org_id=org_id,
+            owner_user_id=owner_user_id or org_id,
+            additional_bytes=TYPICAL_IMAGE_BYTES,
+        )
+
+    # org_id 必须带上：配了自己 Key 的租户要用他自己的那把（ADR-027）。
+    # 漏了这个参数就会退回平台 Key——而计费那边已经按 BYOK 折扣算过了，
+    # 差额全由平台承担，且不报任何错。
     result = await gateway.generate_image(
         ImageRequest(
             prompt=prompt,
@@ -39,7 +60,8 @@ async def generate_image(payload: dict[str, Any], *, org_id: uuid.UUID) -> dict[
             size=str(payload.get("size", "1024*1024")),
             n=int(payload.get("n", 1)),
             seed=payload.get("seed"),
-        )
+        ),
+        org_id=org_id,
     )
 
     raw_project = payload.get("project_id")
@@ -58,6 +80,7 @@ async def generate_image(payload: dict[str, Any], *, org_id: uuid.UUID) -> dict[
                 storage_key=f"{org_id}/{asset_id}/generated_{index}.png",
                 mime_type="image/png",
                 data=data,
+                owner_user_id=owner_user_id,
                 metadata={
                     "model_id": result.model_id,
                     "prompt": prompt[:2000],

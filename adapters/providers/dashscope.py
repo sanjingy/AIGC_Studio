@@ -11,10 +11,11 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 import httpx
 
-from adapters.providers.base import ImageRequest, ImageResult
+from adapters.providers.base import ImageRequest, ImageResult, KeySource, signal_key_source
 from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
 
@@ -31,9 +32,22 @@ _POLL_TIMEOUT_SECONDS = 300
 class DashScopeImageProvider:
     provider_id = "provider.dashscope"
 
-    def __init__(self, *, api_key: str, model_id: str = "wan2.2-t2i-flash") -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model_id: str = "wan2.2-t2i-flash",
+        key_source: KeySource = KeySource.PLATFORM,
+    ) -> None:
         self._api_key = api_key
         self.model_id = model_id
+        # 默认平台档，理由同 DeepSeek 适配器
+        self.key_source = key_source
+
+    def _signal_call(self) -> None:
+        signal_key_source(
+            provider_id=self.provider_id, model_id=self.model_id, key_source=self.key_source
+        )
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -43,6 +57,7 @@ class DashScopeImageProvider:
         }
 
     async def generate_image(self, request: ImageRequest) -> ImageResult:
+        self._signal_call()
         parameters: dict[str, object] = {
             "size": request.size,
             "n": request.n,
@@ -70,6 +85,42 @@ class DashScopeImageProvider:
         async with httpx.AsyncClient(timeout=60) as client:
             task_id = await self._submit(client, body)
             return await self._poll(client, task_id)
+
+    async def verify_key(self) -> str:
+        """验证 Key 可用（ADR-025 的"测试连接"）。
+
+        **查一个不存在的任务**，只看鉴权结果：任务查询端点不生成任何东西，
+        所以这次探测的成本是零。提交一张真图要 ¥0.1 量级，还要等 9 秒，
+        用来"测一下 Key 对不对"完全不成比例。
+
+        判据只有一条：401/403 说明 Key 不对，其余状态码都说明鉴权已经通过
+        （随机 task_id 本来就该报"任务不存在"，那是预期内的）。
+        限流单独报——它证明不了 Key 好坏，让用户稍后重试比给个假结论好。
+        """
+        self._signal_call()
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                resp = await client.get(
+                    f"{BASE_URL}/api/v1/tasks/{uuid.uuid4()}", headers=self._headers
+                )
+            except httpx.TimeoutException as exc:
+                raise AppError(
+                    "provider.transient.timeout", message=f"dashscope timeout: {exc}"
+                ) from exc
+            except httpx.HTTPError as exc:
+                raise AppError("provider.unavailable", message=f"dashscope: {exc}") from exc
+
+        if resp.status_code in (401, 403):
+            raise AppError(
+                "provider.account.insufficient", message=f"上游拒绝鉴权：{resp.text[:200]}"
+            )
+        if resp.status_code == 429:
+            raise AppError(
+                "provider.rate_limit.exceeded", message=f"上游限流，暂时无法验证：{resp.text[:200]}"
+            )
+        if resp.status_code >= 500:
+            raise AppError("provider.unavailable", message=f"上游 HTTP {resp.status_code}")
+        return "鉴权通过"
 
     async def _submit(self, client: httpx.AsyncClient, body: dict[str, object]) -> str:
         try:

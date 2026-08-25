@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -26,6 +27,10 @@ class LLMRequest:
     schema_name: str
     max_output_tokens: int
     temperature: float = 0.7
+    # 谁在跑这次生成。Gateway 拿它决定用平台的 Key 还是这个 org 自己的
+    # （ADR-027）。默认 None = 没有租户上下文（脚本、内部估算），走平台档；
+    # 漏传只会让用户白配了 Key，不会让别人的 Key 被用掉。
+    org_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +56,8 @@ class GatewayLLM:
                 json_mode=True,
                 max_output_tokens=request.max_output_tokens,
                 temperature=request.temperature,
-            )
+            ),
+            org_id=request.org_id,
         )
         if resp.reasoning_tokens:
             # 推理 token 计入输出预算且要付费，量大时要能看见

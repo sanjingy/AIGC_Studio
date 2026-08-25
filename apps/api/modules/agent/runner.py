@@ -19,6 +19,7 @@ import json
 import re
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,6 +47,39 @@ class RunResult:
     tokens_in: int
     tokens_out: int
     model_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class AttemptRecord:
+    """一次模型调用的结果，成败都记。
+
+    存在的意义是让"落库"与"调用"分开：`complete_structured` 只管调模型、
+    校验、重试，把每一次尝试原样交给调用方去决定怎么存。挂在项目上的运行
+    存进 `agent_steps`，不挂项目的（资产库里的独立角色档案）存进自己的表——
+    两条路径共用同一套提示词与重试逻辑，不会各写一份然后分叉。
+    """
+
+    index: int
+    kind: str  # llm / validate
+    system_prompt: str
+    raw_output: str | None
+    error: str | None
+    duration_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class Completion:
+    output: BaseModel
+    tokens_in: int
+    tokens_out: int
+    model_id: str
+    system_prompt: str
+    attempts: int
+
+
+#: 每次尝试结束时的回调。给 `run_agent` 用来逐步落 `agent_steps`——
+#: 逐步落而不是最后一次性落，是因为中途抛错时那些步骤同样要留下来。
+AttemptSink = Callable[[AttemptRecord], Awaitable[None]]
 
 
 def _extract_json(raw: str) -> dict[str, Any]:
@@ -89,23 +123,24 @@ def render_prompt(template: str, variables: dict[str, Any]) -> str:
     return out
 
 
-async def run_agent(
-    db: AsyncSession,
+async def complete_structured(
     *,
-    org_id: uuid.UUID,
-    project_id: uuid.UUID,
     spec: AgentSpec,
     user_input: str,
     variables: dict[str, Any] | None = None,
     system_suffix: str = "",
-) -> RunResult:
-    """跑一个 Agent。
+    on_attempt: AttemptSink | None = None,
+) -> Completion:
+    """按 spec 调一次模型并拿到合法的结构化产出。**不碰数据库。**
 
-    `system_suffix` 追加在 spec 提示词之后、输出契约之前，用于**改变任务性质**
-    而不换 Agent——修订就是这种情况：同一个 Agent、同一个 schema，
-    但干的是"改一份已有产出"而不是"从素材创作"。
-    不给它一条新的角色指令，模型会按原来的角色理解输入，
-    实测表现是把用户消息里那份已经合规的 JSON 原样吐回来。
+    这里是「跑一个 Agent」的全部实质：提示词合成、输出契约注入、schema 校验、
+    校验失败重试。落库交给调用方——`run_agent` 存进 agent_runs / agent_steps，
+    资产库里那条不挂项目的路径存进它自己的表。
+
+    分层的理由很实际：`agent_runs.project_id` 是 NOT NULL，而「直接写一段描述
+    生成角色档案」根本没有项目。要么把那个列改成可空（波及所有按项目查档案的
+    地方），要么把不需要项目的那部分逻辑抽出来共用。抽出来更小也更安全，
+    而且保证两条路径共用同一套提示词——两份相似的提示词一定会分叉。
     """
     schema = resolve_schema(spec.output_schema)
     prompt = render_prompt(spec.prompt, variables or {})
@@ -113,18 +148,24 @@ async def run_agent(
         prompt = f"{prompt.rstrip()}\n\n{system_suffix.strip()}"
     system = build_system_prompt(prompt, schema)
 
-    run = await repo.create_run(
-        db,
-        org_id=org_id,
-        project_id=project_id,
-        agent_id=spec.id,
-        role=spec.role,
-        input_json={"user_input": user_input[:4000], "variables": variables or {}},
-    )
-    await db.commit()
-
     provider = get_provider()
     last_error = ""
+
+    async def _record(
+        index: int, kind: str, *, raw: str | None, error: str | None, started: float
+    ) -> None:
+        if on_attempt is None:
+            return
+        await on_attempt(
+            AttemptRecord(
+                index=index,
+                kind=kind,
+                system_prompt=system,
+                raw_output=raw[:8000] if raw else None,
+                error=error[:2000] if error else None,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
+        )
 
     # schema_retries + 1 次机会。校验失败就重试，因为这类失败
     # 换一次采样往往就好了——但不能无限重试，那会把预算烧光。
@@ -145,42 +186,13 @@ async def run_agent(
         except AppError as exc:
             # 上游错误（限流、参数、鉴权…）不属于 schema 校验失败，
             # 不该在这里重试——Gateway 已经做过 failover 了。
-            # 但必须把 run 标成 failed，否则它会永远卡在 running，
-            # 前端显示"生成中"直到天荒地老。
-            await repo.add_step(
-                db,
-                org_id=org_id,
-                run_id=run.id,
-                step_index=attempt,
-                kind="llm",
-                resolved_prompt=system if attempt == 0 else None,
-                error=f"{exc.code}: {exc.message}"[:2000],
-                duration_ms=int((time.perf_counter() - started) * 1000),
+            await _record(
+                attempt, "llm", raw=None, error=f"{exc.code}: {exc.message}", started=started
             )
-            await repo.finish_run(
-                db,
-                run,
-                status="failed",
-                error_code=exc.code,
-                error_detail=exc.message[:2000],
-                attempts=attempt + 1,
-            )
-            await db.commit()
             raise
         except (ValidationError, ValueError, json.JSONDecodeError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
-            await repo.add_step(
-                db,
-                org_id=org_id,
-                run_id=run.id,
-                step_index=attempt,
-                kind="validate",
-                resolved_prompt=system if attempt == 0 else None,
-                raw_output=raw[:8000],
-                error=last_error[:2000],
-                duration_ms=int((time.perf_counter() - started) * 1000),
-            )
-            await db.commit()
+            await _record(attempt, "validate", raw=raw, error=last_error, started=started)
             log.warning(
                 "agent.schema_invalid",
                 agent_id=spec.id,
@@ -189,48 +201,110 @@ async def run_agent(
             )
             continue
 
-        await repo.add_step(
-            db,
-            org_id=org_id,
-            run_id=run.id,
-            step_index=attempt,
-            kind="llm",
-            # resolved_prompt 只在第一步存全文，重试步骤 prompt 相同，
-            # 存多份没有信息量只有存储成本
-            resolved_prompt=system if attempt == 0 else None,
-            raw_output=raw[:8000],
-            duration_ms=int((time.perf_counter() - started) * 1000),
-        )
-        await repo.finish_run(
-            db,
-            run,
-            status="succeeded",
-            output=parsed.model_dump(mode="json"),
-            model_id=response.model_id,
-            tokens_in=response.tokens_in,
-            tokens_out=response.tokens_out,
-            attempts=attempt + 1,
-        )
-        await db.commit()
-
-        return RunResult(
-            run_id=run.id,
+        await _record(attempt, "llm", raw=raw, error=None, started=started)
+        return Completion(
             output=parsed,
             tokens_in=response.tokens_in,
             tokens_out=response.tokens_out,
             model_id=response.model_id,
+            system_prompt=system,
+            attempts=attempt + 1,
         )
+
+    raise AppError("agent.output.schema_invalid", message=last_error)
+
+
+async def run_agent(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    spec: AgentSpec,
+    user_input: str,
+    variables: dict[str, Any] | None = None,
+    system_suffix: str = "",
+) -> RunResult:
+    """跑一个 Agent，并把整个过程落进 agent_runs / agent_steps。
+
+    `system_suffix` 追加在 spec 提示词之后、输出契约之前，用于**改变任务性质**
+    而不换 Agent——修订就是这种情况：同一个 Agent、同一个 schema，
+    但干的是"改一份已有产出"而不是"从素材创作"。
+    不给它一条新的角色指令，模型会按原来的角色理解输入，
+    实测表现是把用户消息里那份已经合规的 JSON 原样吐回来。
+    """
+    run = await repo.create_run(
+        db,
+        org_id=org_id,
+        project_id=project_id,
+        agent_id=spec.id,
+        role=spec.role,
+        input_json={"user_input": user_input[:4000], "variables": variables or {}},
+    )
+    await db.commit()
+
+    attempts = 0
+
+    async def _persist(record: AttemptRecord) -> None:
+        # 逐步落库而不是最后一次性落：中途抛错时这些步骤同样要留下来，
+        # 「为什么这一步崩了」全靠它们才查得清。
+        nonlocal attempts
+        attempts = record.index + 1
+        await repo.add_step(
+            db,
+            org_id=org_id,
+            run_id=run.id,
+            step_index=record.index,
+            kind=record.kind,
+            # resolved_prompt 只在第一步存全文，重试步骤 prompt 相同，
+            # 存多份没有信息量只有存储成本
+            resolved_prompt=record.system_prompt if record.index == 0 else None,
+            raw_output=record.raw_output,
+            error=record.error,
+            duration_ms=record.duration_ms,
+        )
+        await db.commit()
+
+    try:
+        completion = await complete_structured(
+            spec=spec,
+            user_input=user_input,
+            variables=variables,
+            system_suffix=system_suffix,
+            on_attempt=_persist,
+        )
+    except AppError as exc:
+        # 必须把 run 标成 failed，否则它会永远卡在 running，
+        # 前端显示"生成中"直到天荒地老。
+        await repo.finish_run(
+            db,
+            run,
+            status="failed",
+            error_code=exc.code,
+            error_detail=exc.message[:2000],
+            attempts=attempts,
+        )
+        await db.commit()
+        raise
 
     await repo.finish_run(
         db,
         run,
-        status="failed",
-        error_code="agent.output.schema_invalid",
-        error_detail=last_error[:2000],
-        attempts=spec.schema_retries + 1,
+        status="succeeded",
+        output=completion.output.model_dump(mode="json"),
+        model_id=completion.model_id,
+        tokens_in=completion.tokens_in,
+        tokens_out=completion.tokens_out,
+        attempts=completion.attempts,
     )
     await db.commit()
-    raise AppError("agent.output.schema_invalid", message=last_error)
+
+    return RunResult(
+        run_id=run.id,
+        output=completion.output,
+        tokens_in=completion.tokens_in,
+        tokens_out=completion.tokens_out,
+        model_id=completion.model_id,
+    )
 
 
 def assert_tool_allowed(spec: AgentSpec, tool: str) -> None:

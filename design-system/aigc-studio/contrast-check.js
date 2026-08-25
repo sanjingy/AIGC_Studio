@@ -59,6 +59,8 @@
     add("success/软", t("--success"), t("--success-soft"));
     add("danger/软", t("--danger"), t("--danger-soft"));
     add("主按钮字/底", t("--primary-fg"), t("--primary"));
+    // 反色控件：右栏的「全部生成」和已选中的标签页，用 --fg 当底、--surface 当字
+    add("反色字/底", su, t("--fg"));
 
     return { out, failed };
   }

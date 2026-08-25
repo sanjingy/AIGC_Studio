@@ -93,6 +93,20 @@ ERRORS: dict[str, ErrorSpec] = {
         failover=True,
         disposition=Disposition.REFUND,
     ),
+    "provider.byok.rejected": ErrorSpec(
+        # 用户自己配的那把 Key 调不通（ADR-027）。与上面那条
+        # `account.insufficient` 的区别只有一个，但这个区别决定了谁去修：
+        # 那条是**平台**在上游欠费/被拒，用户只能等；这条是**用户自己的**
+        # Key 出了问题，只有他能改，所以文案必须直接把他指到设置页去。
+        # 不 failover：能换的另一家用户根本没配 Key，换过去要么无 Key 可用，
+        # 要么就是拿平台 Key 顶上——而计费此刻已经按 BYOK 折扣算了，
+        # 顶上去等于平台掏钱买单，正是 ADR-027 要堵的那个洞。
+        "provider.byok.rejected",
+        502,
+        "你为该能力配置的 API Key 调用失败，请到设置页测试连接、更换或移除它",
+        failover=False,
+        disposition=Disposition.RELEASE,
+    ),
     "provider.params.invalid": ErrorSpec(
         "provider.params.invalid",
         400,
@@ -147,11 +161,42 @@ ERRORS: dict[str, ErrorSpec] = {
         "处理超出预期复杂度，请简化需求",
         disposition=Disposition.REFUND,
     ),
+    # --- 一致性引擎 ---
+    "consistency.profile.missing": ErrorSpec(
+        # 出图要拿角色资产包和风格档案去合成提示词，两者都在角色档案
+        # 那一步才落库。缺了就直说缺哪一步，别让用户拿到一个
+        # "生成失败"却不知道该回去做什么。
+        "consistency.profile.missing",
+        409,
+        "还没有角色设定，先完成角色档案这一步再出图",
+    ),
     # --- 资产 ---
     "asset.upload.checksum_mismatch": ErrorSpec(
         "asset.upload.checksum_mismatch", 400, "文件上传不完整，请重试"
     ),
     "asset.upload.too_large": ErrorSpec("asset.upload.too_large", 413, "文件超出大小限制"),
+    "asset.quota.exceeded": ErrorSpec(
+        # 用户资产库容量用尽。必须在花钱生成/签发直传 URL **之前**抛出，
+        # 生成完了才发现存不下等于白花一次上游调用的钱。
+        "asset.quota.exceeded",
+        413,
+        "资产库容量已满，请先清理不用的素材",
+    ),
+    # --- Skill ---
+    "skill.spec.too_large": ErrorSpec(
+        # 上限跟 skills/registry.py 的 MAX_SPEC_BYTES 是同一个数，
+        # 由 service 直接引用那个常量，不在这里复制一份。
+        "skill.spec.too_large",
+        413,
+        "Skill 文件超出大小限制",
+    ),
+    "skill.spec.unreadable": ErrorSpec(
+        # YAML 都解析不了，连"存下来让用户看错在哪"都做不到——
+        # 校验失败（能解析但不合规）是另一回事，那种照常入库。
+        "skill.spec.unreadable",
+        400,
+        "这个文件不是合法的 YAML，请检查后重新上传",
+    ),
 }
 
 

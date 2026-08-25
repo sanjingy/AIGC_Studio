@@ -1,0 +1,101 @@
+{
+  "suite": "agent_eval.min.v1",
+  "doc": "aigc_studio_docs/22_AgentEval.md §6",
+  "generated_at": "2026-08-18T12:11:03+00:00",
+  "git_sha": "ad14aa5d6947da55b77707fd2e539f8839f7f48a",
+  "thresholds": {
+    "route_accuracy_min": 0.9,
+    "clarification_recall_min": 0.85,
+    "schema_pass_rate_required": 1.0
+  },
+  "router": {
+    "method": "reference_keyword_classifier (代理，非真实模型)；真实模型准确率见 22_AgentEval.md §3 每周真实 Provider 链路",
+    "route_accuracy": 1.0,
+    "clarification_recall": 1.0,
+    "overall_accuracy": 1.0,
+    "route_cases": 17,
+    "route_correct": 17,
+    "clarification_cases": 3,
+    "clarification_recall_hits": 3,
+    "total_cases": 20,
+    "mispredictions": [],
+    "prompt_missing_routes": []
+  },
+  "schema": {
+    "agents_with_schema": 10,
+    "passed": 10,
+    "pass_rate": 1.0,
+    "results": [
+      {
+        "agent_id": "director.default.v1",
+        "schema_name": "DirectorPlan",
+        "resolved": true,
+        "validated": true,
+        "error": ""
+      },
+      {
+        "agent_id": "qa.default.v1",
+        "schema_name": "QAReport",
+        "resolved": true,
+        "validated": true,
+        "error": ""
+      },
+      {
+        "agent_id": "router.default.v1",
+        "schema_name": "RouterDecision",
+        "resolved": true,
+        "validated": true,
+        "error": ""
+      },
+      {
+        "agent_id": "story.default.v1",
+        "schema_name": "StoryOutline",
+        "resolved": true,
+        "validated": true,
+        "error": ""
+      },
+      {
+        "agent_id": "story.plot_index.v1",
+        "schema_name": "PlotIndex",
+        "resolved": true,
+        "validated": true,
+        "error": ""
+      },
+      {
+        "agent_id": "story.screenplay.v1",
+        "schema_name": "Screenplay",
+        "resolved": true,
+        "validated": true,
+        "error": ""
+      },
+      {
+        "agent_id": "visual.character.v1",
+        "schema_name": "CharacterSheets",
+        "resolved": true,
+        "validated": true,
+        "error": ""
+      },
+      {
+        "agent_id": "visual.default.v1",
+        "schema_name": "VisualPlan",
+        "resolved": true,
+        "validated": true,
+        "error": ""
+      },
+      {
+        "agent_id": "visual.scene.v1",
+        "schema_name": "SceneSheets",
+        "resolved": true,
+        "validated": true,
+        "error": ""
+      },
+      {
+        "agent_id": "visual.storyboard.v1",
+        "schema_name": "Storyboard",
+        "resolved": true,
+        "validated": true,
+        "error": ""
+      }
+    ]
+  }
+}

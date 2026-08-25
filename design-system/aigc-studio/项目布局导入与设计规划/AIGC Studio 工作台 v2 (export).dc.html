@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+<template id="__bundler_thumbnail" data-bg-color="#f7f8fa">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1200" height="800" fill="#f7f8fa"/>
+    <rect x="0" y="0" width="1200" height="72" fill="#ffffff"/>
+    <rect x="0" y="71" width="1200" height="2" fill="#e6e9ef"/>
+    <rect x="0" y="73" width="230" height="727" fill="#ffffff"/>
+    <rect x="228" y="73" width="2" height="727" fill="#e6e9ef"/>
+    <rect x="900" y="73" width="300" height="727" fill="#ffffff"/>
+    <rect x="898" y="73" width="2" height="727" fill="#e6e9ef"/>
+    <rect x="32" y="28" width="120" height="16" rx="8" fill="#0f766e"/>
+    <rect x="28" y="110" width="150" height="26" rx="13" fill="#e6f4f2"/>
+    <rect x="28" y="152" width="120" height="26" rx="13" fill="#eef0f4"/>
+    <rect x="28" y="194" width="134" height="26" rx="13" fill="#eef0f4"/>
+    <rect x="430" y="140" width="380" height="70" rx="18" fill="#e6f4f2"/>
+    <rect x="290" y="250" width="440" height="90" rx="18" fill="#ffffff" stroke="#e6e9ef" stroke-width="3"/>
+    <rect x="290" y="380" width="520" height="120" rx="18" fill="#ffffff" stroke="#e6e9ef" stroke-width="3"/>
+    <rect x="290" y="660" width="520" height="96" rx="24" fill="#ffffff" stroke="#cfd5e0" stroke-width="3"/>
+    <rect x="930" y="120" width="240" height="110" rx="16" fill="#f2f4f7"/>
+    <rect x="930" y="250" width="240" height="110" rx="16" fill="#f2f4f7"/>
+    <rect x="930" y="380" width="240" height="110" rx="16" fill="#f2f4f7"/>
+    <rect x="930" y="700" width="240" height="44" rx="14" fill="#0f766e"/>
+  </svg>
+</template>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<style>
+:root{
+--bg:oklch(0.9842 0.0034 247.86);--surface:oklch(1 0 0);--surface-2:oklch(0.9683 0.0069 247.9);--surface-3:oklch(0.947 0.0097 252.81);
+--border:oklch(0.9288 0.0126 255.51);--border-strong:oklch(0.869 0.0198 252.89);
+--fg:oklch(0.2077 0.0398 265.75);--fg-muted:oklch(0.4455 0.0374 257.28);--fg-subtle:oklch(0.4924 0.0345 257.79);
+--primary:oklch(0.5109 0.0861 186.39);--primary-hover:oklch(0.4308 0.0714 187.5);--primary-fg:oklch(1 0 0);--primary-soft:oklch(0.9636 0.0129 185.1);
+--running:oklch(0.5553 0.1455 49);--running-soft:oklch(0.9677 0.0237 79.74);
+--success:oklch(0.5273 0.1371 150.07);--success-soft:oklch(0.9632 0.0189 157.87);
+--danger:oklch(0.5054 0.1905 27.52);--danger-soft:oklch(0.9566 0.0185 17.48);
+}
+html,body{margin:0;padding:0;height:100%}
+body{background:var(--bg);color:var(--fg);font-size:13px;line-height:18px;-webkit-font-smoothing:antialiased;font-family:"Plus Jakarta Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif}
+*{box-sizing:border-box}
+button,input,textarea{font:inherit}
+a{color:var(--primary);text-decoration:none}
+a:hover{color:var(--primary-hover)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.5}}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;height:100dvh;overflow:hidden;background:var(--bg)">
+
+  <header style="display:flex;height:52px;flex-shrink:0;align-items:center;gap:16px;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--border)">
+    <div style="display:flex;align-items:center;gap:8px;width:196px">
+      <i data-lucide="clapperboard" width="17" height="17" style="color:var(--primary)"></i>
+      <span style="font-size:14px;font-weight:600;letter-spacing:-0.015em">AIGC Studio</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--fg-subtle)">
+      <span style="color:var(--fg-muted)">雾港迷案</span>
+      <i data-lucide="chevron-right" width="13" height="13"></i>
+      <span style="color:var(--fg);font-weight:500">第 1 集 · 雾里的手</span>
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
+      <div style="display:flex;align-items:baseline;gap:6px;border-radius:8px;background:var(--surface-2);padding:5px 10px">
+        <span style="font-size:12px;color:var(--fg-subtle)">Credits</span>
+        <span style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums">48,650</span>
+      </div>
+      <button style="white-space:nowrap;display:inline-flex;height:30px;align-items:center;gap:5px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);padding:0 10px;font-size:12px;font-weight:500;color:var(--fg-muted);cursor:pointer"><i data-lucide="plus" width="12" height="12"></i>充值</button>
+      <div style="width:28px;height:28px;border-radius:9999px;background:var(--surface-3)"></div>
+    </div>
+  </header>
+
+  <div style="display:flex;min-height:0;flex:1;overflow-x:auto"><div style="display:flex;min-width:1280px;flex:1;min-height:0">
+
+    <aside style="display:flex;width:212px;flex-shrink:0;flex-direction:column;background:var(--surface);border-right:1px solid var(--border)">
+      <div style="display:flex;flex-direction:column;gap:2px;padding:12px 10px">
+        <button style="white-space:nowrap;display:flex;align-items:center;gap:10px;border:none;border-radius:8px;background:var(--primary-soft);padding:7px 10px;font-size:13px;font-weight:500;color:var(--primary);cursor:pointer;text-align:left"><i data-lucide="layout-grid" width="16" height="16"></i>工作台</button>
+        <button style="white-space:nowrap;display:flex;align-items:center;gap:10px;border:none;border-radius:8px;background:transparent;padding:7px 10px;font-size:13px;color:var(--fg-muted);cursor:pointer;text-align:left"><i data-lucide="folder-open" width="16" height="16"></i>资产库</button>
+        <button style="white-space:nowrap;display:flex;align-items:center;gap:10px;border:none;border-radius:8px;background:transparent;padding:7px 10px;font-size:13px;color:var(--fg-muted);cursor:pointer;text-align:left"><i data-lucide="list-checks" width="16" height="16"></i>任务中心</button>
+        <button style="white-space:nowrap;display:flex;align-items:center;gap:10px;border:none;border-radius:8px;background:transparent;padding:7px 10px;font-size:13px;color:var(--fg-muted);cursor:pointer;text-align:left"><i data-lucide="key-round" width="16" height="16"></i>模型密钥</button>
+      </div>
+
+      <div style="height:1px;margin:0 10px;background:var(--border)"></div>
+
+      <div style="display:flex;align-items:baseline;justify-content:space-between;padding:14px 14px 6px">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.06em;color:var(--fg-subtle)">流程</span>
+        <button style="white-space:nowrap;border:none;background:transparent;padding:0;font-size:12px;color:var(--primary);cursor:pointer">编排</button>
+      </div>
+      <ol style="display:flex;flex-direction:column;gap:2px;margin:0;padding:0 10px;list-style:none">
+        <li style="display:flex;align-items:center;gap:8px;border-radius:8px;padding:6px 8px;font-size:12px;color:var(--fg-muted)"><i data-lucide="grip-vertical" width="12" height="12" style="color:var(--border-strong)"></i><i data-lucide="check" width="13" height="13" style="color:var(--success)"></i>情节目录</li>
+        <li style="display:flex;align-items:center;gap:8px;border-radius:8px;padding:6px 8px;font-size:12px;color:var(--fg-muted)"><i data-lucide="grip-vertical" width="12" height="12" style="color:var(--border-strong)"></i><i data-lucide="check" width="13" height="13" style="color:var(--success)"></i>剧本</li>
+        <li style="display:flex;align-items:center;gap:8px;border-radius:8px;background:var(--primary-soft);padding:6px 8px;font-size:12px;font-weight:500;color:var(--primary)"><i data-lucide="grip-vertical" width="12" height="12" style="color:var(--primary)"></i><i data-lucide="circle-dot" width="13" height="13"></i>资产提取</li>
+        <li style="display:flex;align-items:center;gap:8px;border-radius:8px;padding:6px 8px;font-size:12px;color:var(--fg-subtle)"><i data-lucide="grip-vertical" width="12" height="12" style="color:var(--border-strong)"></i><i data-lucide="circle-dashed" width="13" height="13"></i>出图</li>
+        <li style="display:flex;align-items:center;gap:8px;border-radius:8px;padding:6px 8px;font-size:12px;color:var(--fg-subtle)"><i data-lucide="grip-vertical" width="12" height="12" style="color:var(--border-strong)"></i><i data-lucide="circle-dashed" width="13" height="13"></i>视频生成</li>
+        <li><button style="white-space:nowrap;display:flex;width:100%;align-items:center;gap:6px;border:1px dashed var(--border-strong);border-radius:8px;background:transparent;padding:6px 8px;font-size:12px;color:var(--fg-subtle);cursor:pointer;margin-top:4px"><i data-lucide="plus" width="12" height="12"></i>添加技能</button></li>
+      </ol>
+
+      <button onClick="{{ toggleSkills }}" aria-expanded="{{ skillsOpen }}" style="display:flex;align-items:center;gap:6px;border:none;background:transparent;padding:16px 14px 6px;cursor:pointer;text-align:left">
+        <i data-lucide="chevron-right" width="12" height="12" style="{{ skillsChevron }}"></i>
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.06em;color:var(--fg-subtle)">技能库</span>
+        <span style="margin-left:auto;font-size:11px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">3</span>
+      </button>
+      <div style="{{ skillsBody }}">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <button style="display:flex;align-items:flex-start;gap:8px;border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:8px 9px;text-align:left;cursor:pointer">
+            <div style="width:26px;height:26px;flex-shrink:0;border-radius:7px;background:var(--surface-2);display:flex;align-items:center;justify-content:center"><i data-lucide="book-open" width="14" height="14" style="color:var(--fg-muted)"></i></div>
+            <div style="min-width:0"><div style="font-size:12px;font-weight:500;color:var(--fg)">小说转漫剧</div><div style="font-size:11px;line-height:15px;color:var(--fg-subtle)">长文本拆节点 → 剧本 → 分镜</div></div>
+          </button>
+          <button style="display:flex;align-items:flex-start;gap:8px;border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:8px 9px;text-align:left;cursor:pointer">
+            <div style="width:26px;height:26px;flex-shrink:0;border-radius:7px;background:var(--surface-2);display:flex;align-items:center;justify-content:center"><i data-lucide="users" width="14" height="14" style="color:var(--fg-muted)"></i></div>
+            <div style="min-width:0"><div style="font-size:12px;font-weight:500;color:var(--fg)">角色一致性</div><div style="font-size:11px;line-height:15px;color:var(--fg-subtle)">基准立绘 + 跨镜校验</div></div>
+          </button>
+          <button style="display:flex;align-items:flex-start;gap:8px;border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:8px 9px;text-align:left;cursor:pointer">
+            <div style="width:26px;height:26px;flex-shrink:0;border-radius:7px;background:var(--surface-2);display:flex;align-items:center;justify-content:center"><i data-lucide="clapperboard" width="14" height="14" style="color:var(--fg-muted)"></i></div>
+            <div style="min-width:0"><div style="font-size:12px;font-weight:500;color:var(--fg)">分镜成片</div><div style="font-size:11px;line-height:15px;color:var(--fg-subtle)">首帧 + 尾帧驱动的视频段</div></div>
+          </button>
+          <button style="display:flex;align-items:center;gap:6px;border:none;background:transparent;padding:6px 4px;font-size:12px;color:var(--fg-subtle);cursor:pointer"><i data-lucide="upload" width="12" height="12"></i>上传自己的 skill</button>
+        </div>
+      </div>
+    </aside>
+
+    <aside style="display:flex;width:236px;flex-shrink:0;flex-direction:column;background:var(--bg);border-right:1px solid var(--border)">
+      <div style="padding:12px">
+        <button style="white-space:nowrap;display:flex;width:100%;height:34px;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border-strong);border-radius:9px;background:var(--surface);font-size:13px;font-weight:500;color:var(--fg);cursor:pointer"><i data-lucide="plus" width="14" height="14"></i>新项目</button>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:0 12px 12px">
+        <div style="border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:10px">
+          <div style="display:flex;align-items:center;gap:9px">
+            <div style="width:30px;height:30px;border-radius:8px;background:var(--primary-soft);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:var(--primary)">雾</div>
+            <div style="min-width:0"><div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">雾港迷案</div><div style="font-size:11px;color:var(--fg-subtle)">2 集 · 漫剧</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">
+            <button style="border:1px solid var(--border);border-radius:9px;background:var(--surface-2);padding:8px 6px;cursor:pointer;text-align:center"><i data-lucide="images" width="15" height="15" style="color:var(--fg-muted)"></i><div style="margin-top:3px;font-size:11px;font-weight:500;color:var(--fg)">资源库</div><div style="font-size:11px;color:var(--fg-subtle)">17 项</div></button>
+            <button style="border:1px solid var(--border);border-radius:9px;background:var(--surface-2);padding:8px 6px;cursor:pointer;text-align:center"><i data-lucide="palette" width="15" height="15" style="color:var(--fg-muted)"></i><div style="margin-top:3px;font-size:11px;font-weight:500;color:var(--fg)">风格</div><div style="font-size:11px;color:var(--fg-subtle)">写实漫画</div></button>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin:12px 0 6px">
+            <span style="font-size:11px;font-weight:600;letter-spacing:0.06em;color:var(--fg-subtle)">章节</span>
+            <button style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;border:none;border-radius:6px;background:var(--surface-2);color:var(--fg-muted);cursor:pointer"><i data-lucide="plus" width="12" height="12"></i></button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <button style="border:1px solid var(--primary);border-radius:9px;background:var(--primary-soft);padding:8px 9px;text-align:left;cursor:pointer">
+              <div style="font-size:11px;color:var(--primary)">第 1 集</div>
+              <div style="font-size:12px;font-weight:500;color:var(--fg)">雾里的手</div>
+            </button>
+            <button style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:8px 9px;text-align:left;cursor:pointer">
+              <div style="font-size:11px;color:var(--fg-subtle)">第 2 集</div>
+              <div style="font-size:12px;font-weight:500;color:var(--fg-muted)">档案室的灰</div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main style="display:flex;min-width:440px;flex:1;flex-direction:column;background:var(--bg)">
+      <div style="flex:1;overflow-y:auto;padding:22px 26px 8px">
+        <div style="margin:0 auto;display:flex;max-width:620px;flex-direction:column;gap:14px">
+
+          <div style="display:flex;justify-content:flex-end">
+            <div style="max-width:82%;border-radius:14px 14px 4px 14px;background:var(--primary-soft);padding:10px 13px;font-size:13px;line-height:20px;color:var(--fg)">把这篇小说做成 5 分钟悬疑漫剧，主角是市局法医，故事发生在雾锁的旧码头。</div>
+          </div>
+          <div style="display:flex;justify-content:flex-end">
+            <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:8px 11px">
+              <i data-lucide="file-text" width="14" height="14" style="color:var(--fg-subtle)"></i>
+              <span style="font-size:12px;color:var(--fg)">雾港迷案·全文.txt</span>
+              <span style="font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">18,420 字</span>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="max-width:88%;border-radius:14px 14px 14px 4px;background:var(--surface);border:1px solid var(--border);padding:11px 13px;font-size:13px;line-height:21px;color:var(--fg-muted)">
+              <span style="margin-right:7px;font-size:11px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">v2</span>剧本已锁定：2 集 9 场，覆盖 12 个情节节点。全部对白已按“说话很短”收紧，钩子保留在每集末。
+            </div>
+            <ul style="display:flex;flex-wrap:wrap;gap:5px;margin:0;padding:0 0 0 2px;list-style:none">
+              <li style="border-radius:6px;background:var(--surface-2);padding:2px 7px;font-size:11px;color:var(--fg-subtle)">characters[0].occupation</li>
+              <li style="border-radius:6px;background:var(--surface-2);padding:2px 7px;font-size:11px;color:var(--fg-subtle)">episodes[0].scenes[2].beats</li>
+            </ul>
+          </div>
+
+          <div style="border:1px solid var(--border);border-radius:14px;background:var(--surface);overflow:hidden">
+            <div style="display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--border)">
+              <i data-lucide="sparkles" width="14" height="14" style="color:var(--primary)"></i>
+              <span style="font-size:13px;font-weight:600">资产提取完成</span>
+              <span style="margin-left:auto;font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">13 项</span>
+            </div>
+            <div style="padding:12px 14px 14px">
+              <p style="margin:0 0 10px;font-size:12px;line-height:19px;color:var(--fg-muted)">从剧本里抽出了角色、场景与关键道具。确认后导入右侧资产面板，逐项检查描述再出图。</p>
+              <div style="display:flex;flex-wrap:wrap;gap:5px">
+                <span style="border:1px solid var(--border);border-radius:7px;background:var(--surface-2);padding:3px 8px;font-size:11px;color:var(--fg-muted)">角色 5</span>
+                <span style="border:1px solid var(--border);border-radius:7px;background:var(--surface-2);padding:3px 8px;font-size:11px;color:var(--fg-muted)">场景 6</span>
+                <span style="border:1px solid var(--border);border-radius:7px;background:var(--surface-2);padding:3px 8px;font-size:11px;color:var(--fg-muted)">道具 2</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:12px">
+                <button onClick="{{ importAssets }}" style="white-space:nowrap;display:inline-flex;height:30px;align-items:center;gap:6px;border:1px solid transparent;border-radius:9px;background:var(--primary);padding:0 12px;font-size:12px;font-weight:500;color:var(--primary-fg);cursor:pointer"><i data-lucide="arrow-right" width="13" height="13"></i>导入右侧资产</button>
+                <button style="white-space:nowrap;display:inline-flex;height:30px;align-items:center;gap:6px;border:1px solid var(--border-strong);border-radius:9px;background:var(--surface);padding:0 12px;font-size:12px;font-weight:500;color:var(--fg);cursor:pointer">查看清单</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg-subtle)">
+            <i data-lucide="corner-down-right" width="13" height="13"></i>下一步：确认 13 个资产的描述，然后出图
+          </div>
+        </div>
+      </div>
+
+      <div style="flex-shrink:0;padding:10px 26px 20px">
+        <div style="margin:0 auto;max-width:620px">
+          <div style="display:flex;align-items:center;gap:5px;padding:0 2px 7px">
+            <span style="font-size:11px;color:var(--fg-subtle)">改</span>
+            <button style="white-space:nowrap;border:none;border-radius:7px;background:transparent;padding:3px 8px;font-size:11px;color:var(--fg-subtle);cursor:pointer">情节目录</button>
+            <button style="white-space:nowrap;border:none;border-radius:7px;background:transparent;padding:3px 8px;font-size:11px;color:var(--fg-subtle);cursor:pointer">剧本</button>
+            <button aria-pressed="true" style="white-space:nowrap;border:none;border-radius:7px;background:var(--primary-soft);padding:3px 8px;font-size:11px;font-weight:500;color:var(--primary);cursor:pointer">资产</button>
+          </div>
+          <div style="border:1px solid var(--border-strong);border-radius:16px;background:var(--surface);padding:12px 14px 10px;box-shadow:0 1px 2px rgba(15,23,42,.04)">
+            <textarea rows="2" aria-label="对话输入" placeholder="描述你想做什么、粘贴小说正文，或说说资产要怎么改。Enter 发送" style="width:100%;resize:none;border:none;outline:none;background:transparent;font-size:13px;line-height:20px;color:var(--fg)"></textarea>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+              <button style="white-space:nowrap;display:inline-flex;height:28px;align-items:center;gap:5px;border:none;border-radius:8px;background:var(--surface-2);padding:0 9px;font-size:12px;color:var(--fg-muted);cursor:pointer"><i data-lucide="paperclip" width="13" height="13"></i>上传 txt</button>
+              <button style="white-space:nowrap;display:inline-flex;height:28px;align-items:center;gap:5px;border:none;border-radius:8px;background:var(--surface-2);padding:0 9px;font-size:12px;color:var(--fg-muted);cursor:pointer"><i data-lucide="image-plus" width="13" height="13"></i>参考图</button>
+              <span style="margin-left:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--fg-subtle)">每次发送都是一次真实调用，会消耗 Credits</span>
+              <button style="white-space:nowrap;display:inline-flex;width:30px;height:30px;align-items:center;justify-content:center;border:none;border-radius:9px;background:var(--primary);color:var(--primary-fg);cursor:pointer"><i data-lucide="arrow-up" width="15" height="15"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <aside style="display:flex;width:352px;flex-shrink:0;flex-direction:column;background:var(--surface);border-left:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px;height:48px;flex-shrink:0;padding:0 14px;border-bottom:1px solid var(--border)">
+        <span style="font-size:13px;font-weight:600">章节资产</span>
+        <span style="font-size:12px;color:var(--fg-subtle);font-variant-numeric:tabular-nums">{{ total }}</span>
+        <button style="white-space:nowrap;margin-left:auto;display:inline-flex;height:28px;align-items:center;gap:5px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);padding:0 9px;font-size:12px;color:var(--fg-muted);cursor:pointer"><i data-lucide="images" width="13" height="13"></i>资源库</button>
+        <button style="white-space:nowrap;display:inline-flex;height:28px;align-items:center;gap:5px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);padding:0 9px;font-size:12px;color:var(--fg-muted);cursor:pointer"><i data-lucide="settings-2" width="13" height="13"></i>配置</button>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface-2)">
+        <div style="min-width:0;flex:1">
+          <div style="font-size:12px;font-weight:500;color:var(--fg)">{{ bannerTitle }}</div>
+          <div style="font-size:11px;color:var(--fg-subtle)">{{ bannerHint }}</div>
+        </div>
+        <button onClick="{{ generateAll }}" style="{{ generateBtnStyle }}"><i data-lucide="wand-2" width="13" height="13"></i>{{ generateLabel }}</button>
+      </div>
+
+      <div style="display:flex;gap:4px;padding:10px 14px 6px">
+        <button onClick="{{ showPending }}" style="{{ tabPending }}">待生成 {{ pendingCount }}</button>
+        <button onClick="{{ showDone }}" style="{{ tabDone }}">已生成 {{ doneCount }}</button>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;padding:6px 14px 14px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <sc-for list="{{ visible }}" as="a" hint-placeholder-count="3">
+            <div style="{{ a.cardStyle }}">
+              <div style="display:flex;gap:10px;padding:10px">
+                <div style="{{ a.thumbStyle }}">
+                  <span style="{{ a.thumbTextStyle }}">{{ a.glyph }}</span>
+                </div>
+                <div style="min-width:0;flex:1">
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <span style="{{ a.kindStyle }}">{{ a.kind }}</span>
+                    <span style="{{ a.statusStyle }}">{{ a.statusLabel }}</span>
+                  </div>
+                  <div style="margin-top:5px;font-size:12px;font-weight:600;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.name }}</div>
+                  <p style="margin:3px 0 0;font-size:11px;line-height:16px;color:var(--fg-subtle);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">{{ a.desc }}</p>
+                  <div style="display:flex;align-items:center;gap:6px;margin-top:8px">
+                    <button style="white-space:nowrap;display:inline-flex;height:26px;align-items:center;gap:4px;border:1px solid var(--border-strong);border-radius:7px;background:var(--surface);padding:0 8px;font-size:11px;color:var(--fg-muted);cursor:pointer">调整描述</button>
+                    <button onClick="{{ a.onGenerate }}" style="{{ a.actionStyle }}">{{ a.actionLabel }}</button>
+                  </div>
+                </div>
+              </div>
+              <sc-if value="{{ a.busy }}" hint-placeholder-val="{{ false }}">
+                <div style="height:3px;background:var(--surface-2)"><div style="{{ a.barStyle }}"></div></div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="flex-shrink:0;border-top:1px solid var(--border);padding:12px 14px 14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--fg-subtle)">
+          <span>剧本已锁定 · 出图 {{ doneCount }}/{{ total }}</span>
+          <span style="font-variant-numeric:tabular-nums">{{ percentLabel }}</span>
+        </div>
+        <div style="height:4px;margin:7px 0 11px;overflow:hidden;border-radius:9999px;background:var(--surface-2)"><div style="{{ progressStyle }}"></div></div>
+        <button style="{{ videoBtnStyle }}"><i data-lucide="clapperboard" width="15" height="15"></i>{{ videoLabel }}</button>
+      </div>
+    </aside>
+
+  </div></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+const ASSETS = [
+  { id: "c1", kind: "角色", glyph: "林", name: "林见夏", desc: "三十出头女法医，束起的黑发，左眉旧疤，洗得发白的深蓝工装。" },
+  { id: "c2", kind: "角色", glyph: "周", name: "周立", desc: "五十岁老刑警，灰色风衣，右手常年拿着保温杯，声音低哑。" },
+  { id: "c3", kind: "角色", glyph: "陈", name: "陈默", desc: "码头值夜的看守，瘦高，旧棉服，说话躲闪。" },
+  { id: "c4", kind: "角色", glyph: "苏", name: "苏婉", desc: "失踪七年的姐姐，照片里齐耳短发，左眉同样的旧疤。" },
+  { id: "c5", kind: "角色", glyph: "何", name: "何队", desc: "四十五岁刑侦队长，短寸，衬衫袖口卷到小臂，语速快。" },
+  { id: "s1", kind: "场景", glyph: "港", name: "旧码头 · 夜/雾", desc: "锈迹斑斑的系缆桩，探照灯扫过水面，警戒线在风里绷紧。" },
+  { id: "s2", kind: "场景", glyph: "验", name: "市局解剖室", desc: "冷白顶灯，不锈钢台面，墙上贴着排班表，通风口低鸣。" },
+  { id: "s3", kind: "场景", glyph: "档", name: "档案室", desc: "铁皮柜排到天花板，落灰的纸箱，唯一一盏吊灯。" },
+  { id: "s4", kind: "场景", glyph: "巷", name: "码头后巷", desc: "潮湿砖墙，堆到半人高的渔箱，头顶一盏坏掉的路灯。" },
+  { id: "s5", kind: "场景", glyph: "家", name: "林见夏的出租屋", desc: "十平米单间，墙上贴满案情照片，窗外是高架。" },
+  { id: "s6", kind: "场景", glyph: "局", name: "市局走廊 · 清晨", desc: "长条日光灯，浅绿墙裙，尽头的窗透进灰白的天。" },
+  { id: "p1", kind: "道具", glyph: "牌", name: "无名女尸的铜牌", desc: "掌心大小，边缘磨圆，刻着一个模糊的“7”。" },
+  { id: "p2", kind: "道具", glyph: "卷", name: "七年前的卷宗", desc: "牛皮纸封套，边角发脆，封面编号被划掉重写过。" }
+];
+
+const TAB_BASE = "white-space:nowrap;border:1px solid;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;";
+const TAB_ON = TAB_BASE + "border-color:transparent;background:var(--fg);color:var(--surface);font-weight:500";
+const TAB_OFF = TAB_BASE + "border-color:var(--border);background:var(--surface);color:var(--fg-muted)";
+const BTN_SM = "white-space:nowrap;display:inline-flex;height:26px;align-items:center;gap:4px;border-radius:7px;padding:0 9px;font-size:11px;font-weight:500;cursor:pointer;";
+
+class Component extends DCLogic {
+  state = { skillsOpen: true, tab: "pending", assets: ASSETS.map((a) => ({ ...a, status: "pending", progress: 0 })), imported: true };
+
+  icons() { if (window.lucide) window.lucide.createIcons(); }
+  componentDidMount() { this.icons(); setTimeout(() => this.icons(), 400); this.arm(); }
+  componentDidUpdate() { this.icons(); this.arm(); }
+  componentWillUnmount() { this.dead = true; clearTimeout(this.timer); }
+
+  /** 有 running 的资产就保证有一个在跑的定时器；进度按真实经过时间算，不靠 tick 次数 */
+  arm() {
+    if (this.dead) return;
+    const live = this.state.assets.some((a) => a.status === "running");
+    if (!live) { clearTimeout(this.timer); this.timer = null; this.last = null; return; }
+    if (this.timer) return;
+    this.last = Date.now();
+    const step = () => {
+      this.timer = null;
+      if (this.dead) return;
+      const now = Date.now();
+      const dt = Math.min(600, now - (this.last ?? now));
+      this.last = now;
+      const perMs = 100 / 3000; // 一张图约 3 秒跑满
+      let live = false;
+      const assets = this.state.assets.map((a) => {
+        if (a.status !== "running") return a;
+        const p = a.progress + dt * perMs;
+        if (p >= 100) return { ...a, status: "done", progress: 100 };
+        live = true;
+        return { ...a, progress: p };
+      });
+      this.setState({ assets }, () => { if (live) this.timer = setTimeout(step, 120); else this.arm(); });
+    };
+    this.timer = setTimeout(step, 120);
+  }
+
+  start(ids) {
+    this.setState(
+      { assets: this.state.assets.map((a) => (ids.includes(a.id) && a.status === "pending" ? { ...a, status: "running", progress: 4 } : a)) },
+      () => this.arm()
+    );
+  }
+
+  renderVals() {
+    const assets = this.state.assets;
+    const pending = assets.filter((a) => a.status !== "done");
+    const done = assets.filter((a) => a.status === "done");
+    const anyRunning = assets.some((a) => a.status === "running");
+    const list = this.state.tab === "pending" ? pending : done;
+    const pct = Math.round((done.length / assets.length) * 100);
+    const ready = done.length === assets.length;
+
+    const view = list.map((a) => {
+      const running = a.status === "running";
+      const isDone = a.status === "done";
+      return {
+        ...a,
+        busy: running,
+        statusLabel: isDone ? "已出图" : running ? "生成中" : "待生成",
+        cardStyle:
+          "overflow:hidden;border:1px solid " + (running ? "color-mix(in oklch, var(--running) 45%, transparent)" : "var(--border)") +
+          ";border-radius:12px;background:var(--surface)",
+        thumbStyle:
+          "display:flex;width:64px;height:84px;flex-shrink:0;align-items:center;justify-content:center;overflow:hidden;border-radius:9px;background:" +
+          (isDone ? "var(--surface-3)" : "var(--surface-2)"),
+        thumbTextStyle: "font-size:22px;font-weight:600;color:" + (isDone ? "var(--fg-muted)" : "var(--border-strong)"),
+        kindStyle: "border-radius:6px;background:var(--surface-2);padding:2px 6px;font-size:10px;color:var(--fg-muted)",
+        statusStyle:
+          "font-size:10px;color:" + (isDone ? "var(--success)" : running ? "var(--running)" : "var(--fg-subtle)") +
+          (running ? ";animation:breathe 1.8s ease-in-out infinite" : ""),
+        actionLabel: isDone ? "重新生成" : running ? "生成中…" : "生成图像",
+        actionStyle:
+          BTN_SM +
+          (isDone
+            ? "border:1px solid transparent;background:transparent;color:var(--fg-muted)"
+            : running
+              ? "border:1px solid var(--border);background:var(--surface-2);color:var(--fg-subtle);cursor:default"
+              : "border:1px solid transparent;background:var(--primary);color:var(--primary-fg)"),
+        barStyle: "height:100%;width:" + Math.round(a.progress) + "%;background:var(--running);transition:width .2s linear",
+        onGenerate: () => (a.status === "pending" ? this.start([a.id]) : undefined)
+      };
+    });
+
+    return {
+      visible: view,
+      total: assets.length,
+      pendingCount: pending.length,
+      doneCount: done.length,
+      percentLabel: pct + "%",
+      bannerTitle: ready ? "全部资产已出图" : anyRunning ? "正在出图…" : "有 " + pending.length + " 个资产待生成图像",
+      bannerHint: ready ? "可以进入视频生成" : "会调用真实上游，按张扣 Credits",
+      generateLabel: anyRunning ? "生成中…" : ready ? "全部重出" : "全部生成",
+      generateBtnStyle:
+        "white-space:nowrap;display:inline-flex;height:30px;flex-shrink:0;align-items:center;gap:5px;border:1px solid transparent;border-radius:9px;padding:0 11px;font-size:12px;font-weight:500;cursor:pointer;" +
+        (anyRunning ? "background:var(--surface-3);color:var(--fg-subtle)" : "background:var(--fg);color:var(--surface)"),
+      generateAll: () => this.start(pending.filter((a) => a.status === "pending").map((a) => a.id)),
+      importAssets: () => this.setState({ tab: "pending" }),
+      skillsOpen: this.state.skillsOpen,
+      toggleSkills: () => this.setState({ skillsOpen: !this.state.skillsOpen }),
+      skillsChevron: "flex-shrink:0;color:var(--fg-subtle);transition:transform .15s ease;" + (this.state.skillsOpen ? "transform:rotate(90deg)" : ""),
+      skillsBody: this.state.skillsOpen ? "flex:1;overflow-y:auto;padding:0 10px 12px" : "display:none",
+      showPending: () => this.setState({ tab: "pending" }),
+      showDone: () => this.setState({ tab: "done" }),
+      tabPending: this.state.tab === "pending" ? TAB_ON : TAB_OFF,
+      tabDone: this.state.tab === "done" ? TAB_ON : TAB_OFF,
+      progressStyle: "height:100%;width:" + pct + "%;background:var(--primary);transition:width .3s ease",
+      videoLabel: ready ? "进入视频生成" : "出图完成后可进入视频生成",
+      videoBtnStyle:
+        "white-space:nowrap;display:flex;width:100%;height:36px;align-items:center;justify-content:center;gap:7px;border:1px solid transparent;border-radius:10px;font-size:13px;font-weight:600;cursor:" +
+        (ready ? "pointer;" : "default;") +
+        (ready ? "background:var(--primary);color:var(--primary-fg)" : "background:var(--surface-2);color:var(--fg-subtle)")
+    };
+  }
+}
+</script>
+</body>
+</html>
