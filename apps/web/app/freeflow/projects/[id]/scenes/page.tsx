@@ -5,11 +5,14 @@ import { use } from "react";
 import { ProjectHeader } from "@/components/freeflow/project-header";
 import { ScenesView } from "@/components/project/scenes-view";
 import { useProjectOutput } from "@/lib/freeflow/use-project-output";
+import { useRenders } from "@/lib/useRenders";
 
-// REQ-001：复用现有 ScenesView（只读列出，场景出图后端还没做，见 CLAUDE.md S11）。
+// REQ-001：复用现有 ScenesView（含出图）。出图进度走项目 SSE，
+// 跟主线四栏工作台看到的是同一份状态——`useRenders` 本来就是通用 hook。
 export default function FreeflowScenesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { project, output, loading, error } = useProjectOutput(id);
+  const renders = useRenders(id);
 
   return (
     <>
@@ -20,7 +23,7 @@ export default function FreeflowScenesPage({ params }: { params: Promise<{ id: s
         {!error && !loading && !output.scenes && (
           <p className="text-sm text-fg-subtle">还没有场景档案。</p>
         )}
-        {output.scenes && <ScenesView data={output.scenes} />}
+        {output.scenes && <ScenesView data={output.scenes} renders={renders} />}
       </main>
     </>
   );

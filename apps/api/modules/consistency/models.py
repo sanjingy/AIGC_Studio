@@ -89,6 +89,42 @@ class CharacterProfile(OrgEntity):
     __table_args__ = (Index("ix_character_profiles_project_ref", "project_id", "ref", "version"),)
 
 
+class SceneProfile(OrgEntity):
+    """场景资产包。角色资产包的场景对偶物。
+
+    空间信息拆成结构化字段而不是一段自由文本，理由和角色一样：
+    条件化提示词要按字段拼装，一段散文没法稳定地提取出"摄影机站在哪"。
+
+    真正撑起场景一致性的是 `camera_axis` 和 `fixed_references`
+    （`agents/schemas.py` 的 `SceneSheet`）。没有摄影主轴，"这个场景的
+    正面"就由模型每次自己挑，同一个场景两次生成会朝两个方向；没有固定
+    参照物，同一个房间里的书桌这次在左边下次在右边。这两个字段必须真的
+    进提示词——只存不用等于场景出图看着和角色出图一样，但没有一致性。
+    """
+
+    __tablename__ = "scene_profiles"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    # Agent 输出里用来引用它的短 id，如 gate。分镜表的 `scene_ref` 指的就是它。
+    ref: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    spatial_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+    base_reference_asset_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+
+    consistency_tier: Mapped[str] = mapped_column(String(4), nullable=False, default="L1")
+    # 基准参考图的向量。留给后续的场景相似度度量，用途与角色那一列相同。
+    reference_embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(EMBEDDING_DIM), nullable=True
+    )
+
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("ix_scene_profiles_project_ref", "project_id", "ref", "version"),)
+
+
 class ShotConditioning(OrgEntity):
     """一个镜头实际用了什么去生成。
 
@@ -105,6 +141,9 @@ class ShotConditioning(OrgEntity):
     character_profile_ids: Mapped[list[uuid.UUID]] = mapped_column(
         ARRAY(Uuid), nullable=False, default=list
     )
+    # 这一镜发生在哪个场景。可空：分镜表没写 scene_ref、或者项目还没有
+    # 场景档案时，镜头照出——旧项目不该因为多了一张表就出不了图。
+    scene_profile_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
 
     resolved_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     negative_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")

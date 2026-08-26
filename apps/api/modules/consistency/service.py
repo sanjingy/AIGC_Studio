@@ -14,6 +14,7 @@ from apps.api.core.logging import get_logger
 from apps.api.modules.consistency import compose, metrics
 from apps.api.modules.consistency.models import (
     CharacterProfile,
+    SceneProfile,
     ShotConditioning,
     ShotQualityScore,
     StyleProfile,
@@ -146,6 +147,132 @@ async def sync_from_characters_output(
     return style, profiles
 
 
+async def list_scenes(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID
+) -> list[SceneProfile]:
+    """项目下的场景资产包，每个 ref 只取最新一版。
+
+    带 org_id 查，理由和 `list_characters` 一字不差：跨租户拿到别人的
+    场景档案，等于把别人的项目内容拼进自己的提示词里。
+    """
+    rows = list(
+        (
+            await db.execute(
+                select(SceneProfile)
+                .where(
+                    SceneProfile.org_id == org_id,
+                    SceneProfile.project_id == project_id,
+                    SceneProfile.deleted_at.is_(None),
+                )
+                .order_by(SceneProfile.ref, SceneProfile.version.desc())
+            )
+        ).scalars()
+    )
+    latest: dict[str, SceneProfile] = {}
+    for row in rows:
+        latest.setdefault(row.ref, row)
+    return list(latest.values())
+
+
+async def sync_from_scenes_output(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    output: dict[str, Any],
+) -> tuple[StyleProfile, list[SceneProfile]]:
+    """把场景档案 Agent 的产出接进一致性引擎。
+
+    `visual.scene.v1`（`SceneSheets`）与本引擎之间唯一的接缝，形状与
+    `sync_from_characters_output` 完全相同——包括同样不做字段翻译：
+    `SceneSheet` 的字段名就是 `_spatial()` 取的那些，一翻译就会有两份
+    字段名，改一处忘一处。
+
+    风格也在这里 `ensure_style`：正常流程里角色阶段已经建过了，这一步
+    是幂等的空转；但场景阶段被单独重跑、或者存量项目从角色那一步之前
+    就断了的情况下，它保证出场景参考图时一定有风格词可注入。
+    """
+    style = await ensure_style(db, org_id=org_id, project_id=project_id)
+    designs = [d for d in output.get("scenes", []) if isinstance(d, dict)]
+    profiles = await upsert_scenes(db, org_id=org_id, project_id=project_id, designs=designs)
+    return style, profiles
+
+
+async def upsert_scenes(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    designs: list[dict[str, Any]],
+) -> list[SceneProfile]:
+    """把 Visual Agent 产出的场景设定落成资产包。
+
+    已冻结的场景不覆盖：同一场景的后续镜头都以它的摄影主轴和固定参照物
+    为基准，中途改掉等于让同一个房间在前后两镜里变成两个房间。
+    """
+    out: list[SceneProfile] = []
+    for design in designs:
+        ref = str(design.get("ref", "")).strip()
+        if not ref:
+            continue
+
+        existing = (
+            await db.execute(
+                select(SceneProfile)
+                .where(
+                    SceneProfile.project_id == project_id,
+                    SceneProfile.ref == ref,
+                    SceneProfile.deleted_at.is_(None),
+                )
+                .order_by(SceneProfile.version.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if existing is not None:
+            if existing.locked_at is None:
+                existing.spatial_json = _spatial(design)
+                existing.name = str(design.get("name", existing.name))
+            out.append(existing)
+            continue
+
+        row = SceneProfile(
+            org_id=org_id,
+            project_id=project_id,
+            ref=ref,
+            name=str(design.get("name", ref)),
+            spatial_json=_spatial(design),
+        )
+        db.add(row)
+        await db.flush()
+        out.append(row)
+
+    return out
+
+
+def _spatial(design: dict[str, Any]) -> dict[str, Any]:
+    """只取结构化空间字段，丢掉其余。
+
+    `camera_axis` 和 `fixed_references` 是场景一致性的全部依据，
+    比 setting 那段散文重要得多——它们必须是可拼装的字段，
+    所以这里逐字段取，不整份塞进去。
+    """
+    axis = design.get("camera_axis")
+    axis = axis if isinstance(axis, dict) else {}
+    return {
+        "time_slot": str(design.get("time_slot", "")),
+        "setting": str(design.get("setting", "")),
+        "lighting": str(design.get("lighting", "")),
+        "camera_axis": {
+            "position": str(axis.get("position", "")),
+            "facing": str(axis.get("facing", "")),
+            "far_end": str(axis.get("far_end", "")),
+        },
+        "fixed_references": [str(f) for f in design.get("fixed_references", []) or []],
+        "key_elements": [str(e) for e in design.get("key_elements", []) or []],
+    }
+
+
 async def lock_style(db: AsyncSession, style: StyleProfile) -> None:
     if style.locked_at is None:
         style.locked_at = datetime.now(UTC)
@@ -233,6 +360,7 @@ async def record_conditioning(
         shot_index=shot_index,
         style_profile_id=style_id,
         character_profile_ids=[uuid.UUID(c) for c in composed.character_ids],
+        scene_profile_id=uuid.UUID(composed.scene_id) if composed.scene_id else None,
         resolved_prompt=composed.prompt,
         negative_prompt=composed.negative_prompt,
         seed=composed.seed,

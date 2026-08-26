@@ -1,4 +1,4 @@
-"""从产品界面出图：角色基准立绘 + 单个分镜。
+"""从产品界面出图：角色基准立绘 + 场景基准参考图 + 单个分镜。
 
 这条链路在此之前是断的。`worker/jobs/generation.py` 能出图，
 `consistency/compose.py` 能合成提示词，但正常项目流程从来没在
@@ -16,6 +16,7 @@ Worker 是独立容器、跑在 `ENV=local` 下，它不认测试环境的 Mock 
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -25,7 +26,7 @@ from sqlalchemy import select
 from apps.api.core.db import session_scope
 from apps.api.modules.agent import orchestrator
 from apps.api.modules.consistency import service as consistency
-from apps.api.modules.consistency.models import ShotConditioning
+from apps.api.modules.consistency.models import SceneProfile, ShotConditioning
 from apps.api.modules.project import service as project_service
 from apps.api.modules.task import service as task_service
 from apps.api.modules.task.models import Task
@@ -223,6 +224,116 @@ async def test_portrait_before_characters_stage_explains_itself(alice: AsyncClie
     assert r.json()["error"]["user_message"]
 
 
+# ---------------------------------------------------------------- 场景基准参考图
+
+
+async def test_scenes_stage_lands_scene_profiles(alice: AsyncClient) -> None:
+    """跑完场景阶段，一致性引擎里必须真的有场景档案。
+
+    摄影主轴和固定参照物是场景一致性的全部依据。它们在
+    `agents/schemas.py` 的 `SceneSheet` 里本来就有，但在这之前从来没有
+    任何代码把它们写进库——场景出图拿不到锚点，等于没有一致性。
+    """
+    org_id = await _org(alice)
+    pid = await _run_to_storyboard(alice)
+
+    async with session_scope() as db:
+        scenes = await consistency.list_scenes(db, org_id=org_id, project_id=uuid.UUID(pid))
+
+    refs = {s.ref for s in scenes}
+    assert {"gate", "office"} <= refs, f"场景档案没落库：{refs}"
+
+    gate = next(s for s in scenes if s.ref == "gate")
+    axis = gate.spatial_json["camera_axis"]
+    assert axis["position"] and axis["facing"] and axis["far_end"], "摄影主轴必须逐字段存下来"
+    assert gate.spatial_json["fixed_references"], "固定参照物必须存下来"
+    assert gate.spatial_json["setting"]
+
+
+async def test_scene_rerun_does_not_overwrite_frozen_profile(alice: AsyncClient) -> None:
+    """已冻结的场景，重跑场景阶段也不能被改掉。
+
+    同一场景的后续镜头都以它的摄影主轴为基准，中途改掉等于让同一个
+    房间在前后两镜里变成两个房间。
+    """
+    org_id = await _org(alice)
+    pid = await _run_to_storyboard(alice)
+    project_id = uuid.UUID(pid)
+
+    async with session_scope() as db:
+        scenes = await consistency.list_scenes(db, org_id=org_id, project_id=project_id)
+        gate = next(s for s in scenes if s.ref == "gate")
+        gate.spatial_json = {**gate.spatial_json, "lighting": "冻结后的光影"}
+        gate.locked_at = datetime.now(UTC)
+        scene_id = gate.id
+        await db.commit()
+
+    async with session_scope() as db:
+        project = await project_service.get_project(db, org_id=org_id, project_id=project_id)
+        project.current_state_json = {**dict(project.current_state_json), "stage": "scenes"}
+        await db.commit()
+
+    async with session_scope() as db:
+        result = await orchestrator.advance(db, org_id=org_id, project_id=project_id)
+    assert result.ran_role == "scenes"
+
+    async with session_scope() as db:
+        scenes = await consistency.list_scenes(db, org_id=org_id, project_id=project_id)
+
+    gate = next(s for s in scenes if s.ref == "gate")
+    assert gate.id == scene_id, "不能因为重跑就新建一份场景档案"
+    assert gate.spatial_json["lighting"] == "冻结后的光影", "冻结的场景被覆盖了"
+
+
+async def test_scene_reference_task_carries_spatial_anchors(alice: AsyncClient) -> None:
+    """场景参考图的提示词必须由系统合成，且带上摄影主轴与固定参照物。"""
+    org_id = await _org(alice)
+    pid = await _run_to_storyboard(alice)
+
+    r = await alice.post(f"{P}/{pid}/images/scenes/gate")
+    assert r.status_code == 201, r.text
+    created = r.json()
+    assert created["type"] == "image.generate"
+    assert created["estimated_cost"] > 0
+
+    row = await _task_row(created["id"])
+    payload: dict[str, Any] = dict(row.input_json)
+
+    async with session_scope() as db:
+        style = await consistency.get_style(db, org_id=org_id, project_id=uuid.UUID(pid))
+        assert style is not None
+        positive, negative, seed_base = (
+            style.positive_tokens,
+            style.negative_tokens,
+            style.seed_base,
+        )
+
+    # 锚点：这两样不进提示词，场景出图就只是"看着像"而没有一致性
+    assert "铁门外的路面" in payload["prompt"], "摄影主轴的站位没进提示词"
+    assert "朝向建筑正面" in payload["prompt"]
+    assert "铁门在画面正前方" in payload["prompt"], "固定参照物没进提示词"
+    assert "摄影主轴" in payload["prompt"], "主轴必须是构图指令，不只是描述"
+    assert positive in payload["prompt"], "风格词必须由系统注入"
+    assert payload["negative_prompt"] == negative
+    assert payload["seed"] == seed_base
+    assert payload["subject_kind"] == "scene"
+    assert payload["subject_ref"] == "gate"
+
+
+async def test_unknown_scene_is_404(alice: AsyncClient) -> None:
+    pid = await _run_to_storyboard(alice)
+    r = await alice.post(f"{P}/{pid}/images/scenes/nowhere")
+    assert r.status_code == 404
+
+
+async def test_scene_reference_before_scenes_stage_explains_itself(alice: AsyncClient) -> None:
+    pid = await _project(alice, "empty-scenes")
+    r = await alice.post(f"{P}/{pid}/images/scenes/gate")
+    assert r.status_code == 409, r.text
+    assert r.json()["error"]["code"] == "consistency.profile.missing"
+    assert r.json()["error"]["detail"]["missing_stage"] == "scenes"
+
+
 # ---------------------------------------------------------------- 分镜出图
 
 
@@ -272,6 +383,74 @@ async def test_shot_task_composes_from_storyboard_and_records_conditioning(
     assert record.attempt == 1
 
 
+async def test_shot_prompt_carries_its_scene(alice: AsyncClient) -> None:
+    """镜头提示词里必须说清楚这一镜发生在哪个场景。
+
+    在这之前 `compose_shot` 只有"角色 + 画面 + 风格"——同一个房间的
+    两镜之间没有任何共同的空间锚点，书桌这镜在左边下镜在右边。
+    """
+    pid = await _run_to_storyboard(alice)
+
+    r = await alice.post(f"{P}/{pid}/images/shots/1")
+    assert r.status_code == 201, r.text
+    created = r.json()
+
+    row = await _task_row(created["id"])
+    payload: dict[str, Any] = dict(row.input_json)
+
+    # mock 分镜表第 1 镜的 scene_ref 是 gate
+    assert "铁门外的路面" in payload["prompt"], "摄影主轴没进镜头提示词"
+    assert "铁门在画面正前方" in payload["prompt"], "固定参照物没进镜头提示词"
+    # 顺序：角色 → 场景 → 画面 → 风格
+    assert payload["prompt"].index("主角") < payload["prompt"].index("铁门外的路面")
+    assert payload["prompt"].index("铁门外的路面") < payload["prompt"].index("第 1 镜的画面内容")
+
+    async with session_scope() as db:
+        record = (
+            await db.execute(
+                select(ShotConditioning).where(
+                    ShotConditioning.project_id == uuid.UUID(pid),
+                    ShotConditioning.shot_index == 1,
+                )
+            )
+        ).scalar_one()
+        scene = (
+            await db.execute(
+                select(SceneProfile).where(
+                    SceneProfile.project_id == uuid.UUID(pid), SceneProfile.ref == "gate"
+                )
+            )
+        ).scalar_one()
+    assert record.scene_profile_id == scene.id, "这一镜用了哪个场景档案要记下来"
+
+
+async def test_shot_without_scene_profile_still_renders(alice: AsyncClient) -> None:
+    """项目没有场景档案时，镜头照样出图，只是不带空间信息。
+
+    这是一条刻意的优雅降级：镜头出图在场景档案存在之前就跑通了，
+    把场景变成硬前置条件会让存量项目从"能出图"变成"点了报 409"。
+    """
+    org_id = await _org(alice)
+    pid = await _run_to_storyboard(alice)
+    project_id = uuid.UUID(pid)
+
+    # 把 state 里的场景产出摘掉，等价于"存量项目跑过分镜但没有场景档案"
+    async with session_scope() as db:
+        project = await project_service.get_project(db, org_id=org_id, project_id=project_id)
+        state = {k: v for k, v in dict(project.current_state_json).items() if k != "scenes"}
+        project.current_state_json = state
+        await db.commit()
+
+    r = await alice.post(f"{P}/{pid}/images/shots/1")
+    assert r.status_code == 201, r.text
+
+    row = await _task_row(r.json()["id"])
+    payload: dict[str, Any] = dict(row.input_json)
+    assert "第 1 镜的画面内容" in payload["prompt"], "画面内容还得在"
+    assert "主角" in payload["prompt"], "角色还得在"
+    assert "铁门外的路面" not in payload["prompt"], "没有场景档案就不该凭空造一个"
+
+
 async def test_unknown_shot_is_404(alice: AsyncClient) -> None:
     pid = await _run_to_storyboard(alice)
     r = await alice.post(f"{P}/{pid}/images/shots/999")
@@ -291,6 +470,7 @@ async def test_shot_before_storyboard_explains_itself(alice: AsyncClient) -> Non
 async def test_render_list_reports_subject_and_status(alice: AsyncClient) -> None:
     pid = await _run_to_storyboard(alice)
     portrait = (await alice.post(f"{P}/{pid}/images/characters/zhu_jue")).json()
+    scene = (await alice.post(f"{P}/{pid}/images/scenes/office")).json()
     shot = (await alice.post(f"{P}/{pid}/images/shots/2")).json()
 
     rows = (await alice.get(f"{P}/{pid}/images")).json()
@@ -299,6 +479,9 @@ async def test_render_list_reports_subject_and_status(alice: AsyncClient) -> Non
     assert by_task[portrait["id"]]["subject_kind"] == "character"
     assert by_task[portrait["id"]]["subject_ref"] == "zhu_jue"
     assert by_task[portrait["id"]]["asset_id"] is None, "还没跑，不该有图"
+    assert by_task[scene["id"]]["subject_kind"] == "scene"
+    assert by_task[scene["id"]]["subject_ref"] == "office"
+    assert by_task[scene["id"]]["shot_index"] is None
     assert by_task[shot["id"]]["subject_kind"] == "shot"
     assert by_task[shot["id"]]["shot_index"] == 2
     assert all(r["status"] == "queued" for r in rows)
@@ -322,5 +505,6 @@ async def test_cross_tenant_is_404_not_403(alice: AsyncClient, bob: AsyncClient)
     pid = await _run_to_storyboard(alice)
 
     assert (await bob.post(f"{P}/{pid}/images/characters/zhu_jue")).status_code == 404
+    assert (await bob.post(f"{P}/{pid}/images/scenes/gate")).status_code == 404
     assert (await bob.post(f"{P}/{pid}/images/shots/1")).status_code == 404
     assert (await bob.get(f"{P}/{pid}/images")).status_code == 404

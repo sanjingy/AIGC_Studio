@@ -28,10 +28,11 @@ type SceneCard = {
  * 出图入口只在这里，中栏的角色档案不再重复放一个——同一张图两个按钮，
  * 用户会以为是两张不同的图。
  *
- * 只有**角色**能出图。场景在下面只读列出：场景一致性还没设计，后端也没有
- * `POST /projects/{id}/images/scenes/{ref}`（见 CLAUDE.md「S11 出图接上界面」）。
- * 摆一个点了报 404 的按钮比不摆更糟，所以这里就是一份清单。
- * 道具同理——`agents/schemas.py` 里根本没有道具这个产出。
+ * 这里只放**角色**的出图卡片。场景现在也能出参考图了，但入口在中栏的
+ * 场景档案里（`ScenesView`），不在这儿——同一张图两个按钮，用户会以为
+ * 是两张不同的图，这正是上面那条规则要避免的。所以场景在下面仍然只是
+ * 一份清单，外加一个跳过去的链接。
+ * 道具是真没有——`agents/schemas.py` 里根本没有道具这个产出。
  */
 export function AssetPanel({
   characters,
@@ -201,7 +202,12 @@ export function AssetPanel({
                     场景
                   </span>
                   <span className="tnum text-xs text-fg-subtle">{sceneList.length}</span>
-                  <span className="ml-auto text-xs text-fg-subtle">场景出图尚未开放</span>
+                  <a
+                    href={`#${groupDomId("scenes")}`}
+                    className="ml-auto text-xs text-fg-muted underline-offset-2 transition-colors duration-150 hover:text-fg hover:underline"
+                  >
+                    去档案里出图
+                  </a>
                 </div>
                 <ul className="flex flex-col gap-1">
                   {sceneList.map((s) => (

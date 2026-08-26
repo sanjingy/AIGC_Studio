@@ -246,6 +246,19 @@ export const projects = {
       headers: { "Idempotency-Key": crypto.randomUUID() },
     }),
 
+  /**
+   * 给场景出基准参考图。同上，会扣 Credits。
+   *
+   * 参考图的提示词里有摄影主轴和固定参照物，是同一场景后续所有镜头的
+   * 空间基准——和角色立绘一样，提示词全部由后端 `compose` 合成，
+   * 前端传不了也不该传。
+   */
+  renderScene: (id: string, ref: string) =>
+    apiFetch<Task>(`/projects/${id}/images/scenes/${encodeURIComponent(ref)}`, {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    }),
+
   /** 给一个镜号出图。同上，会扣 Credits。 */
   renderShot: (id: string, shotIndex: number) =>
     apiFetch<Task>(`/projects/${id}/images/shots/${shotIndex}`, {
