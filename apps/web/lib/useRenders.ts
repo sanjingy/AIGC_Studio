@@ -5,17 +5,23 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiRequestError, projects, tasks, type Render, type TaskStatus } from "@/lib/api";
 import { useProjectEvents } from "@/lib/useProjectEvents";
 
-/** 要画什么。角色立绘按 ref，分镜按镜号——后端也是这两种定位方式。 */
-export type RenderSubject = { kind: "character"; ref: string } | { kind: "shot"; index: number };
+/**
+ * 要画什么。角色立绘和场景参考图按各自的 ref，分镜按镜号——
+ * 后端 `subject_kind` 就是这三种定位方式。
+ */
+export type RenderSubject =
+  | { kind: "character"; ref: string }
+  | { kind: "scene"; ref: string }
+  | { kind: "shot"; index: number };
 
 export function subjectKey(subject: RenderSubject): string {
-  return subject.kind === "character" ? `character:${subject.ref}` : `shot:${subject.index}`;
+  return subject.kind === "shot" ? `shot:${subject.index}` : `${subject.kind}:${subject.ref}`;
 }
 
 function keyOfRender(r: Render): string {
-  return r.subject_kind === "character"
-    ? `character:${r.subject_ref}`
-    : `shot:${r.shot_index}`;
+  return r.subject_kind === "shot"
+    ? `shot:${r.shot_index}`
+    : `${r.subject_kind}:${r.subject_ref}`;
 }
 
 /** 一个角色/一个镜号当前这一版图的状态。 */
@@ -108,17 +114,24 @@ export function useRenders(projectId: string | null) {
     [reload],
   );
 
+  /** 一个 subject 对应哪个出图接口。三处都要用，抽出来免得漏一处。 */
+  const post = useCallback(
+    (id: string, subject: RenderSubject) =>
+      subject.kind === "character"
+        ? projects.renderCharacter(id, subject.ref)
+        : subject.kind === "scene"
+          ? projects.renderScene(id, subject.ref)
+          : projects.renderShot(id, subject.index),
+    [],
+  );
+
   const generate = useCallback(
     (subject: RenderSubject) => {
       if (!projectId) return;
       const key = subjectKey(subject);
-      void run(key, () =>
-        subject.kind === "character"
-          ? projects.renderCharacter(projectId, subject.ref)
-          : projects.renderShot(projectId, subject.index),
-      );
+      void run(key, () => post(projectId, subject));
     },
-    [projectId, run],
+    [projectId, run, post],
   );
 
   /**
@@ -135,9 +148,7 @@ export function useRenders(projectId: string | null) {
         const key = subjectKey(subject);
         setPending((p) => new Set(p).add(key));
         try {
-          await (subject.kind === "character"
-            ? projects.renderCharacter(projectId, subject.ref)
-            : projects.renderShot(projectId, subject.index));
+          await post(projectId, subject);
         } catch (e) {
           setError(e instanceof ApiRequestError ? e.error.user_message : "出图请求失败");
           break; // 余额不足这类错误，后面几张也一定失败，没必要继续刷屏
@@ -151,7 +162,7 @@ export function useRenders(projectId: string | null) {
       }
       await reload();
     },
-    [projectId, reload],
+    [projectId, reload, post],
   );
 
   /** 失败重试走任务自己的重试接口，不新建任务——它会重新预扣同一笔。 */

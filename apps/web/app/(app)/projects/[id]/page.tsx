@@ -298,7 +298,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                   )}
                   {/* 角色的出图按钮只在右栏，这里是纯档案 */}
                   {r === "characters" && <CharactersView data={output.characters} />}
-                  {r === "scenes" && <ScenesView data={output.scenes} />}
+                  {/* 场景出图入口在这里，不在右栏——右栏那张卡片只有角色，
+                      加一份场景卡等于同一张图两个按钮 */}
+                  {r === "scenes" && <ScenesView data={output.scenes} renders={renders} />}
                   {r === "storyboard" && (
                     <StoryboardView data={output.storyboard} renders={renders} />
                   )}

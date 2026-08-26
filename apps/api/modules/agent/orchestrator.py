@@ -297,6 +297,8 @@ async def advance(
 
     if stage == "characters":
         await _sync_consistency(db, org_id=org_id, project_id=project_id, output=output)
+    elif stage == "scenes":
+        await _sync_scene_consistency(db, org_id=org_id, project_id=project_id, output=output)
 
     return Advance(
         stage=state["stage"],
@@ -409,6 +411,49 @@ async def _sync_consistency(
         await db.rollback()
         log.error(
             "agent.consistency_sync_failed",
+            project_id=str(project_id),
+            error=repr(exc),
+        )
+
+
+async def _sync_scene_consistency(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, output: dict[str, Any]
+) -> None:
+    """场景档案跑完后，把它落成一致性引擎的资产包。
+
+    `scene_profiles` 之于场景，等同于 `character_profiles` 之于角色：
+    没有它，场景出图既拿不到摄影主轴也拿不到固定参照物，同一个房间
+    两镜之间会挪位置。
+
+    **放在 `_save` 之后，且失败不拖累这一步本身**——三条理由与
+    `_sync_consistency` 一字不差，这里不重复推导，只重复结论：
+
+    1. 场景阶段的产出是一次真实的 LLM 调用，钱已经花了、结果已经入库；
+    2. 场景资产包是可补的，出图端点在合成提示词前会用同一个函数再同步
+       一次（两个动作都幂等）；
+    3. 阶段推进的唯一真相是 `projects.current_state_json`，它在上面已经
+       提交过了，这里再抛异常只会制造更难解释的状态。
+
+    同样**不能静默**：写不进去意味着后面点"生成参考图"会拿到一个前置
+    条件错误，日志里必须留下真正的原因。
+    """
+    from apps.api.modules.consistency import service as consistency
+
+    try:
+        style, profiles = await consistency.sync_from_scenes_output(
+            db, org_id=org_id, project_id=project_id, output=output
+        )
+        await db.commit()
+        log.info(
+            "agent.scene_consistency_synced",
+            project_id=str(project_id),
+            style_id=str(style.id),
+            scenes=len(profiles),
+        )
+    except Exception as exc:  # 兜住一切：这个 except 的存在意义就是不让它冒泡
+        await db.rollback()
+        log.error(
+            "agent.scene_consistency_sync_failed",
             project_id=str(project_id),
             error=repr(exc),
         )

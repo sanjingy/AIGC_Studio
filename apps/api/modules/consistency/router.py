@@ -49,6 +49,26 @@ async def generate_character_portrait(
     return TaskOut.model_validate(task)
 
 
+@router.post("/scenes/{ref}", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
+async def generate_scene_reference(
+    project_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    ref: str = Path(min_length=1, max_length=32),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+) -> TaskOut:
+    """给场景出基准参考图。真实出图调用，会扣 Credits。"""
+    task = await render.request_scene_reference(
+        db,
+        org_id=user.org_id,
+        project_id=project_id,
+        created_by=user.id,
+        ref=ref,
+        idempotency_key=idempotency_key,
+    )
+    return TaskOut.model_validate(task)
+
+
 @router.post("/shots/{shot_index}", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
 async def generate_shot_image(
     project_id: uuid.UUID,
