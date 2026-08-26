@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Clapperboard, Images, PanelRightClose, PanelRightOpen, Wand2 } from "lucide-react";
 
-import { RenderThumb } from "@/components/project/render-slot";
+import { BaseImageActions, RenderThumb } from "@/components/project/render-slot";
 import { groupDomId } from "@/components/project/stages";
 import { cn } from "@/lib/utils";
 import type { RenderSubject, Renders, RenderView } from "@/lib/useRenders";
@@ -190,6 +190,7 @@ export function AssetPanel({
                   key={c.ref}
                   card={c}
                   view={viewOf(c.ref)}
+                  renders={renders}
                   busy={renders.isPending({ kind: "character", ref: c.ref })}
                   onGenerate={() => renders.generate({ kind: "character", ref: c.ref })}
                   onRetry={(taskId) => renders.retry({ kind: "character", ref: c.ref }, taskId)}
@@ -297,11 +298,13 @@ function Tab({
 function CharacterAssetCard({
   card,
   view,
+  renders,
   busy,
   onGenerate,
   onRetry,
 }: {
   card: CharacterCard;
+  renders: Renders;
   view: RenderView | null;
   busy: boolean;
   onGenerate: () => void;
@@ -310,6 +313,9 @@ function CharacterAssetCard({
   const active = view?.status === "queued" || view?.status === "running";
   const failed = view?.status === "failed" || view?.status === "cancelled";
   const done = view?.assetId != null;
+  // 用户自己钉的基准图没有任务（`PUT .../images/characters/{ref}` 那条路
+  // 不建任务），重试无从谈起——所以判据是有没有 taskId，不是失没失败
+  const retryTaskId = failed ? (view?.taskId ?? null) : null;
 
   return (
     <div
@@ -365,11 +371,11 @@ function CharacterAssetCard({
             >
               看档案
             </a>
-            {failed && view ? (
+            {retryTaskId ? (
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => onRetry(view.taskId)}
+                onClick={() => onRetry(retryTaskId)}
                 className="flex h-6.5 cursor-pointer items-center rounded-md border border-border-strong px-2 text-xs font-medium text-fg transition-colors duration-150 hover:bg-surface-2 disabled:opacity-45"
               >
                 {busy ? "提交中…" : "重试"}
@@ -391,6 +397,16 @@ function CharacterAssetCard({
                 {busy ? "提交中…" : active ? "生成中…" : done ? "重新生成" : "生成图像"}
               </button>
             )}
+
+            {/* 「用已有图」两条路，与中栏抽屉里的角色档案是同一组入口。
+                两处渲染的是同一份 `renders` 状态，入口却只有一边有的话，
+                用户会以为右栏这个角色"不支持用自己的图"。 */}
+            <BaseImageActions
+              subject={{ kind: "character", ref: card.ref }}
+              renders={renders}
+              pickerTitle={`选一张图作为 ${card.name} 的基准立绘`}
+              disabled={busy || active}
+            />
           </div>
         </div>
       </div>

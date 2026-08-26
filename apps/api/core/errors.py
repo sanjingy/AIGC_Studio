@@ -170,6 +170,16 @@ ERRORS: dict[str, ErrorSpec] = {
         409,
         "还没有角色设定，先完成角色档案这一步再出图",
     ),
+    "consistency.base_image.invalid": ErrorSpec(
+        # 用户想把资产库里的某张素材直接钉成角色立绘/场景参考图，但那份
+        # 素材当不了基准图：不是图片，或者上传还没走完 complete（桶里可能
+        # 根本没有字节）。这条路径不调任何 Provider，所以它是**纯参数错误**
+        # ——400 而不是 404：资源确实存在且属于这个租户，只是不合用；
+        # 报 404 会让用户以为自己选错了那张图。
+        "consistency.base_image.invalid",
+        400,
+        "这份素材不能作为基准图，请选择一张已上传完成的图片",
+    ),
     # --- 资产 ---
     "asset.upload.checksum_mismatch": ErrorSpec(
         "asset.upload.checksum_mismatch", 400, "文件上传不完整，请重试"

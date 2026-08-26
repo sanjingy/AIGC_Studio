@@ -170,9 +170,13 @@ export type ChatMessage = {
  * 风格词必须由系统注入，这是画风一致性的唯一保障。
  */
 export type Render = {
-  task_id: string;
-  subject_kind: "character" | "shot";
-  /** 角色立绘才有 */
+  /**
+   * `source: "assigned"` 那条路没有任务，所以可空。
+   * 重试按钮必须靠它判断——没有任务的东西重试不了。
+   */
+  task_id: string | null;
+  subject_kind: "character" | "scene" | "shot";
+  /** 角色立绘 / 场景参考图才有 */
   subject_ref: string | null;
   /** 分镜出图才有 */
   shot_index: number | null;
@@ -182,6 +186,25 @@ export type Render = {
   /** 出成功了才有。取图 URL 走 assets.downloadUrl，预签名链接存不住 */
   asset_id: string | null;
   created_at: string;
+  /**
+   * 这张图是怎么来的。
+   *
+   * `generated` = 真跑过一次生成，扣过 Credits；
+   * `assigned`  = 用户自己指定的一张既有资产（库存或本地上传），一分钱没花。
+   *
+   * 界面上两者占同一个位置、长得一样，但计费语义相反，所以要分开显示。
+   */
+  source: RenderSource;
+};
+
+export type RenderSource = "generated" | "assigned";
+
+/** 把一张已有资产钉成基准图之后的回执。刻意不是 Task——这里没有任务在跑。 */
+export type BaseImage = {
+  subject_kind: "character" | "scene";
+  subject_ref: string;
+  asset_id: string;
+  updated_at: string;
 };
 
 export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
@@ -262,6 +285,27 @@ export const projects = {
     apiFetch<Task>(`/projects/${id}/images/scenes/${encodeURIComponent(ref)}`, {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
+    }),
+
+  /**
+   * 把一张**已有**的资产钉成角色的基准立绘。**不出图，不扣 Credits。**
+   *
+   * 和 `renderCharacter` 是同一个路径的两个动词，区别是根本性的：
+   * POST 是"再生成一张新的"（每次花钱、结果不同），PUT 是"这个角色的
+   * 基准图就是它"（幂等，点十次和点一次一样）。所以这条可以放心地
+   * 重试，那条不行。
+   */
+  setCharacterPortrait: (id: string, ref: string, assetId: string) =>
+    apiFetch<BaseImage>(`/projects/${id}/images/characters/${encodeURIComponent(ref)}`, {
+      method: "PUT",
+      body: JSON.stringify({ asset_id: assetId }),
+    }),
+
+  /** 把一张已有资产钉成场景的基准参考图。同上，不扣 Credits。 */
+  setSceneReference: (id: string, ref: string, assetId: string) =>
+    apiFetch<BaseImage>(`/projects/${id}/images/scenes/${encodeURIComponent(ref)}`, {
+      method: "PUT",
+      body: JSON.stringify({ asset_id: assetId }),
     }),
 
   /** 给一个镜号出图。同上，会扣 Credits。 */
@@ -394,6 +438,28 @@ export type AssetFolder = {
 /** 能归类的东西。三种 id 指向三张不同的表，所以类型要一起带上。 */
 export type FolderItemType = "asset" | "profile" | "character";
 
+/**
+ * 直传票据。上传是三段式（10_API.md）：建 pending 记录拿预签名地址 →
+ * 客户端 PUT 到对象存储（不经过 API）→ complete 让服务端 HEAD 校验后置 ready。
+ * 第三步不能省：只信客户端"我传完了"，后面会拿到一个坏文件。
+ */
+export type UploadTicket = {
+  asset: LibraryAsset;
+  upload_url: string;
+  expires_at: string;
+};
+
+/**
+ * 后端 MIME 白名单里的图片那几项（`apps/api/modules/asset/mime.py`）。
+ *
+ * 只用来给文件选择器过滤，**不是第二套校验**：真正说了算的还是后端，
+ * 它在签发直传地址那一步就会拒掉不认识的类型和超限的大小。前端再写一遍
+ * 大小上限只会和 `s3_max_upload_bytes` 分叉，所以这里没有那个数字。
+ */
+export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+
+export const IMAGE_ACCEPT = IMAGE_MIME_TYPES.join(",");
+
 export type Library = {
   usage: StorageUsage;
   assets: LibraryAsset[];
@@ -420,6 +486,49 @@ export const assets = {
   },
 
   usage: () => apiFetch<StorageUsage>("/assets/usage"),
+
+  /** 第一段：建一条 pending 记录，换回预签名直传地址。 */
+  createUploadUrl: (file: File, projectId?: string) =>
+    apiFetch<UploadTicket>("/assets/upload-url", {
+      method: "POST",
+      body: JSON.stringify({
+        filename: file.name,
+        mime_type: file.type,
+        size_bytes: file.size,
+        project_id: projectId ?? null,
+      }),
+    }),
+
+  /** 第三段：服务端 HEAD 校验后置 ready。不调它资产永远是 pending。 */
+  completeUpload: (assetId: string) =>
+    apiFetch<LibraryAsset>(`/assets/${assetId}/complete`, { method: "POST" }),
+
+  /**
+   * 三段式跑完，返回可用的 asset_id。
+   *
+   * 中间那一段**不走 `apiFetch`**：预签名地址指向对象存储本身，不是
+   * 我们的 API，带上 `credentials` 和 JSON 头只会让签名对不上。
+   * Content-Type 必须和签发时用的完全一致，SigV4 把它算进签名了。
+   */
+  upload: async (file: File, projectId?: string): Promise<string> => {
+    const ticket = await assets.createUploadUrl(file, projectId);
+    const put = await fetch(ticket.upload_url, {
+      method: "PUT",
+      body: file,
+      headers: { "Content-Type": file.type },
+    });
+    if (!put.ok) {
+      throw new ApiRequestError(put.status, {
+        code: "asset.upload.checksum_mismatch",
+        message: `PUT ${put.status}`,
+        user_message: "文件上传失败，请重试",
+        retryable: true,
+        trace_id: "",
+      });
+    }
+    await assets.completeUpload(ticket.asset.id);
+    return ticket.asset.id;
+  },
 
   /**
    * 缩略图/下载都要现签一个 URL：对象存储里的东西不能直接暴露，
