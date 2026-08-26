@@ -10,6 +10,7 @@ from apps.api.modules.auth.deps import CurrentUser, DbSession
 from apps.api.modules.project import service
 from apps.api.modules.project.schemas import (
     ProjectCreateIn,
+    ProjectModelPreferenceIn,
     ProjectOut,
     ProjectPage,
     ProjectUpdateIn,
@@ -78,6 +79,32 @@ async def update_project(
         title=payload.title,
         route_type=payload.route_type,
         budget_cap_credits=payload.budget_cap_credits,
+    )
+    return ProjectOut.model_validate(row)
+
+
+@router.patch("/{project_id}/model-preference", response_model=ProjectOut)
+async def set_model_preference(
+    project_id: uuid.UUID,
+    payload: ProjectModelPreferenceIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> ProjectOut:
+    """按能力覆盖这个项目用哪个模型（ADR-024）。
+
+    单独一条端点而不是塞进 `PATCH /projects/{id}`：那条是"改项目的属性"，
+    每个字段一列；这条改的是一张 JSONB 字典里的**一个键**，语义是
+    "合并"不是"替换"。混在一起，前端就得为了改一个模型把整份偏好
+    读出来再整个传回去——两个标签页同时开着必然互相覆盖。
+
+    `model_id=null` 表示清掉该能力的偏好，回到 Gateway 的默认优先级。
+    """
+    row = await service.set_model_preference(
+        db,
+        org_id=user.org_id,
+        project_id=project_id,
+        capability=payload.capability,
+        model_id=payload.model_id,
     )
     return ProjectOut.model_validate(row)
 

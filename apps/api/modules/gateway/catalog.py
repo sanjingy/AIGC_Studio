@@ -95,3 +95,48 @@ def platform_key(provider_id: str) -> str:
     if provider_id == "provider.dashscope":
         return s.dashscope_api_key.get_secret_value()
     return ""
+
+
+# 推理模型。思考 token 计入输出预算，用在分类和结构化抽取上会返回
+# **空内容且不报错**——这个仓库已经踩过两次，ADR-024 的第二条硬约束
+# （`model_policy.no_reasoning_roles`）就是为它写的。
+#
+# 判定写成显式集合而不是按 id 前缀猜：`deepseek-v4-flash` 里没有任何
+# 字符表明它会思考，靠 `"v4" in model_id` 这种规则迟早会误判下一个
+# 命名风格不同的模型。
+REASONING_MODELS: frozenset[str] = frozenset({"deepseek-v4-flash"})
+
+
+def is_reasoning(model_id: str) -> bool:
+    return model_id in REASONING_MODELS
+
+
+# 模型的展示信息。**只讲模型本身的定位（快 / 推理强 / 细节多），不讲价格**：
+# 价格在 `model_pricing` 表里，上游一调价，代码里的"更便宜"就变成了谎话。
+#
+# 放在目录里而不是前端，理由同 `credentials.CAPABILITY_LABELS`：有哪些模型
+# 是后端定的，前端遇到没见过的 id 只能把裸 id 怼给用户。
+MODEL_LABELS: dict[str, tuple[str, str]] = {
+    "deepseek-chat": ("快速档", "响应快，适合分类、结构化抽取这类不需要推理的环节"),
+    "deepseek-v4-flash": ("推理档", "带思考过程，复杂改写更稳；分类与结构化抽取环节会自动回退"),
+    "wan2.2-t2i-flash": ("快速档", "出图快，适合大批量分镜草图"),
+    "wan2.2-t2i-plus": ("精细档", "细节与材质更丰富，单张耗时更长"),
+}
+
+
+def spec_for_capability(capability: str) -> ProviderSpec | None:
+    for spec in SPECS:
+        if spec.capability == capability:
+            return spec
+    return None
+
+
+def model_ids(capability: str) -> tuple[str, ...]:
+    """这个能力下所有可选的模型 id，按优先级排好。
+
+    "用户能选哪些模型"和"Gateway 会试哪些模型"必须是同一份列表——
+    分家的下场是设置页存下一个路由表里根本没有的 id，
+    偏好静默失效而没有任何人知道。
+    """
+    spec = spec_for_capability(capability)
+    return tuple(model for model, _ in spec.models) if spec else ()
