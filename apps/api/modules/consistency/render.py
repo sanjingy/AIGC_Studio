@@ -16,6 +16,13 @@
 3. **前置条件缺失要在花钱之前拦下来。** 没有角色档案就没有风格档案，
    合成不出提示词。这时候返回 `consistency.profile.missing`，
    而不是让用户拿到一个跑到 Worker 才炸的 500。
+
+后来多了第四条规则，因为多了一条不生成的路径：
+
+4. **"用一张已有的图"不是"生成一张图"。** `assign_*` 把用户指定的
+   `asset_id` 直接钉成基准图，不建任务、不预扣、不结算——上面三条里
+   除了"跨租户 404"之外的每一条都不适用于它。两条路径在数据里靠
+   `Render.source` 分开，不靠前端猜。
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
+from apps.api.modules.asset import service as asset_service
 from apps.api.modules.consistency import compose
 from apps.api.modules.consistency import service as consistency
 from apps.api.modules.consistency.models import CharacterProfile, SceneProfile, StyleProfile
@@ -48,6 +56,16 @@ SUBJECT_CHARACTER = "character"
 SUBJECT_SCENE = "scene"
 SUBJECT_SHOT = "shot"
 
+# 这张图是怎么来的。
+#
+# `generated` 是上面那三条路：建任务、预扣、跑 Provider、结算。
+# `assigned` 是用户自己指定的一张既有资产（从资产库挑的，或者刚从本地
+# 传上来的）——**它不经过 Gateway，所以不建任务、不预扣、不结算**。
+# 两者在界面上长得一样（都是"这个角色现在的基准图"），但计费语义完全
+# 相反，所以必须在数据里分得开，不能让前端靠"有没有 task_id"去猜。
+SOURCE_GENERATED = "generated"
+SOURCE_ASSIGNED = "assigned"
+
 # 一次列多少条出图记录。26 个镜号 + 若干角色立绘 + 若干场景参考图，
 # 再加上重试，100 条足够覆盖一个项目的全部出图，且不用分页。
 MAX_RENDERS = 100
@@ -62,7 +80,9 @@ class Render:
     "这个任务画的是哪个角色/哪一镜"和"产出的资产 id"翻译出来。
     """
 
-    task_id: uuid.UUID
+    #: `assigned` 那条路没有任务，所以这里可空——它是"用户钉了一张图"，
+    #: 不是"系统跑了一次生成"，硬造一个任务 id 只会让重试按钮点得下去。
+    task_id: uuid.UUID | None
     subject_kind: str
     subject_ref: str | None
     shot_index: int | None
@@ -71,6 +91,23 @@ class Render:
     error_code: str | None
     asset_id: uuid.UUID | None
     created_at: datetime
+    #: SOURCE_GENERATED / SOURCE_ASSIGNED
+    source: str = SOURCE_GENERATED
+
+
+@dataclass(frozen=True, slots=True)
+class BaseImage:
+    """把一张既有资产钉成基准图之后的回执。
+
+    刻意不返回 `TaskOut`：那个形状里有 `estimated_cost`、`attempt`、
+    `status`，全都不适用——这条路径一分钱都没花，也没有东西在跑。
+    返回一个任务形状会让前端（和读日志的人）以为它是一次生成。
+    """
+
+    subject_kind: str
+    subject_ref: str
+    asset_id: uuid.UUID
+    updated_at: datetime
 
 
 async def _project_state(
@@ -328,6 +365,127 @@ async def request_scene_reference(
     return task
 
 
+async def _image_asset(db: AsyncSession, *, org_id: uuid.UUID, asset_id: uuid.UUID) -> Any:
+    """校验一份资产能不能当基准图，能就把它取出来。
+
+    两道闸，顺序不能换：
+
+    1. **归属**。走 `asset.service.get_asset`，跨租户/不存在一律 404
+       ——和项目、角色那两处一字不差，403 会确认资源存在。
+    2. **可用性**。必须是图片，且上传已经 `complete`。`pending` 的记录
+       在桶里可能一个字节都没有（用户选完文件就关了页面），把它钉成
+       基准图等于让后续每一镜都拿着一张打不开的参考图去生成。
+
+    第 2 道给 400 不给 404：那份资产确实存在、确实是他自己的，
+    只是不合用。报 404 他会以为自己选错了图，回去再选一遍还是同一个。
+    """
+    asset = await asset_service.get_asset(db, org_id=org_id, asset_id=asset_id)
+
+    if not str(asset.mime_type or "").lower().startswith("image/"):
+        raise AppError(
+            "consistency.base_image.invalid",
+            message=f"asset {asset_id} is not an image ({asset.mime_type})",
+            detail={"reason": "not_image", "mime_type": asset.mime_type},
+        )
+    if asset.status != "ready":
+        raise AppError(
+            "consistency.base_image.invalid",
+            message=f"asset {asset_id} is not ready ({asset.status})",
+            detail={"reason": "not_ready", "status": asset.status},
+        )
+    return asset
+
+
+async def assign_character_portrait(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    ref: str,
+    asset_id: uuid.UUID,
+) -> BaseImage:
+    """把一张**已有**的资产钉成某个角色的基准立绘。
+
+    `request_character_portrait` 的姊妹函数，区别只有一个但它是根本的：
+    **这里不问 Gateway 要图**。用户已经有一张满意的图（自己画的、从别的
+    项目搬过来的、刚从本地传上来的），他要的是"就用这张"，不是"再生成
+    一张像这样的"。所以这条路径不建任务、不预扣、不结算——
+    `billing` 模块在这个函数的调用链上一行都不会被执行。
+
+    `version` **不递增**。递增版本的含义是"角色设定本身改了"，后续镜头
+    要按新版重出；换一张基准图不是设定变了，外貌字段一个字没动。
+    把它当成新版本会让所有已生成的镜头凭空变成"过期版本"。
+
+    换掉之前那张也**不删**旧资产：用户很可能想换回去，而删除是另一件事。
+    """
+    _project, state = await _project_state(db, org_id=org_id, project_id=project_id)
+    _style, profiles = await _profiles(db, org_id=org_id, project_id=project_id, state=state)
+
+    profile = next((p for p in profiles if p.ref == ref), None)
+    if profile is None:
+        raise AppError("common.not_found", message=f"character {ref}")
+
+    await _image_asset(db, org_id=org_id, asset_id=asset_id)
+
+    profile.base_portrait_asset_id = asset_id
+    await db.commit()
+    await db.refresh(profile)
+
+    log.info(
+        "consistency.portrait_assigned",
+        project_id=str(project_id),
+        ref=profile.ref,
+        asset_id=str(asset_id),
+    )
+    return BaseImage(
+        subject_kind=SUBJECT_CHARACTER,
+        subject_ref=profile.ref,
+        asset_id=asset_id,
+        updated_at=profile.updated_at,
+    )
+
+
+async def assign_scene_reference(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    ref: str,
+    asset_id: uuid.UUID,
+) -> BaseImage:
+    """把一张**已有**的资产钉成某个场景的基准参考图。
+
+    与 `assign_character_portrait` 逐条同理，包括不建任务、不预扣、
+    不递增 `version`、不删旧图。角色和场景两边必须完全对称——
+    一边能挑库存图另一边只能生成，用户会当成两个不同的产品。
+    """
+    _project, state = await _project_state(db, org_id=org_id, project_id=project_id)
+    _style, profiles = await _scene_profiles(db, org_id=org_id, project_id=project_id, state=state)
+
+    profile = next((p for p in profiles if p.ref == ref), None)
+    if profile is None:
+        raise AppError("common.not_found", message=f"scene {ref}")
+
+    await _image_asset(db, org_id=org_id, asset_id=asset_id)
+
+    profile.base_reference_asset_id = asset_id
+    await db.commit()
+    await db.refresh(profile)
+
+    log.info(
+        "consistency.scene_reference_assigned",
+        project_id=str(project_id),
+        ref=profile.ref,
+        asset_id=str(asset_id),
+    )
+    return BaseImage(
+        subject_kind=SUBJECT_SCENE,
+        subject_ref=profile.ref,
+        asset_id=asset_id,
+        updated_at=profile.updated_at,
+    )
+
+
 def _find_shot(state: dict[str, Any], shot_index: int) -> dict[str, Any]:
     storyboard = state.get("storyboard")
     if not isinstance(storyboard, dict) or not storyboard.get("shots"):
@@ -456,10 +614,65 @@ def _asset_id_of(output: dict[str, Any] | None) -> uuid.UUID | None:
         return None
 
 
+async def _assigned_base_images(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID
+) -> list[Render]:
+    """用户自己钉上去的基准图，翻译成和生成记录同一个形状。
+
+    它们不在 `tasks` 里——那张表是执行状态的唯一真相（ADR-008），而钉一张
+    既有图根本没有"执行"。但界面上它们和生成出来的图占同一个位置，所以
+    必须从同一个接口出去，否则前端要维护两份"这个角色现在的图是哪张"。
+
+    时间取档案行的 `updated_at`，不是 `now()`：这样这条记录和生成任务
+    能放在同一根时间轴上排序——先钉后生成，生成的那张在前；先生成后钉，
+    钉的那张在前。**当前那张图永远是最新的那条**，两个方向都成立。
+    """
+    out: list[Render] = []
+    for character in await consistency.list_characters(db, org_id=org_id, project_id=project_id):
+        if character.base_portrait_asset_id is None:
+            continue
+        out.append(
+            Render(
+                task_id=None,
+                subject_kind=SUBJECT_CHARACTER,
+                subject_ref=character.ref,
+                shot_index=None,
+                status="succeeded",
+                progress=100,
+                error_code=None,
+                asset_id=character.base_portrait_asset_id,
+                created_at=character.updated_at,
+                source=SOURCE_ASSIGNED,
+            )
+        )
+    for scene in await consistency.list_scenes(db, org_id=org_id, project_id=project_id):
+        if scene.base_reference_asset_id is None:
+            continue
+        out.append(
+            Render(
+                task_id=None,
+                subject_kind=SUBJECT_SCENE,
+                subject_ref=scene.ref,
+                shot_index=None,
+                status="succeeded",
+                progress=100,
+                error_code=None,
+                asset_id=scene.base_reference_asset_id,
+                created_at=scene.updated_at,
+                source=SOURCE_ASSIGNED,
+            )
+        )
+    return out
+
+
 async def list_renders(
     db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID
 ) -> list[Render]:
     """列出这个项目的全部出图，最新的在前。
+
+    两个来源合起来：`tasks` 里的生成记录，加上用户自己钉的基准图
+    （见 `_assigned_base_images`）。合并之后统一按时间倒序，前端仍然
+    "取第一条就是当前这一版"，不需要知道有两个来源。
 
     刻意不做"每个角色/镜号只留最新一条"的收敛：那是展示策略，
     前端取第一条就是最新的，而保留全部让重试历史仍然可见。
@@ -483,6 +696,7 @@ async def list_renders(
         out.append(
             Render(
                 task_id=row.id,
+                source=SOURCE_GENERATED,
                 subject_kind=kind,
                 subject_ref=str(payload["subject_ref"]) if payload.get("subject_ref") else None,
                 shot_index=int(raw_index) if isinstance(raw_index, int) else None,
@@ -493,4 +707,7 @@ async def list_renders(
                 created_at=row.created_at,
             )
         )
+
+    out.extend(await _assigned_base_images(db, org_id=org_id, project_id=project_id))
+    out.sort(key=lambda r: r.created_at, reverse=True)
     return out

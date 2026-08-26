@@ -17,7 +17,7 @@ from fastapi import APIRouter, Header, Path, status
 
 from apps.api.modules.auth.deps import CurrentUser, DbSession
 from apps.api.modules.consistency import render
-from apps.api.modules.consistency.schemas import RenderOut
+from apps.api.modules.consistency.schemas import BaseImageIn, BaseImageOut, RenderOut
 from apps.api.modules.task.schemas import TaskOut
 
 router = APIRouter(prefix="/projects/{project_id}/images", tags=["images"])
@@ -67,6 +67,50 @@ async def generate_scene_reference(
         idempotency_key=idempotency_key,
     )
     return TaskOut.model_validate(task)
+
+
+@router.put("/characters/{ref}", response_model=BaseImageOut)
+async def set_character_portrait(
+    project_id: uuid.UUID,
+    payload: BaseImageIn,
+    user: CurrentUser,
+    db: DbSession,
+    ref: str = Path(min_length=1, max_length=32),
+) -> BaseImageOut:
+    """把一张已有资产钉成角色的基准立绘。**不出图，不扣 Credits。**
+
+    PUT 而不是 POST，语义差别是实打实的：POST 到同一个路径是"再生成
+    一张新的"（每次都花钱、每次结果不同），PUT 是"这个角色的基准图
+    就是它"——幂等，同一个 asset_id 提交十次和一次结果完全一样。
+    用同一个动词会让"点两下多扣一次钱"和"点两下没事"混在一起。
+    """
+    result = await render.assign_character_portrait(
+        db,
+        org_id=user.org_id,
+        project_id=project_id,
+        ref=ref,
+        asset_id=payload.asset_id,
+    )
+    return BaseImageOut.model_validate(result)
+
+
+@router.put("/scenes/{ref}", response_model=BaseImageOut)
+async def set_scene_reference(
+    project_id: uuid.UUID,
+    payload: BaseImageIn,
+    user: CurrentUser,
+    db: DbSession,
+    ref: str = Path(min_length=1, max_length=32),
+) -> BaseImageOut:
+    """把一张已有资产钉成场景的基准参考图。**不出图，不扣 Credits。**"""
+    result = await render.assign_scene_reference(
+        db,
+        org_id=user.org_id,
+        project_id=project_id,
+        ref=ref,
+        asset_id=payload.asset_id,
+    )
+    return BaseImageOut.model_validate(result)
 
 
 @router.post("/shots/{shot_index}", response_model=TaskOut, status_code=status.HTTP_201_CREATED)

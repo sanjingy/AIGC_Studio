@@ -153,6 +153,36 @@ DELETE /skills/{id}       软删
 **没做**：ADR-026 里的"项目内选择 Skill"。那要给 `projects` 加一列，
 且选了也不生效，这次没碰。
 
+**S14 基准图不止能生成**：角色基准立绘和场景参考图现在有三条来路——
+AI 生成（原有）、从资产库选一张、从本地传一张。后两条走
+`PUT /projects/{id}/images/characters/{ref}` 和 `.../scenes/{ref}`，
+入参只有 `{asset_id}`。
+
+- **PUT 不是 POST**：POST 到同一路径是"再生成一张"（每次扣 Credits、
+  结果不同），PUT 是"基准图就是它"（幂等）。用同一个动词会让
+  "点两下多扣一次钱"和"点两下没事"混在一起
+- **这条路径一分钱不花**：不建任务、不预扣、不结算，`billing`
+  在它的调用链上一行都不执行。`test_base_image_assign.py` 里每个用例都在
+  断言反面（无 Task、无 Ledger 流水、余额不动），因为唯一的风险就是
+  哪天有人把它接回 `create_task`
+- `GET /projects/{id}/images` 现在合并两个来源：`tasks` 里的生成记录
+  + 档案上钉的基准图。多出 `source`（`generated` / `assigned`），
+  `task_id` 因此**可空**——钉的那条没有任务，重试按钮要靠它判断。
+  合并后按时间倒序，前端"取第一条就是当前这一版"仍然成立
+- 换基准图**不递增 `version`**（那是"角色设定改了"用的），
+  也**不删旧资产**（用户可能想换回去）
+- 前端入口是 `RenderSlot` / 右栏角色卡上的「用已有图」下拉，
+  两个落点共用 `BaseImageActions`。菜单走 portal 画到 body：右栏角色卡
+  是 `overflow-hidden`，绝对定位的浮层会被裁掉只剩一条边
+- 上传复用资产模块现成的三段式直传（`assets.upload`），MIME 白名单、
+  大小上限、容量配额全在那条链路上，前端不另写一套阈值
+
+顺带发现的既有缺口（**没修**，不在范围内）：`base_portrait_asset_id` /
+`base_reference_asset_id` 这两列在此之前**从来没有任何代码写过**——
+AI 出图成功后也不回写。所以"AI 生成"那条路仍然只体现在 `tasks` 上，
+`reference_embedding` 同理还是空的。要让两条路完全对称，得在出图完成
+回调里补一次回写。
+
 **`feat/freeflow-prototype` 分支（未合并 `main`）**：设计包
 「分支B·自由工作流」的前端可点击原型——`/freeflow` 独立路由下的
 全局两级 IA（左侧常驻导航）+ 节点画布（`@xyflow/react`）+ 素材库 +
