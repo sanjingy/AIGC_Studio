@@ -296,10 +296,12 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                   {r === "screenplay" && (
                     <ScreenplayView data={output.screenplay} episodeIndex={episode} />
                   )}
-                  {/* 角色的出图按钮只在右栏，这里是纯档案 */}
-                  {r === "characters" && <CharactersView data={output.characters} />}
-                  {/* 场景出图入口在这里，不在右栏——右栏那张卡片只有角色，
-                      加一份场景卡等于同一张图两个按钮 */}
+                  {/* 角色出图在这里也能点，跟场景对齐——右栏 AssetPanel
+                      仍然保留同一个入口（那是跨角色的总览/待办视图），
+                      两处指向同一份 renders 状态，不是两张图。 */}
+                  {r === "characters" && (
+                    <CharactersView data={output.characters} renders={renders} />
+                  )}
                   {r === "scenes" && <ScenesView data={output.scenes} renders={renders} />}
                   {r === "storyboard" && (
                     <StoryboardView data={output.storyboard} renders={renders} />
