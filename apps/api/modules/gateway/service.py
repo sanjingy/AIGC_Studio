@@ -17,6 +17,13 @@
 - 不跨 Provider failover 回平台。他只配了一家，"轮换到另一家"这个选项
   并不存在；而计费此刻已经按 BYOK 折扣算过了（ADR-025），
   这时候拿平台 Key 顶上就是平台掏钱、用户按折扣价付款。
+
+**项目级模型偏好也在这里生效（ADR-024）**。调用带上 `project_id` 时，
+Gateway 查 `projects.model_preference[capability]`，把匹配的那条路由
+**排到最前**——注意是重排不是过滤：用户选了一个模型不等于他要求关掉容错。
+选中的模型熔断了、或者这一次调用失败了，仍然按原来的优先级顺序落到
+同能力的下一个模型上。"只准跑这一个，坏了就报错"从来不是用户在下拉框里
+选一次时表达的意思。
 """
 
 from __future__ import annotations
@@ -40,6 +47,7 @@ from apps.api.core.errors import ERRORS, AppError
 from apps.api.core.logging import get_logger
 from apps.api.modules.billing import credentials
 from apps.api.modules.gateway import breaker, catalog, probe
+from apps.api.modules.project import service as project_service
 
 log = get_logger(__name__)
 
@@ -161,6 +169,74 @@ class Resolution:
     secret: str = ""
 
 
+async def _load_model_preference(
+    *, org_id: uuid.UUID, project_id: uuid.UUID, capability: str
+) -> str | None:
+    """查这个项目给这个能力钉了哪个模型（ADR-024）。
+
+    单开一个函数的理由同 `_load_org_key`：它是这条链路上第二个需要真实
+    数据库的环节，而"偏好怎么影响路由顺序"本身不该只能靠整套 DB 才测得了。
+    """
+    async with session_scope() as db:
+        return await project_service.get_model_preference(
+            db, org_id=org_id, project_id=project_id, capability=capability
+        )
+
+
+def _prefer_model(routes: list[Route], model_id: str | None) -> list[Route]:
+    """把用户钉的那个模型排到最前，**其余原样保留在后面**。
+
+    重排而不是过滤，是这个函数存在的全部意义。过滤掉其余路由会让
+    "我想用高质档"变成"高质档挂了就整条链路报错"——用户在下拉框里
+    选一次表达不了这么强的意思，而且这是一条**已经预扣过 Credits** 的
+    调用，让它因为一个本可以自动绕过的故障失败，代价是用户白付一次钱。
+
+    匹配不上就整份原样返回：目录改过、模型下线、偏好过期——这些情况下
+    按默认优先级继续跑是对的，为一条陈旧的偏好把整个能力停掉不是。
+    """
+    if not model_id:
+        return routes
+    chosen = [r for r in routes if r.model_id == model_id]
+    if not chosen:
+        log.info("gateway.preference_stale", model_id=model_id)
+        return routes
+    return chosen + [r for r in routes if r.model_id != model_id]
+
+
+async def _preferred_model(
+    *,
+    capability: str,
+    org_id: uuid.UUID | None,
+    project_id: uuid.UUID | None,
+    allow_reasoning: bool,
+) -> str | None:
+    """解析出这次调用该优先用哪个模型。没有偏好返回 None。
+
+    `allow_reasoning=False` 时推理模型的偏好会被丢掉，这是 ADR-024 的
+    第二条硬约束：`deepseek-v4-*` 的思考 token 计入输出预算，钉在分类和
+    结构化抽取上会**返回空内容且不报错**（已踩过两次）。调用方知道自己
+    是什么 role，Gateway 不知道，所以这个判断由调用方给结论、这里执行。
+
+    只拦偏好、不动默认路由：默认优先级本来就把非推理模型排在前面，
+    推理模型只有在前一个真的失败之后才会被试到，那是一条罕见的降级路径，
+    不在本次改动的范围里；而钉住偏好会让它变成**每一次调用的首选**，
+    这才是新引入的风险。
+    """
+    if org_id is None or project_id is None:
+        return None
+    model_id = await _load_model_preference(
+        org_id=org_id, project_id=project_id, capability=capability
+    )
+    if model_id and not allow_reasoning and catalog.is_reasoning(model_id):
+        log.info(
+            "gateway.preference_dropped_no_reasoning",
+            capability=capability,
+            model_id=model_id,
+        )
+        return None
+    return model_id
+
+
 async def _load_org_key(*, org_id: uuid.UUID, capability: str) -> credentials.ResolvedKey | None:
     """查这个 org 有没有给这个能力配自己的 Key。
 
@@ -171,12 +247,21 @@ async def _load_org_key(*, org_id: uuid.UUID, capability: str) -> credentials.Re
         return await credentials.resolve_for_call(db, org_id=org_id, capability=capability)
 
 
-async def _resolve(capability: str, *, org_id: uuid.UUID | None) -> Resolution:
-    """决定这次调用用谁的 Key。
+async def _resolve(
+    capability: str,
+    *,
+    org_id: uuid.UUID | None,
+    preferred_model_id: str | None = None,
+) -> Resolution:
+    """决定这次调用用谁的 Key，以及路由按什么顺序试。
 
     org 配了自己的 Key 就**只**返回他那家的路由——不把平台路由缀在后面。
     缀上去的话，用户的 Key 一失败就会自动落到平台档，用户看不到自己的
     Key 坏了，平台默默替他付了钱，账面上还是 BYOK 折扣价。
+
+    `preferred_model_id` 是项目级模型覆盖（ADR-024），作用在**两条路的
+    出口上**——BYOK 也吃这份偏好，那时候候选集是同一把 Key 的几个模型，
+    "用户想用哪个模型"这个诉求跟 Key 是谁的无关。
     """
     if org_id is not None:
         own = await _load_org_key(org_id=org_id, capability=capability)
@@ -202,16 +287,19 @@ async def _resolve(capability: str, *, org_id: uuid.UUID | None) -> Resolution:
             )
             return Resolution(
                 capability=capability,
-                routes=_routes_for(
-                    spec, api_key=own.api_key, key_source=KeySource.ORG, org_id=org_id
+                routes=_prefer_model(
+                    _routes_for(spec, api_key=own.api_key, key_source=KeySource.ORG, org_id=org_id),
+                    preferred_model_id,
                 ),
                 key_source=KeySource.ORG,
                 secret=own.api_key,
             )
 
+    # 取副本再重排：`registry()` 是进程级单例，就地排序会让一个项目的
+    # 偏好泄漏给所有租户的后续调用。
     return Resolution(
         capability=capability,
-        routes=list(registry().for_capability(capability)),
+        routes=_prefer_model(list(registry().for_capability(capability)), preferred_model_id),
         key_source=KeySource.PLATFORM,
     )
 
@@ -235,16 +323,53 @@ async def _candidates(resolution: Resolution) -> list[Route]:
     return healthy + degraded or resolution.routes[:1]
 
 
-async def generate_text(request: TextRequest, *, org_id: uuid.UUID | None = None) -> TextResponse:
-    return await _call("text_generation", "generate_text", request, org_id=org_id)  # type: ignore[return-value]
+async def generate_text(
+    request: TextRequest,
+    *,
+    org_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
+    allow_reasoning: bool = True,
+) -> TextResponse:
+    """文本生成。
+
+    `project_id` 只用来读项目级模型偏好（ADR-024）。漏传的后果是"用户选的
+    模型不生效"，串不到别的租户——偏好的读取同时带 org_id。
+    `allow_reasoning=False` 由调用方在 role 属于 `no_reasoning_roles` 时给出。
+    """
+    return await _call(  # type: ignore[return-value]
+        "text_generation",
+        "generate_text",
+        request,
+        org_id=org_id,
+        project_id=project_id,
+        allow_reasoning=allow_reasoning,
+    )
 
 
-async def generate_image(request: ImageRequest, *, org_id: uuid.UUID | None = None) -> ImageResult:
-    return await _call("image_generation", "generate_image", request, org_id=org_id)  # type: ignore[return-value]
+async def generate_image(
+    request: ImageRequest,
+    *,
+    org_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
+) -> ImageResult:
+    """出图。出图模型里没有"推理模型"这回事，所以不带 `allow_reasoning`。"""
+    return await _call(  # type: ignore[return-value]
+        "image_generation",
+        "generate_image",
+        request,
+        org_id=org_id,
+        project_id=project_id,
+    )
 
 
 async def _call(
-    capability: str, method: str, request: object, *, org_id: uuid.UUID | None
+    capability: str,
+    method: str,
+    request: object,
+    *,
+    org_id: uuid.UUID | None,
+    project_id: uuid.UUID | None = None,
+    allow_reasoning: bool = True,
 ) -> object:
     """按优先级依次尝试，可 failover 的错误才继续换下一家。
 
@@ -255,7 +380,13 @@ async def _call(
     BYOK 时候选集里只有那一家的几个模型，所以"换下一家"退化成
     "同一把 Key 换个模型"——同账号同价，换得起；跨到平台档换不起。
     """
-    resolution = await _resolve(capability, org_id=org_id)
+    preferred = await _preferred_model(
+        capability=capability,
+        org_id=org_id,
+        project_id=project_id,
+        allow_reasoning=allow_reasoning,
+    )
+    resolution = await _resolve(capability, org_id=org_id, preferred_model_id=preferred)
     try:
         return await _attempt(capability, method, request, resolution)
     except AppError as exc:

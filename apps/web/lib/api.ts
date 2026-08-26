@@ -89,6 +89,11 @@ export type Project = {
   status: string;
   spent_credits: number;
   /**
+   * 项目级模型覆盖（ADR-024）：capability → model_id。
+   * 没设过的项目是 `{}` 而不是 null——后端已经统一过了，这里不用再兜底。
+   */
+  model_preference: Record<string, string>;
+  /**
    * 上游被修订后已经过期、需要同步的阶段产出。
    * 后端记在 `current_state_json` 里，所以刷新页面也还在——
    * 不要用 revise 那一次响应的返回值当真相。
@@ -251,6 +256,23 @@ export const projects = {
     apiFetch<Task>(`/projects/${id}/images/shots/${shotIndex}`, {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
+    }),
+
+  /**
+   * 按能力覆盖这个项目用哪个模型（ADR-024）。
+   *
+   * 每次只传正在改的那一个能力，后端按 key 合并——不要把整份
+   * `model_preference` 读出来再传回去，两个标签页同时开着会互相覆盖。
+   *
+   * `modelId = null` 是"回到默认"，不是"没填"。
+   *
+   * 存偏好本身不花钱：它只改下次解析的输入，不预扣也不结算。
+   * 真正的重新估价发生在下一次生成，按 `model_pricing` 算（ADR-024 硬约束 1）。
+   */
+  setModelPreference: (id: string, capability: string, modelId: string | null) =>
+    apiFetch<Project>(`/projects/${id}/model-preference`, {
+      method: "PATCH",
+      body: JSON.stringify({ capability, model_id: modelId }),
     }),
 };
 
@@ -476,6 +498,40 @@ export const providerCredentials = {
       method: "POST",
       body: JSON.stringify(apiKey ? { api_key: apiKey } : {}),
     }),
+};
+
+// ---------------------------------------------------------------- 模型目录（ADR-024）
+
+export type ModelOption = {
+  model_id: string;
+  /** 档位名，例如「快速档」。后端给——有哪些模型是后端定的 */
+  label: string;
+  /**
+   * 这一档的定位说明。**只讲模型本身（快 / 推理强 / 细节多），不讲价格**：
+   * 价格在 `model_pricing` 表里，上游一调价，前端冻着的那句结论就是谎话。
+   */
+  note: string;
+};
+
+export type CapabilityModels = {
+  capability: string;
+  label: string;
+  /** 平台真的接了这家。false 时 models 必然为空，界面要照实说"未接入" */
+  available: boolean;
+  provider_id: string | null;
+  provider_label: string | null;
+  /** Skill 的 model_policy.user_selectable 允不允许用户改这个能力 */
+  user_selectable: boolean;
+  models: ModelOption[];
+  /** 没设偏好时 Gateway 先试的那个，用来标注「默认」 */
+  default_model_id: string | null;
+  /** available=false 时为什么。后端给的原话，前端不要自己编 */
+  unavailable_reason: string | null;
+};
+
+export const modelCatalog = {
+  /** 有哪些能力、每个能力能选哪几个模型。只读，选择动作落在项目上。 */
+  list: () => apiFetch<{ items: CapabilityModels[] }>("/model-catalog"),
 };
 
 // ---------------------------------------------------------------- Skill（ADR-026）

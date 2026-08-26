@@ -8,17 +8,21 @@
 from apps.api.modules.project.service import (
     create_project,
     delete_project,
+    get_model_preference,
     get_project,
     list_projects,
     project_exists,
+    set_model_preference,
     update_project,
 )
 
 __all__ = [
     "create_project",
     "delete_project",
+    "get_model_preference",
     "get_project",
     "list_projects",
     "project_exists",
+    "set_model_preference",
     "update_project",
 ]

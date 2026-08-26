@@ -32,6 +32,7 @@ from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
 from apps.api.modules.agent import repository as repo
 from apps.api.modules.agent.llm import LLMRequest, get_provider
+from skills import registry as skill_registry
 
 log = get_logger(__name__)
 
@@ -123,6 +124,23 @@ def render_prompt(template: str, variables: dict[str, Any]) -> str:
     return out
 
 
+def no_reasoning_roles() -> frozenset[str]:
+    """哪些 role 不许用推理模型（ADR-024 硬约束 2）。
+
+    取所有已注册 Skill 声明的并集，不挑"当前 Skill"——Skill 运行时还没接线
+    （ADR-026），此刻根本不存在"当前 Skill"这个概念。并集是这个前提下唯一
+    安全的读法：漏掉一个 role 的代价是它拿着推理模型**返回空内容且不报错**，
+    多算一个 role 的代价只是它的模型偏好被忽略、按默认优先级跑。
+
+    读法与 `billing/credentials.configurable_capabilities()` 一致——
+    那边同样是从 Skill 声明里取用户可改的能力集合。
+    """
+    roles: set[str] = set()
+    for spec in skill_registry.registry().specs.values():
+        roles.update(spec.model_policy.no_reasoning_roles)
+    return frozenset(roles)
+
+
 async def complete_structured(
     *,
     spec: AgentSpec,
@@ -130,6 +148,8 @@ async def complete_structured(
     variables: dict[str, Any] | None = None,
     system_suffix: str = "",
     on_attempt: AttemptSink | None = None,
+    org_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> Completion:
     """按 spec 调一次模型并拿到合法的结构化产出。**不碰数据库。**
 
@@ -179,6 +199,9 @@ async def complete_structured(
                     user=user_input,
                     schema_name=spec.output_schema,
                     max_output_tokens=spec.max_output_tokens,
+                    org_id=org_id,
+                    project_id=project_id,
+                    allow_reasoning=spec.role not in no_reasoning_roles(),
                 )
             )
             raw = response.text
@@ -271,6 +294,11 @@ async def run_agent(
             variables=variables,
             system_suffix=system_suffix,
             on_attempt=_persist,
+            # 这两个一路传到 Gateway：org_id 决定用谁的 Key（ADR-027），
+            # project_id 决定用哪个模型（ADR-024）。在此之前这条链路
+            # 一个都没往下传，用户在设置页做的选择到不了真正的调用点。
+            org_id=org_id,
+            project_id=project_id,
         )
     except AppError as exc:
         # 必须把 run 标成 failed，否则它会永远卡在 running，

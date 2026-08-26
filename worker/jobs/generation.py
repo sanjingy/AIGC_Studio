@@ -50,9 +50,15 @@ async def generate_image(payload: dict[str, Any], *, org_id: uuid.UUID) -> dict[
             additional_bytes=TYPICAL_IMAGE_BYTES,
         )
 
+    raw_project = payload.get("project_id")
+    project_id = uuid.UUID(str(raw_project)) if raw_project else None
+
     # org_id 必须带上：配了自己 Key 的租户要用他自己的那把（ADR-027）。
     # 漏了这个参数就会退回平台 Key——而计费那边已经按 BYOK 折扣算过了，
     # 差额全由平台承担，且不报任何错。
+    #
+    # project_id 带上是为了项目级模型偏好（ADR-024）。它比 org_id 温和得多：
+    # 漏了只是用户在设置页选的出图模型不生效，不会有人多付钱。
     result = await gateway.generate_image(
         ImageRequest(
             prompt=prompt,
@@ -62,10 +68,8 @@ async def generate_image(payload: dict[str, Any], *, org_id: uuid.UUID) -> dict[
             seed=payload.get("seed"),
         ),
         org_id=org_id,
+        project_id=project_id,
     )
-
-    raw_project = payload.get("project_id")
-    project_id = uuid.UUID(str(raw_project)) if raw_project else None
 
     asset_ids: list[str] = []
     for index, url in enumerate(result.urls):

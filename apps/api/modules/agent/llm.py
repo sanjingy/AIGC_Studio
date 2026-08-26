@@ -32,6 +32,17 @@ class LLMRequest:
     # 漏传只会让用户白配了 Key，不会让别人的 Key 被用掉。
     org_id: uuid.UUID | None = None
 
+    # 哪个项目在跑。Gateway 拿它读项目级模型偏好（ADR-024）。
+    # 不挂项目的调用（资产库里那条直接生成角色档案的路径）为 None，
+    # 走 Gateway 的默认优先级。
+    project_id: uuid.UUID | None = None
+
+    # 这一步允不允许用推理模型。False 时项目级偏好里的推理模型会被丢掉，
+    # 按默认优先级走。ADR-024 硬约束 2：`no_reasoning_roles` 里的 role
+    # 用上 deepseek-v4-* 会**返回空内容且不报错**。
+    # 判断放在调用方是因为只有它知道自己是什么 role。
+    allow_reasoning: bool = True
+
 
 @dataclass(frozen=True, slots=True)
 class LLMResponse:
@@ -58,6 +69,8 @@ class GatewayLLM:
                 temperature=request.temperature,
             ),
             org_id=request.org_id,
+            project_id=request.project_id,
+            allow_reasoning=request.allow_reasoning,
         )
         if resp.reasoning_tokens:
             # 推理 token 计入输出预算且要付费，量大时要能看见
