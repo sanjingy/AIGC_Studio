@@ -95,7 +95,14 @@ Skill 层的 role 兜底。**Skill 运行时仍未接线**，阶段图还硬编�
 分镜出图在分镜表的「画面」列，走 `POST /projects/{id}/images/characters/{ref}`
 和 `.../images/shots/{index}`——提示词一律由 `consistency.compose` 合成，
 前端传不了也不该传风格词。进度走项目 SSE，出图落 `assets` 表。
-场景出图和视频不在内（场景一致性还没设计）。
+场景出图和视频当时不在内（场景一致性还没设计）。**`feat/freeflow-prototype`
+分支上已经补上场景一致性资产流水线**（`scene_profiles` 表、
+`consistency.sync_from_scenes_output`、`compose.describe_scene`/
+`reference_scene_prompt`，一致性锚点用 `SceneSheet` 早就有的
+`camera_axis`/`fixed_references` 两个字段），出图端点
+`POST /projects/{id}/images/scenes/{ref}`，`compose_shot` 现在也会把
+场景信息注入镜头提示词（可选参数，缺场景档案时优雅降级为旧行为）。
+视频仍是 M2 待办。
 
 **S12 工作台 v2 布局**：项目页从"一列面板"改成四栏工作台，
 版式见 `design-system/aigc-studio/MASTER.md` §5。要点：
@@ -108,14 +115,18 @@ Skill 层的 role 兜底。**Skill 运行时仍未接线**，阶段图还硬编�
 - 左栏「流程」和右栏「看档案」用 `#group-xxx` 锚点打开抽屉。外壳在项目页
   的上层，回调传不下去，锚点是两边都能写、页面能听的公共通道
 - 右栏可折叠：1440 屏上中栏只有 640，收起右栏把 352 还给中栏
-- 右栏是项目资产：角色可出图，场景只读列出，道具没有
+- 右栏是项目资产：角色可出图，道具没有。场景现在也能出图了
+  （`feat/freeflow-prototype`），入口在中栏抽屉的场景档案里而不是右栏——
+  右栏 `AssetPanel` 的既有规则是"出图入口只有一个"，场景没有对应的右栏卡片，
+  和角色不对称，是有意的，见该分支的场景出图交付记录
 - 「集」不是后端实体，只是 `screenplay.episodes` 里的一项。项目栏里选一集
   只筛中栏剧本视图的显示，不改变任何生产范围，所以也不能增删
 - 设计稿原件在 `design-system/aigc-studio/项目布局导入与设计规划/`
 
 稿子里有而**没做**的，都是因为后端没有对应能力，做了就是假入口：
 拖拽编排阶段（阶段图后端硬编码）、道具（`agents/schemas.py` 里没有这个
-产出）、场景出图、参考图上传（advance/revise 只收文本）、视频生成（M2）。
+产出）、参考图上传（advance/revise 只收文本）、视频生成（M2）。
+（场景出图原本也在这个列表里，`feat/freeflow-prototype` 分支已经补上，见上。）
 
 **S13 Skill 上传（ADR-026）**：`apps/api/modules/skill/` 补上了
 service/repository/router，接口四个：
@@ -141,6 +152,30 @@ DELETE /skills/{id}       软删
 
 **没做**：ADR-026 里的"项目内选择 Skill"。那要给 `projects` 加一列，
 且选了也不生效，这次没碰。
+
+**`feat/freeflow-prototype` 分支（未合并 `main`）**：设计包
+「分支B·自由工作流」的前端可点击原型——`/freeflow` 独立路由下的
+全局两级 IA（左侧常驻导航）+ 节点画布（`@xyflow/react`）+ 素材库 +
+分镜编辑 + 任务中心 + 项目设置 + 悬浮 AI 助手，主线四栏工作台
+`app/(app)/...` 一个字没动。REQ-000（要不要替换主线工作台）**仍未决定**，
+这条分支只验证方向，见 `design-system/项目布局导入与设计规划.zip`。
+前端范围内的门禁全绿；节点图存储与执行引擎、Skill 接入执行引擎、
+跨类型资产统一索引三项按需求文档本来就是后端未设计项，没做。
+
+同一分支上顺手补了三处主线也受益的真实后端能力（都不是原型专属）：
+
+- **项目删除**：`DELETE /projects/{id}` 软删其实早就实现了
+  （`repo.soft_delete`），只是前端 `lib/api.ts` 没封装出来，界面因此
+  长期显示"未接入"。
+- **场景一致性资产流水线**：见上方 S11 段落更新。
+- **ADR-024 项目级模型偏好接线**：`projects.model_preference` 这个
+  JSONB 字段和 ADR 早就有了，从来没人接到 Gateway 的路由解析上。
+  这次接上，`gateway._resolve` 按偏好重排候选路由（不是过滤，选中模型
+  失败仍自动 failover 到同能力下一个）。**顺带发现文本生成链路上
+  `org_id` 从未被传到 Gateway 这个既有 bug**——配了 BYOK Key 按折扣价
+  计费的租户，实际调用一直在走平台的 Key，平台在倒贴钱；这次一并修了，
+  是一次可感知的计费路径变化，不是纯内部重构。模型页面在
+  `/freeflow/models`，视频/语音诚实标注"M2 待办"，没有假下拉框。
 
 **M2 待办**（"出片"）：TTS → 音频优先时间线 → ffmpeg 合成，目标产出第一条完整成片。
 详见 `12_MVP_Roadmap.md`。
