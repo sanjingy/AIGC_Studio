@@ -1,5 +1,10 @@
 # AIGC Studio 架构与开发文档
 
+> **2026-09-02 起本目录为历史资料，唯一入口是 [`../project_docs/`](../project_docs/README.md)。**
+> 例外：`15_ArchitectureDecisions.md` 仍是 ADR 的唯一存放处，全部有效。
+> 本目录其余文档不再更新，与 `project_docs` 冲突时以 `project_docs` 为准；
+> 保留是因为 ADR 和评审记录引用了它们。
+
 第二版蓝图。基于 2026-08-16 架构评审修订，评审记录见
 [`../reviews/2026-08-16_架构评审与修订记录.md`](../reviews/2026-08-16_架构评审与修订记录.md)。
 

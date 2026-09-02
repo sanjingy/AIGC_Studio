@@ -7,15 +7,20 @@
 
 ## 先读什么
 
-不要一上来就改代码。按这个顺序读，大概 20 分钟：
+不要一上来就改代码。按这个顺序读，大概 20 分钟。
+**`project_docs/` 是唯一入口**（2026-09-02 起），`aigc_studio_docs/` 除 ADR 外都是历史资料：
 
 | 顺序 | 文档 | 为什么先读它 |
 |---|---|---|
-| 1 | `aigc_studio_docs/19_UnitEconomics.md` | 先搞清楚钱怎么算。**盈亏平衡 = 每天 16 部成片**，所有优先级都用它衡量 |
-| 2 | `aigc_studio_docs/17_ConsistencyEngine.md` | 核心技术难点，也是唯一的护城河。§8.1 有实测数据 |
-| 3 | `aigc_studio_docs/15_ArchitectureDecisions.md` | 19 条 ADR，全部已定决策 |
-| 4 | `aigc_studio_docs/12_MVP_Roadmap.md` | 当前在哪个里程碑 |
-| 5 | `reviews/2026-08-16_架构评审与修订记录.md` | 为什么是现在这个设计 |
+| 1 | `project_docs/00_CURRENT_STATUS.md` | 前半页是产品终点：用户是谁、输入什么、终点是"逐镜带配音的 MP4"、明确不做什么 |
+| 2 | `project_docs/DECISIONS_2026-09-02.md` | 本轮大改的全部决策，与任何文档冲突时以它为准 |
+| 3 | `aigc_studio_docs/15_ArchitectureDecisions.md` | 33 条 ADR，全部有效。ADR-030 ~ 033 是本轮新增 |
+| 4 | `project_docs/04_MODULE_ROADMAP.md` | 当前在哪一波、黄金路径是什么 |
+| 5 | `project_docs/modules/` | 要改哪个模块就读哪份 |
+| 6 | `aigc_studio_docs/19_UnitEconomics.md` | 钱怎么算。**盈亏平衡 = 每天 16 部成片**（"部"的定义随 ADR-032 待重估） |
+| 7 | `aigc_studio_docs/17_ConsistencyEngine.md` | 核心技术难点，也是唯一的护城河。§8.1 有实测数据 |
+
+下面"当前进度"一节记录的是 S1 ~ S14 的实施史，仍然准确，但**方向以 `project_docs` 为准**。
 
 ---
 
