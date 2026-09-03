@@ -5,7 +5,7 @@ import { AlertTriangle, CheckCircle2, Loader2, X } from "lucide-react";
 
 import { ApiRequestError, orgSkills, type OrgSkill } from "@/lib/api";
 
-/** 上传成功后广播一声，左栏的技能库跟着刷新。 */
+/** 上传成功后广播一声，正在列 Skill 的地方（资产库「技能」chip）跟着刷新。 */
 export const SKILLS_CHANGED = "skills:changed";
 
 export function notifySkillsChanged() {
@@ -19,8 +19,12 @@ export function notifySkillsChanged() {
  * 一套校验，两套规则迟早分叉，而那套规则是安全边界（处理器白名单、
  * 导出路径白名单），分叉的后果不是显示不一致而是放行不该放行的东西。
  *
- * 挂成一个 hook 而不是组件：触发它的按钮长在输入框的附件菜单里，
- * 结果要显示在输入框上方，两处位置不同。
+ * 挂成一个 hook 而不是组件：触发按钮和结果提示不在同一处（资产库
+ * 「技能」chip 里按钮在标题行、提示在列表上方，空态里两者又都在卡片内），
+ * 组件包不住这种布局差异。
+ *
+ * 入口在**资产库的「技能」chip**（决策记录 §11.5 裁决 8）。原来那个
+ * 「对话框 + 附件菜单」的入口随旧壳一起删了。
  */
 export function useSkillUpload() {
   const inputRef = useRef<HTMLInputElement>(null);

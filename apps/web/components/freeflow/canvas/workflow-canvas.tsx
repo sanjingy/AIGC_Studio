@@ -20,8 +20,6 @@ import {
 import { Ban, Copy, Trash2, X } from "lucide-react";
 
 import { NODE_TYPES_NEEDING_BACKEND, type FreeflowNodeType } from "@/lib/freeflow/types";
-import { MOCK_GRAPH } from "@/lib/freeflow/mock-data";
-
 import "@xyflow/react/dist/style.css";
 
 import { CanvasActionsContext } from "./canvas-actions";
@@ -29,6 +27,7 @@ import { MenuItem, MenuShell } from "./canvas-menu";
 import { CanvasRail } from "./canvas-rail";
 import { CanvasToolbar } from "./canvas-toolbar";
 import { DeletableEdge } from "./deletable-edge";
+import { MOCK_GRAPH } from "./mock-data";
 import { NodeCard } from "./node-card";
 import { NodePicker } from "./node-picker";
 import {

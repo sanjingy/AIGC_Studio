@@ -1,6 +1,4 @@
-import { HomeProjectGrid } from "@/components/freeflow/home-project-grid";
-import { HomeQuickStart } from "@/components/freeflow/home-quick-start";
-import { HomeTemplateGrid } from "@/components/freeflow/home-template-grid";
+import { ProjectLobby } from "@/components/freeflow/project-lobby";
 
 /**
  * 01 首页（需求文档「屏幕 01」、REQ-010/011）。
@@ -14,10 +12,6 @@ import { HomeTemplateGrid } from "@/components/freeflow/home-template-grid";
  */
 export default function FreeflowHomePage() {
   return (
-    <div className="mx-auto flex max-w-[1200px] flex-col gap-6">
-      <HomeProjectGrid />
-      <HomeQuickStart />
-      <HomeTemplateGrid />
-    </div>
+    <ProjectLobby />
   );
 }

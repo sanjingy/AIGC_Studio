@@ -1,142 +1,37 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  CreditCard,
-  FolderOpen,
-  Home,
-  LayoutTemplate,
-  Plus,
-  Server,
-  Settings,
-  Users,
-  Wrench,
-  Cpu,
-  FolderKanban,
-  type LucideIcon,
-} from "lucide-react";
-
-import { assets, credits, ApiRequestError, type Balance, type StorageUsage } from "@/lib/api";
-import { creditsToYuan, cn } from "@/lib/utils";
+import { Boxes, FolderKanban, Home, Images, Plus, type LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 
-// 01 首页需求里列的 10 项。多数是占位（分支内未展开，见 README「全局层」）——
-// 只有首页和资源库有真实页面，其余点进去是"即将支持"提示，不是死链接。
+/**
+ * 导航里只放已经接了真实后端的页面（FR-WEB-011）。
+ *
+ * 模型页读 `/model-catalog` 和 `/provider-credentials`，是真页面，所以进导航
+ * （决策记录 §11.5 裁决 10）。成员 / 服务器 / 模板 / 技能四个占位路由已删；
+ * 账单与设置两个占位页留在路由里但不进这张表——不在导航里就不是假入口
+ * （同 §11.5 裁决 11）。节点画布按 ADR-030 第 5 条隐藏，代码保留。
+ */
 const NAV: NavItem[] = [
   { href: "/freeflow", label: "首页", icon: Home },
   { href: "/freeflow/projects", label: "项目", icon: FolderKanban },
-  { href: "/freeflow/templates", label: "模板", icon: LayoutTemplate },
-  { href: "/freeflow/skills", label: "技能", icon: Wrench },
-  { href: "/freeflow/models", label: "模型", icon: Cpu },
-  { href: "/freeflow/assets", label: "资源库", icon: FolderOpen },
-  { href: "/freeflow/servers", label: "服务器", icon: Server },
-  { href: "/freeflow/members", label: "成员与团队", icon: Users },
-  { href: "/freeflow/billing", label: "账单与订阅", icon: CreditCard },
-  { href: "/freeflow/settings", label: "设置", icon: Settings },
+  { href: "/freeflow/assets", label: "资产", icon: Images },
+  { href: "/freeflow/models", label: "模型", icon: Boxes },
 ];
 
-/**
- * 全局层左侧常驻导航，212px。REQ-002：Token 余额和存储用量接现有
- * 计费 Ledger 真实接口（`/credits/balance`、`/assets/usage`），不是占位数字——
- * 这两个接口本来就存在，没理由假装没有。
- */
 export function GlobalNavRail() {
   const pathname = usePathname();
-  const [balance, setBalance] = useState<Balance | null>(null);
-  const [usage, setUsage] = useState<StorageUsage | null>(null);
-
-  useEffect(() => {
-    credits
-      .balance()
-      .then(setBalance)
-      .catch(() => setBalance(null));
-    assets
-      .usage()
-      .then(setUsage)
-      .catch(() => setUsage(null));
-  }, []);
-
-  return (
-    <nav
-      aria-label="全局导航"
-      className="flex w-[212px] shrink-0 flex-col overflow-y-auto border-r border-border bg-surface"
-    >
-      <div className="flex items-center gap-2 px-3.5 py-3.5">
-        <div className="flex size-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-fg">
-          A
-        </div>
-        <span className="text-sm font-semibold text-fg">AIGC Studio</span>
-      </div>
-
-      <div className="px-2.5 pb-2.5">
-        <Link
-          href="/freeflow"
-          className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-fg transition-colors duration-150 hover:bg-primary-hover"
-        >
-          <Plus aria-hidden className="size-3.5" />
-          新建项目
-        </Link>
-      </div>
-
-      <ul className="flex flex-col gap-0.5 px-2.5 pb-2.5">
-        {NAV.map(({ href, label, icon: Icon }) => {
-          const active = href === "/freeflow" ? pathname === href : pathname.startsWith(href);
-          return (
-            <li key={href}>
-              <Link
-                href={href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors duration-150",
-                  active
-                    ? "bg-primary-soft font-medium text-primary"
-                    : "text-fg-muted hover:bg-surface-2 hover:text-fg",
-                )}
-              >
-                <Icon aria-hidden className="size-4 shrink-0" />
-                {label}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-
-      <div className="mt-auto flex flex-col gap-2 border-t border-border px-3.5 py-3">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-fg-subtle">Token 余额</span>
-          <span className="tnum font-medium text-fg">
-            {balance ? creditsToYuan(balance.balance) : "—"}
-          </span>
-        </div>
-        {usage && (
-          <div className="flex flex-col gap-1">
-            <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
-              <div
-                className="h-full rounded-full bg-primary"
-                style={{ width: `${Math.min(usage.percent_used, 100)}%` }}
-              />
-            </div>
-            <span className="text-xs text-fg-subtle">
-              存储 {usage.percent_used}%
-              {usage.quota_bytes === null ? "（不限容量）" : ""}
-            </span>
-          </div>
-        )}
-      </div>
-    </nav>
-  );
+  return <nav aria-label="全局导航" className="hidden w-[72px] shrink-0 flex-col border-r border-border bg-surface md:flex 2xl:w-20">
+    <div className="flex h-14 items-center justify-center border-b border-border"><div className="flex size-8 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-fg">A</div></div>
+    <div className="px-3 pt-3"><Link href="/freeflow" aria-label="新建项目" title="新建项目" className="flex min-h-11 items-center justify-center rounded-md bg-primary text-primary-fg transition-colors duration-150 hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"><Plus aria-hidden className="size-4" /></Link></div>
+    <ul className="mt-3 flex flex-col gap-1 px-3">{NAV.map(({ href, label, icon: Icon }) => {
+      const active = href === "/freeflow" ? pathname === href : pathname.startsWith(href);
+      return <li key={href}><Link href={href} aria-label={label} title={label} aria-current={active ? "page" : undefined} className={cn("flex min-h-11 flex-col items-center justify-center gap-1 rounded-md px-1 py-2 text-[10px] transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary", active ? "bg-primary-soft font-medium text-primary" : "text-fg-muted hover:bg-surface-2 hover:text-fg")}><Icon aria-hidden className="size-4" /><span className="hidden 2xl:inline">{label}</span><span className="sr-only 2xl:hidden">{label}</span></Link></li>;
+    })}</ul>
+  </nav>;
 }
 
-/** 分支内为占位的全局层页面（项目/模板/技能/模型/服务器/成员/账单/设置）共用这个壳。
- *  不写成假入口——点进去老实说"即将支持"，不假装有功能。 */
-export function GlobalPlaceholder({ title }: { title: string }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-      <h1 className="text-lg font-semibold text-fg">{title}</h1>
-      <p className="text-sm text-fg-subtle">这是自由工作流原型的占位页，即将支持。</p>
-    </div>
-  );
-}
+export function GlobalPlaceholder({ title }: { title: string }) { return <div className="flex min-h-full flex-col items-center justify-center gap-2 p-6 text-center"><h1 className="text-lg font-semibold text-fg">{title}</h1><p className="max-w-md text-sm text-fg-subtle">此功能尚未接入；工作台只显示可执行的创作流程。</p></div>; }

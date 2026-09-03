@@ -188,6 +188,12 @@ AI 出图成功后也不回写。所以"AI 生成"那条路仍然只体现在 `t
 `reference_embedding` 同理还是空的。要让两条路完全对称，得在出图完成
 回调里补一次回写。
 
+**2026-09-03 起旧壳已删（ADR-030）**：`app/(app)/`、`components/shell/`、四栏工作台
+`project-composer` 全部删除，`/dashboard` 只剩重定向到 `/freeflow`。上面 S11 / S12 里
+关于「项目页右栏 / 中栏抽屉」的入口描述是历史，现在唯一的壳是 `/freeflow`，
+推进 / 审批 / 返工 / 出图 / 任务 / 上传都在里面，状态表见
+`project_docs/modules/11_WEB_WORKBENCH.md` §3.1。
+
 **`feat/freeflow-prototype` 分支（未合并 `main`）**：设计包
 「分支B·自由工作流」的前端可点击原型——`/freeflow` 独立路由下的
 全局两级 IA（左侧常驻导航）+ 节点画布（`@xyflow/react`）+ 素材库 +

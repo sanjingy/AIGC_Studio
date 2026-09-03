@@ -13,6 +13,7 @@ from apps.api.modules.project.service import (
     list_projects,
     project_exists,
     set_model_preference,
+    update_current_state,
     update_project,
 )
 
@@ -24,5 +25,6 @@ __all__ = [
     "list_projects",
     "project_exists",
     "set_model_preference",
+    "update_current_state",
     "update_project",
 ]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -91,6 +92,33 @@ class ProjectOut(BaseModel):
     @classmethod
     def _no_null_preference(cls, v: object) -> object:
         return v or {}
+
+
+class ProjectStateOut(BaseModel):
+    """项目的编排状态。
+
+    在这条接口之前，`current_state_json` **没有任何 GET 接口**：它是
+    ADR-008 里"状态的唯一权威"，却只在 `advance` / 审核决议的响应里带一次，
+    刷新就没了。后果是前端只能从 `agent_runs` 反推阶段，而 ADR-029 的
+    字段级 Patch 明明写进了 `current_state_json`——保存成功、刷新回旧值。
+
+    所以这里把它整份透出。**只读**：写路径仍然只有编排器和 content 模块，
+    这条不接受任何写入。
+
+    `stage` 由 `agent.service.current_stage` 计算（含旧阶段名翻译），
+    不是直接返回 JSONB 里那个字符串——库里存量项目还带着 `story` /
+    `visual` 这类旧值。
+    """
+
+    project_id: uuid.UUID
+    stage: str
+    # 整份编排状态：source、router、五个阶段产出、stale_roles 都在里面。
+    # 不裁剪成"只给产出"——裁剪等于在这里再定义一次哪些键算产出，
+    # 而那张表在 orchestrator 里已经有一份了。
+    current_state_json: dict[str, Any]
+    stale_roles: list[str]
+    # 用来判断本地缓存新不新。项目行的 updated_at，不是某个阶段的。
+    updated_at: datetime
 
 
 class ProjectPage(BaseModel):

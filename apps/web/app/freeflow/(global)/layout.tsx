@@ -8,7 +8,7 @@ export default function GlobalLayout({ children }: { children: React.ReactNode }
       <GlobalNavRail />
       <div className="flex min-w-0 flex-1 flex-col">
         <GlobalTopbar />
-        <main className="min-h-0 flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>
   );

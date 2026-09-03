@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -175,3 +176,20 @@ async def get_model_preference(
         return None
     value = (row.model_preference or {}).get(capability)
     return value if isinstance(value, str) and value else None
+
+
+async def update_current_state(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, state: dict[str, Any]
+) -> Project:
+    """整份写回编排状态（ADR-008 的唯一权威）。**不 commit。**
+
+    不 commit 是有意的：字段级编辑要把"改产出 + 记变更 + 同步一致性投影"
+    放在同一个事务里，任何一步失败都不能留下一份改了产出却没记账的状态。
+    编排器那条路径自己有 `_save` 负责提交，两边不共用一个提交点。
+
+    JSONB **必须整个换成新 dict**：原地 `state[k] = v` 改的是同一个对象，
+    flush 时比较不出差异，改动被悄悄丢掉，表现为"改了但没变"。
+    """
+    row = await get_project(db, org_id=org_id, project_id=project_id)
+    row.current_state_json = dict(state)
+    return row

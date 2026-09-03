@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { Check, Eye, EyeOff, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -258,7 +257,8 @@ function PendingSection({ item }: { item: CapabilityModels }) {
 }
 
 // ---------------------------------------------------------------- Key 表单
-// 与 /settings/keys 的 KeyForm 同形：同一套接口、同一套交互。
+// Key 管理已经全部在这一页（决策记录 §11.5 裁决 9）：旧壳的 /settings/keys 要删，
+// 这里就是它的落点——列表在上面每个能力块里，单条编辑是下面这个表单。
 // 那一页仍然是账号级密钥的主入口，这里只是把它放到模型旁边。
 
 function KeyForm({
@@ -386,12 +386,6 @@ function KeyForm({
         <Button variant="ghost" size="sm" disabled={busy !== null} onClick={onCancel}>
           取消
         </Button>
-        <Link
-          href="/settings/keys"
-          className="ml-auto text-xs text-fg-subtle underline-offset-2 hover:text-fg hover:underline"
-        >
-          在设置页统一管理
-        </Link>
       </div>
     </div>
   );

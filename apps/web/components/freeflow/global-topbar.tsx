@@ -1,39 +1,6 @@
-"use client";
+import Link from "next/link";
+import { FolderOpen, Plus } from "lucide-react";
 
-import { Bell, Search } from "lucide-react";
-
-/**
- * 全局层顶栏：搜索 + 通知 + 头像。搜索框原型里未定义要连什么后端
- * （没有 REQ 编号覆盖），本轮只做视觉，不接真实搜索——接了搜不出
- * 结果比不放更容易让人以为坏了。
- */
 export function GlobalTopbar() {
-  return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
-      <div className="relative max-w-md flex-1">
-        <Search
-          aria-hidden
-          className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-fg-subtle"
-        />
-        <input
-          type="search"
-          placeholder="搜索项目、模板、素材…"
-          disabled
-          title="原型阶段未接搜索"
-          className="w-full rounded-lg border border-border bg-surface-2 py-1.5 pr-3 pl-8 text-sm text-fg placeholder:text-fg-subtle disabled:cursor-not-allowed"
-        />
-      </div>
-
-      <button
-        type="button"
-        disabled
-        title="原型阶段未接通知"
-        className="rounded-lg p-2 text-fg-muted disabled:cursor-not-allowed"
-      >
-        <Bell aria-hidden className="size-4" />
-      </button>
-
-      <div className="size-8 rounded-full bg-surface-3" aria-hidden />
-    </header>
-  );
+  return <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-4 lg:px-6"><div className="min-w-0 flex-1"><p className="text-[10px] font-semibold tracking-[0.16em] text-fg-subtle uppercase">AIGC Studio</p><p className="truncate text-sm font-semibold text-fg">创作工作台</p></div><Link href="/freeflow/assets" className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm text-fg-muted transition-colors duration-150 hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"><FolderOpen aria-hidden className="size-3.5" />资产</Link><Link href="/freeflow" aria-label="新建项目" className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-fg transition-colors duration-150 hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"><Plus aria-hidden className="size-3.5" />新建</Link><div className="flex size-8 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-fg" aria-label="当前用户">A</div></header>;
 }

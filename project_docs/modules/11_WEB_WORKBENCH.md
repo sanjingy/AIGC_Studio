@@ -1,9 +1,9 @@
 # 11 Web 工作台与交互
 
-> 状态：**部分实现**（两套壳并存；freeflow 是唯一正式壳，但还不能独立闭环——连"开始生产"的入口都没有）
+> 状态：**部分实现**（2026-09-03 起 freeflow 是**唯一的壳**，旧壳 `(app)` 已删；「新建 → 推进 → 剧本门 → 分镜门 → 出图」全程在 freeflow 内走通。未做：字段级编辑接 Patch、每镜模型选择、候选版本、逐镜 MP4）
 > 优先级：**P0**（ADR-030 的前置条件全部落在本模块）
 > 负责人：待定
-> 最近核对：2026-09-02
+> 最近核对：2026-09-04（WA / WB / WC / WD 四条工作线交付并经 Lead 验收后）
 > 权威顺序：[DECISIONS_2026-09-02.md](../DECISIONS_2026-09-02.md) §1 / §2 / §3 / §8 / §11.4 > ADR-029 / 030 / 031 / 032 / 033 > 当前代码 > `_research/`
 
 ---
@@ -56,17 +56,17 @@ BGM、转场、剪映导出都在"明确不做（M2 内）"里。任何在界面
 | 项目概览读真实产出、任务、运行、审核 | 已实现 | `components/freeflow/project/project-overview.tsx` + `lib/freeflow/use-project-output.ts` |
 | 故事 / 角色 / 场景 / 分镜四页复用旧壳的真实展示组件 | 已实现 | `story-workspace.tsx` → `plot-index-view` / `screenplay-view`；`characters/page.tsx` → `characters-view`；`scenes/page.tsx` → `scenes-view` |
 | 角色 / 场景 / 分镜出图（含进度、重试、基准图三条来路） | 已实现 | `RenderSlot` / `RenderThumb` + `useRenders`，与旧壳同一份状态；S11 / S14 |
-| 项目设置（基础字段 + 真实删除） | 部分实现 | `project/project-settings.tsx`；`DELETE /projects/{id}` 已接（软删），其余三个分区是"即将支持"，后端没有对应列的字段全是禁用态 |
-| 模型目录页 | 已实现但**无导航入口** | `app/freeflow/(global)/models/page.tsx` → `model-catalog-page.tsx`；`NAV` 里没有它，全仓没有指向它的链接 |
+| 项目设置（名称 / 类型 / 模型偏好 / 真实删除） | 已实现 | `project/project-settings.tsx`；名称走 `PATCH /projects/{id}`，删除走 `DELETE`（软删）。"成员 / 权限 / 高级"三个假分区与示例字段已删，页面上只剩后端有列的东西 |
+| 模型目录页（含 BYOK Key 管理） | 已实现，已进导航 | `app/freeflow/(global)/models/page.tsx` → `model-catalog-page.tsx`；`NAV` 里没有它，全仓没有指向它的链接 |
 | 项目根路由默认落点 | 已实现 | `app/freeflow/projects/[id]/page.tsx` redirect → `/overview` |
 | `screenplay` 路由 | 已实现 | 是到 `/story` 的**兼容重定向**，不是重复页面 |
-| 素材页上传 | 未实现 | `asset-library-grid.tsx:209` 按钮 `disabled`；`lib/api.ts` 没有上传封装（后端三段式直传链路是全的） |
-| 任务页读 `tasks` | 未实现 | `project/task-center.tsx` 读 `projects.runs()`（`agent_runs`），另有写死的 `MOCK_TASKS` 段 |
-| 推进生产（`advance`）入口 | **未实现** | `lib/api.ts:239` 的 `projects.advance()` 在 `app/freeflow` 与 `components/freeflow` 下**零引用** |
-| 返工（`revise`）入口 | **未实现** | `lib/api.ts:256` 的 `projects.revise()` 在 freeflow 下零引用 |
-| 审批门 | 部分实现 | 概览能看见待审，但按钮跳回旧壳（`project-overview.tsx:482`） |
-| 故事 / 分镜字段编辑写回后端 | 未实现 | `storyboard-editor.tsx:184` 自己写着"只存在本地，不写回后端"；ADR-029 的三条 Patch 端点后端已有（`apps/api/modules/content/`，已挂进 `main.py:150`），前端一行没接 |
-| 每镜模型选择、候选版本、逐镜 MP4 下载 | 未实现 | `storyboard-editor.tsx` 的「生成视频 / 重新生成 / 换模型」三个按钮**不发任何请求**（`:62` 有说明文案） |
+| 素材页上传 | 已实现 | `asset-library-grid.tsx` 接 `assets.upload` 三段式直传（多选、串行）；MIME / 大小 / 配额仍全在后端那条链路上 |
+| 任务页读 `tasks` | 已实现 | `lib/freeflow/use-tasks.ts` 读 `GET /tasks` + SSE 增量；重试 / 取消按钮由后端状态决定显隐；`MOCK_TASKS` 已删 |
+| 推进生产（`advance`）入口 | 已实现 | 概览 / 故事 / 角色 / 场景页的「开始生产 / 推进到下一道门」，经 `lib/freeflow/use-project-state.ts`；原证据： `lib/api.ts:239` 的 `projects.advance()` 在 `app/freeflow` 与 `components/freeflow` 下**零引用** |
+| 返工（`revise`）入口 | 已实现 | 故事 / 角色 / 场景 / 分镜页各自的返工框，`target_role` 按页固定；返工对话读 `GET /projects/{id}/conversation` |
+| 审批门 | 已实现 | 概览 / 故事 / 分镜页内「确认通过 / 打回重做」，`POST .../approvals/{id}`；`rejected` 故意不给按钮（无恢复路径） |
+| 故事 / 分镜字段编辑写回后端 | 未实现 | 假的本地草稿编辑已经**删掉**（分镜是只读详情 + 出图动作），所以不再有"改了不保存"；ADR-029 Patch 端点后端已有、`GET /projects/{id}/state` 也已补上，前端接线是 FR-WEB-004 |
+| 每镜模型选择、候选版本、逐镜 MP4 下载 | 未实现 | 原来不发请求的「生成视频 / 重新生成 / 换模型」假按钮已删；模型选择卡在 `GET /model-options`，视频是 M2 |
 | 节点画布 Canvas | 预留 | `app/freeflow/projects/[id]/canvas/page.tsx` + `components/freeflow/canvas/`（12 文件）；数据来自 `lib/freeflow/mock-data.ts`，不接后端。ADR-030 第 5 条：搁置 |
 | 悬浮 AI 助手 | 预留 | `components/freeflow/floating-assistant.tsx` **全仓零引用**（`freeflow/layout.tsx` 注释说明有意不挂载） |
 | 全局占位页 `members` / `servers` / `templates` / `skills` / `billing` / `settings` | 预留 | 六个都只 `return <GlobalPlaceholder title=… />`，没有数据 |
@@ -76,9 +76,11 @@ BGM、转场、剪映导出都在"明确不做（M2 内）"里。任何在界面
 > **不是技能库**——真正的技能列表在 `/freeflow/assets` 的「技能」chip 里。
 > 处置见 [`10_SKILL_WORKFLOW.md`](10_SKILL_WORKFLOW.md)，本文档不重复。
 
-### 3.2 旧壳 `(app)`（ADR-030：待删）
+### 3.2 旧壳 `(app)`（ADR-030：**已于 2026-09-03 删除**）
 
-| 页面 | 状态 | 说明 |
+`app/(app)/` 整目录、`components/shell/*`、`components/project-composer.tsx` 与 §5.3 列出的孤儿组件已全部删除；`/`、登录后落点、`/dashboard` 三处都指向 `/freeflow`（`app/dashboard/page.tsx` 只剩重定向）。下表是删除前的记录，保留作对照：
+
+| 页面 | 删除前状态 | 说明 |
 |---|---|---|
 | `(auth)/login` | 已实现 | **唯一保留项** |
 | `(app)/dashboard` | 已实现但要删 | 改成重定向到 `/freeflow` |
@@ -139,7 +141,7 @@ P0 = 挡住"逐镜 MP4"或挡住 ADR-030 删旧壳的。
 
 ## 5. 旧壳删除清单（文件级，可直接当作后续 Worker 的任务输入）
 
-> **本节只列清单，不删代码。** 执行前置条件是 §6 的缺口补齐（ADR-030 第 2 条）。
+> **2026-09-03 已按本清单执行完毕**（WD 工作线，Lead 验收：`typecheck + build` 绿，旧壳路径零引用，`MOCK_` 只剩 canvas 目录）。清单保留作记录。唯一偏离：`components/project/skill-upload.tsx` 没删——Skill 上传入口迁到了资产库「技能」chip，它的 hook 被 `asset-library-grid.tsx` 复用。
 
 ### 5.1 直接删除的路由
 
@@ -243,6 +245,8 @@ components/freeflow/home-quick-start.tsx:55     新建项目后的落地页   �
 ---
 
 ## 6. freeflow 独立闭环缺口（ADR-030 的唯一前置条件）
+
+> **2026-09-03 状态**：6.1 / 6.2 / 6.3 / 6.5 / 6.6 已关闭（WB 工作线）。6.4 关了一半：假的本地编辑删掉了，Patch 端点前端仍未接（FR-WEB-004 仍开）。前置条件已满足，旧壳已删。下文保留删除前的缺口记录。
 
 前置条件：「新建项目 → 剧本确认 → 分镜确认 → 出图」全程不跳回旧页。
 下面**逐处指到文件**，除 6.6 外都是 P0。
@@ -452,13 +456,12 @@ ADR-029 的三条 Patch 端点后端已有（`apps/api/modules/content/`，已�
 
 **Wave 1（ADR-030 前置条件，全部 P0）**
 
-1. freeflow 加「开始 / 推进生产」入口（FR-WEB-001）——**排第一**，§11.4 裁决 2。
-2. 审批门 + `revise` 迁入 freeflow（FR-WEB-002 / 003）。
-3. 故事 / 分镜编辑接 ADR-029 Patch 端点（FR-WEB-004）。
-4. 任务页切到 `tasks`，删 `MOCK_TASKS`（FR-WEB-005）。
-5. 跑通「新建项目 → 剧本确认 → 分镜确认 → 出图」不跳回旧页 →
-   **按 §5 删旧壳**（FR-WEB-009）。
-6. CI 加前端 `typecheck + build`（§14.2）；Playwright 黄金路径（FR-WEB-024）。
+1. ~~freeflow 加「开始 / 推进生产」入口（FR-WEB-001）~~ **已完成 2026-09-03**。
+2. ~~审批门 + `revise` 迁入 freeflow（FR-WEB-002 / 003）~~ **已完成 2026-09-03**。
+3. 故事 / 分镜编辑接 ADR-029 Patch 端点（FR-WEB-004）——后端阻塞已解（`GET /projects/{id}/state`），前端未接。
+4. ~~任务页切到 `tasks`，删 `MOCK_TASKS`（FR-WEB-005）~~ **已完成 2026-09-03**。
+5. ~~跑通黄金路径不跳回旧页 → 按 §5 删旧壳（FR-WEB-009）~~ **已完成 2026-09-03**。
+6. ~~CI 加前端 `typecheck + build`（§14.2）~~ **已完成**（`ci.yml` 的 `web` job）；Playwright 黄金路径（FR-WEB-024）未做。
 
 **Wave 2（逐镜 MP4 的界面）**
 
@@ -497,9 +500,9 @@ ADR-029 的三条 Patch 端点后端已有（`apps/api/modules/content/`，已�
 
 ### 14.2 CI 地板（决策记录 §8）
 
-`.github/workflows/ci.yml` 当前**只有一个 `backend` job**
-（ruff check + format → mypy → alembic up/down/up → pytest）。本轮增加一个
-`frontend` job，工作目录 `apps/web`：
+`.github/workflows/ci.yml` 原来**只有一个 `backend` job**
+（ruff check + format → mypy → alembic up/down/up → pytest）。**2026-09-03 已加上 `web` job**
+（Node 20，工作目录 `apps/web`，`npm ci → typecheck → build`）：
 
 ```yaml
 frontend:

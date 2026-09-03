@@ -25,6 +25,7 @@ from apps.api.modules.auth.router import router as auth_router
 from apps.api.modules.billing.router import credentials_router
 from apps.api.modules.billing.router import router as billing_router
 from apps.api.modules.consistency.router import router as images_router
+from apps.api.modules.content.router import router as content_router
 from apps.api.modules.gateway.router import router as model_catalog_router
 from apps.api.modules.project.router import router as project_router
 from apps.api.modules.realtime.router import router as realtime_router
@@ -146,6 +147,7 @@ app.include_router(billing_router, prefix=API_PREFIX)
 app.include_router(credentials_router, prefix=API_PREFIX)
 app.include_router(agent_router, prefix=API_PREFIX)
 app.include_router(images_router, prefix=API_PREFIX)
+app.include_router(content_router, prefix=API_PREFIX)
 app.include_router(skill_router, prefix=API_PREFIX)
 app.include_router(model_catalog_router, prefix=API_PREFIX)
 

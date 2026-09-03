@@ -45,7 +45,7 @@ Domain model → API contract → Service → Worker → Adapter → UI → Test
 |---|---|---|
 | 后端 `ruff check` + `ruff format --check` + `mypy` + `pytest` | 已有 | GitHub Actions |
 | 后端 Alembic 迁移可升级 | 已有 | GitHub Actions |
-| 前端 `typecheck + build` | **本轮加入** | 不依赖 ESLint，两分钟 |
+| 前端 `typecheck + build` | 已有（2026-09-03，`web` job） | 不依赖 ESLint，两分钟 |
 | 前端 `lint` | 待 ESLint 9 flat config 修好 | — |
 | Playwright 黄金路径 | Wave 1 | 登录 → 新建 → 剧本确认 → 分镜确认 → 出图 |
 

@@ -6,9 +6,11 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents import registry
+from agents import schemas as agent_schemas
 from agents.spec import AgentSpec
 from apps.api.core.errors import AppError
 from apps.api.modules.agent import orchestrator, runner
@@ -212,3 +214,71 @@ async def generate_structured(
         variables=variables if variables is not None else default_variables(spec.role),
         system_suffix=system_suffix,
     )
+
+
+# ---------------------------------------------------------------- 供字段级编辑复用
+#
+# 下面三个函数是 content 模块（`PATCH /projects/{id}/outputs/{role}`）唯一
+# 需要的编排知识。**它们必须留在这里而不是被 content 抄一份**：
+# "哪些阶段的产出可以改"、"它按哪个 schema"、"改了它谁会过期"
+# 这三件事的真相在编排器里，抄出去必然漂移，而漂移的表现是
+# 用户改完上游、下游没被标过期，界面显示一切正常但内容对不上。
+
+
+def editable_roles() -> tuple[str, ...]:
+    """可被字段级编辑的阶段产出。与聊天修订的范围一致。
+
+    routing 不在内：那是调度决策不是内容，改路线该重跑而不是改字段。
+    """
+    return tuple(revise_mod.REVISABLE_ROLES)
+
+
+def output_schema_for(role: str) -> type[BaseModel]:
+    """这个阶段的产出该按哪个 Pydantic schema 校验。
+
+    从 Agent spec 的 `output_schema` 反查，不在 content 里另建一张
+    role → schema 的表：换 Agent、改 schema 名只该改一处。
+    """
+    if role not in editable_roles():
+        raise AppError(
+            "common.validation_failed",
+            message=f"{role} 的产出不支持字段级编辑",
+            detail={"editable": list(editable_roles())},
+        )
+    spec = get_spec(orchestrator.spec_id_for(role))
+    if not spec.output_schema:
+        raise AppError("common.internal", message=f"Agent {spec.id} 没有声明 output_schema")
+    try:
+        return agent_schemas.resolve(spec.output_schema)
+    except LookupError as exc:
+        raise AppError("common.internal", message=str(exc)) from exc
+
+
+def current_stage(state: dict[str, Any]) -> str:
+    """这份编排状态停在哪个阶段。
+
+    只是把 `orchestrator.current_stage` 透出到 service 层，给别的模块用
+    （`project.router` 的 `GET /projects/{id}/state`）。**不在外面另抄一张
+    阶段表**——"下一步是什么"必须只有一处答案，而那一处是 `_NEXT`。
+
+    它同时负责翻译旧阶段名（`story` / `visual`），所以外部拿到的一定是
+    现行枚举里的值。
+    """
+    return orchestrator.current_stage(state)
+
+
+def stale_roles_of(state: dict[str, Any]) -> list[str]:
+    """过期记账。同样只是透出，顺序按生产顺序，且只保留真的还有产出的阶段。"""
+    return orchestrator.stale_roles(state)
+
+
+def mark_role_edited(state: dict[str, Any], role: str) -> list[str]:
+    """产出被直接改过之后的过期记账，就地改 `state`，返回新增过期的下游。
+
+    与 `revise` 走的是同一对函数（`mark_stale` / `mark_fresh`），
+    因为"改了上游、下游停在旧版"这件事与改动是模型做的还是人做的无关。
+    """
+    stale = [r for r in revise_mod.downstream_of(role) if r in state]
+    orchestrator.mark_stale(state, stale)
+    orchestrator.mark_fresh(state, role)
+    return stale

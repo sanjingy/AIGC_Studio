@@ -4,7 +4,7 @@ import { use, useRef } from "react";
 
 import { ProjectHeader } from "@/components/freeflow/project-header";
 import { WorkflowCanvas, type CanvasHandle } from "@/components/freeflow/canvas/workflow-canvas";
-import { useProjectOutput } from "@/lib/freeflow/use-project-output";
+import { useProject } from "@/lib/freeflow/use-project";
 
 /**
  * 02 工作流画布（REQ-020~023）。
@@ -15,7 +15,7 @@ import { useProjectOutput } from "@/lib/freeflow/use-project-output";
  */
 export default function FreeflowCanvasPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { project } = useProjectOutput(id);
+  const { project } = useProject(id);
   const canvas = useRef<CanvasHandle | null>(null);
 
   return (

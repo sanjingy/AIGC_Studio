@@ -13,10 +13,10 @@ type Mode = "login" | "register";
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  // 会话过期被踢回来时带着原来的页面，登录后回到那儿而不是仪表盘。
+  // 会话过期被踢回来时带着原来的页面，登录后回到那儿而不是工作台首页。
   // 只接受站内相对路径——把 next 直接当 URL 用就是开放重定向。
   const rawNext = params.get("next") ?? "";
-  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/dashboard";
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/freeflow";
   const [mode, setMode] = useState<Mode>("login");
   const [pending, setPending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);

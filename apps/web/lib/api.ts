@@ -223,6 +223,53 @@ export type Task = {
   created_at: string;
 };
 
+/**
+ * 编排器的阶段名（后端 `orchestrator._NEXT` 的键）。
+ *
+ * `await_*` 是**门**，不是生产阶段：跑到那里就停下等人确认。
+ *
+ * 注意：**没有任何接口直接返回当前阶段**——它存在
+ * `projects.current_state_json.stage` 里，而 `ProjectOut` 不暴露这一列。
+ * 唯一会返回它的是 `advance` / 审核决议的响应（`Advance.stage`），
+ * 那是一次性的，刷新就没了。所以前端读到的阶段是由
+ * `lib/freeflow/use-project-state.ts` 从「已有哪些产出 + 审核记录」推出来的。
+ */
+export type Stage =
+  | "routing"
+  | "plot_index"
+  | "screenplay"
+  | "await_setup"
+  | "characters"
+  | "scenes"
+  | "storyboard"
+  | "await_storyboard"
+  | "done";
+
+/** 两道阻塞门（后端 `orchestrator._GATE_OF`）。 */
+export type GateName = "setup" | "storyboard";
+
+/** 审核决议。后端三个都收，界面只用前两个，理由见 use-project-state.ts。 */
+export type ApprovalDecision = "approved" | "changes_requested" | "rejected";
+
+export type TaskPage = { items: Task[]; next_cursor: string | null };
+
+/**
+ * 项目的编排状态（`GET /projects/{id}/state`）。
+ *
+ * `current_state_json` 是 ADR-008 里"状态的唯一权威"：`source`、`router`、
+ * 五个阶段产出、`stale_roles` 都在里面。**只读**——写路径只有编排器和
+ * content 模块。
+ *
+ * `stage` 由后端算好（含旧阶段名翻译），前端不再从 `agent_runs` 反推。
+ */
+export type ProjectStateSnapshot = {
+  project_id: string;
+  stage: Stage;
+  current_state_json: Record<string, any>;
+  stale_roles: ReviseTarget[];
+  updated_at: string;
+};
+
 export const projects = {
   list: () => apiFetch<{ items: Project[]; next_cursor: string | null }>("/projects?limit=50"),
 
@@ -230,6 +277,26 @@ export const projects = {
     apiFetch<Project>("/projects", { method: "POST", body: JSON.stringify({ title }) }),
 
   get: (id: string) => apiFetch<Project>(`/projects/${id}`),
+
+  /**
+   * 编排状态：当前阶段 + 整份 `current_state_json`。
+   *
+   * 阶段和阶段产出都以它为准，不要再从 `agent_runs` 反推——`agent_runs`
+   * 只记"某次运行吐了什么"，字段级编辑（ADR-029）改的是 `current_state_json`，
+   * 两边会分叉。
+   */
+  state: (id: string) => apiFetch<ProjectStateSnapshot>(`/projects/${id}/state`),
+
+  /**
+   * 改项目本身。后端 `PATCH /projects/{id}` 只收这三样
+   * （`ProjectUpdateIn`）——没有描述、分辨率、帧率这些列，别往里塞。
+   *
+   * 只传要改的那一项：三个字段都是可选的，漏传等于不改。
+   */
+  update: (
+    id: string,
+    patch: { title?: string; route_type?: string | null; budget_cap_credits?: number | null },
+  ) => apiFetch<Project>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
 
   /** 软删除——后端早就有这条路由（`repo.soft_delete`，`deleted_at` 打时间戳，
    *  列表查询已经在过滤），只是这层封装一直没补。 */
@@ -244,11 +311,26 @@ export const projects = {
 
   approvals: (id: string) => apiFetch<Approval[]>(`/projects/${id}/approvals`),
 
-  resolve: (id: string, approvalId: string, decision: string, comment?: string) =>
+  resolve: (id: string, approvalId: string, decision: ApprovalDecision, comment?: string) =>
     apiFetch<Advance>(`/projects/${id}/approvals/${approvalId}`, {
       method: "POST",
       body: JSON.stringify({ decision, comment: comment || null }),
     }),
+
+  /** 过门：编排器进入下一阶段。会让下一次 `advance` 真的花钱，所以要用户点。 */
+  approve: (id: string, approvalId: string, comment?: string) =>
+    projects.resolve(id, approvalId, "approved", comment),
+
+  /**
+   * 打回重做：退回产出这批内容的那个阶段（后端 `_REDO_FROM`），
+   * 剧本门退回 `screenplay`，分镜门退回 `storyboard`。
+   *
+   * 这是"驳回"在生产流程里的可用形态。后端还有一个 `rejected`
+   * （项目就地停死，没有恢复路径），界面不给入口——见
+   * `lib/freeflow/use-project-state.ts` 的说明。
+   */
+  reject: (id: string, approvalId: string, comment?: string) =>
+    projects.resolve(id, approvalId, "changes_requested", comment),
 
   runs: (id: string) => apiFetch<AgentRun[]>(`/projects/${id}/agent-runs?limit=50`),
 
@@ -334,6 +416,20 @@ export const projects = {
 };
 
 export const tasks = {
+  /**
+   * 任务列表。**`tasks` 是执行状态的唯一真相**（CLAUDE.md 不可违反的规则）：
+   * 出图 / 视频 / 配音 / 合成都只在这张表里，`agent_runs` 里根本没有它们。
+   *
+   * 不带 `projectId` 是全组织的；任务页带上，只看当前项目。
+   */
+  list: (opts: { projectId?: string; status?: TaskStatus; limit?: number; cursor?: string } = {}) => {
+    const q = new URLSearchParams({ limit: String(opts.limit ?? 50) });
+    if (opts.projectId) q.set("project_id", opts.projectId);
+    if (opts.status) q.set("status", opts.status);
+    if (opts.cursor) q.set("cursor", opts.cursor);
+    return apiFetch<TaskPage>(`/tasks?${q}`);
+  },
+
   get: (id: string) => apiFetch<Task>(`/tasks/${id}`),
 
   /** 重试会重新预扣一笔，不是"免费再跑一次"。 */
@@ -342,8 +438,50 @@ export const tasks = {
   cancel: (id: string) => apiFetch<Task>(`/tasks/${id}/cancel`, { method: "POST" }),
 };
 
+export const realtime = {
+  /**
+   * 项目事件流的一次性票据。
+   *
+   * SSE 用 `EventSource`，它带不了自定义头也带不了我们的 httpOnly Cookie
+   * 跨端口场景，所以先换一张短票据再拼进 query。订阅逻辑在
+   * `lib/useProjectEvents.ts`，页面不直接用这个函数。
+   */
+  ticket: (projectId: string) =>
+    apiFetch<{ ticket: string; expires_in: number }>(`/projects/${projectId}/events/ticket`, {
+      method: "POST",
+    }),
+
+  /** EventSource 的地址。票据在 query 里——EventSource 没有别的地方放。 */
+  eventsUrl: (projectId: string, ticket: string) =>
+    `/api/v1/projects/${projectId}/events?ticket=${encodeURIComponent(ticket)}`,
+};
+
+/**
+ * 预估结果。**给区间不给点值**（19_UnitEconomics.md §6）：真实成本受废片率
+ * 和模型实际用量影响，报一个精确数字只会在结算时对不上。
+ */
+export type Estimate = {
+  estimated_credits: number;
+  range_low: number;
+  range_high: number;
+};
+
 export const credits = {
   balance: () => apiFetch<Balance>("/credits/balance"),
+
+  /**
+   * 生成前估价。**只是算一下，不建任务、不预扣、不结算。**
+   *
+   * `input` 的形状按任务类型定（`billing/pricing.py` 的 `_shape`）：
+   * 出图是 `{ n: 张数, model_id?: string }`，单价乘张数再折废片率。
+   * 不传 `model_id` 走该能力的默认模型——所以这是**估算，不是报价**：
+   * 项目级模型偏好和 failover 都可能让实际用的模型不是这一个。
+   */
+  estimate: (type: string, input: Record<string, unknown> = {}) =>
+    apiFetch<Estimate>("/credits/estimate", {
+      method: "POST",
+      body: JSON.stringify({ type, input }),
+    }),
 
   topup: (principal: number) =>
     apiFetch<Balance>("/credits/topup", {
@@ -459,6 +597,34 @@ export type UploadTicket = {
 export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
 
 export const IMAGE_ACCEPT = IMAGE_MIME_TYPES.join(",");
+
+/**
+ * 后端 MIME 白名单的全集（`apps/api/modules/asset/mime.py` 的 `ALLOWED_MIME`）。
+ *
+ * 同样**只用来给文件选择器过滤**，不是第二套校验：真正说了算的是后端，
+ * 它在签发直传地址那一步就会拒掉不认识的类型和超限的大小。
+ * 改后端那张表要同步这里，否则用户会挑不到一个其实能传的文件。
+ */
+export const UPLOAD_MIME_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/mp4",
+  "text/plain",
+  "text/markdown",
+  "application/json",
+  "application/pdf",
+  "application/epub+zip",
+] as const;
+
+export const UPLOAD_ACCEPT = UPLOAD_MIME_TYPES.join(",");
 
 export type Library = {
   usage: StorageUsage;

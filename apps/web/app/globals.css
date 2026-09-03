@@ -1,3 +1,4 @@
+/* 视觉来自 ReelFlow 原型，数据由页面注入 */
 @import "tailwindcss";
 
 /* 暗色走 class 策略，由 next-themes 在 <html> 上打 .dark */
@@ -112,6 +113,105 @@
   --text-xl--line-height: 28px;
   --text-2xl: 24px;
   --text-2xl--line-height: 32px;
+
+  /* ReelFlow 工作台视觉壳，仅由 .theme-reelflow 提供值。 */
+  --color-rf-bg: var(--rf-bg);
+  --color-rf-panel: var(--rf-panel);
+  --color-rf-dialog: var(--rf-dialog);
+  --color-rf-elevated: var(--rf-elevated);
+  --color-rf-overlay: var(--rf-overlay);
+  --color-rf-line: var(--rf-line);
+  --color-rf-line-strong: var(--rf-line-strong);
+  --color-rf-fg: var(--rf-fg);
+  --color-rf-muted: var(--rf-muted);
+  --color-rf-subtle: var(--rf-subtle);
+  --color-rf-cyan: var(--rf-cyan);
+  --color-rf-cyan-soft: var(--rf-cyan-soft);
+  --color-rf-cyan-hover: var(--rf-cyan-hover);
+  --color-rf-agent: var(--rf-agent);
+  --color-rf-agent-soft: var(--rf-agent-soft);
+  --color-rf-success: var(--rf-success);
+  --color-rf-success-soft: var(--rf-success-soft);
+  --color-rf-warning: var(--rf-warning);
+  --color-rf-warning-soft: var(--rf-warning-soft);
+  --color-rf-danger: var(--rf-danger);
+  --color-rf-danger-soft: var(--rf-danger-soft);
+  --shadow-rf-card: var(--rf-card-shadow);
+  --shadow-rf-glow: var(--rf-glow-shadow);
+}
+
+/* ReelFlow 的控制室主题。变量隔离在壳节点下，不改变站内其它页面。 */
+.theme-reelflow {
+  color-scheme: dark;
+  --rf-bg: #070a0f;
+  --rf-panel: #090d13;
+  --rf-dialog: #10151d;
+  --rf-elevated: rgb(255 255 255 / 0.035);
+  --rf-overlay: rgb(0 0 0 / 0.72);
+  --rf-line: rgb(255 255 255 / 0.08);
+  --rf-line-strong: rgb(255 255 255 / 0.16);
+  --rf-fg: rgb(255 255 255 / 0.94);
+  --rf-muted: rgb(255 255 255 / 0.62);
+  --rf-subtle: rgb(255 255 255 / 0.38);
+  --rf-cyan: #67e8f9;
+  --rf-cyan-soft: rgb(103 232 249 / 0.1);
+  --rf-agent: #c4b5fd;
+  --rf-agent-soft: rgb(196 181 253 / 0.12);
+  --rf-success: #6ee7b7;
+  --rf-success-soft: rgb(110 231 183 / 0.1);
+  --rf-warning: #fbbf24;
+  --rf-warning-soft: rgb(251 191 36 / 0.1);
+  --rf-danger: #f87171;
+  --rf-danger-soft: rgb(248 113 113 / 0.1);
+  --rf-card-shadow: 0 18px 50px rgb(0 0 0 / 0.24);
+  --rf-glow-shadow: 0 0 28px rgb(103 232 249 / 0.18);
+
+  /* 主色的 hover 态。原型里写的是 brightness(110%)，这里把它算成定值：
+     滤镜会连同按钮里的图标和文字一起提亮，颜色就不再由 token 说了算。
+     #67e8f9 × 1.1 = (113, 255, 255)，后两个通道本来就已经溢出到 255。 */
+  --rf-cyan-hover: #71ffff;
+
+  /* --- 把 rf 调色板接到仓库既有的语义层 --- */
+  /* 上面那批 --rf-* 是这套视觉的调色板，下面这批是它在本仓库语义体系里的
+     位置。组件因此可以写 bg-surface / text-fg-muted / bg-primary 这些站内
+     通用类，而不用各自记住该取哪个 rf 变量；换主题只改这一段。
+     每一条都直接指向同一个 --rf-* 变量，所以颜色值与映射前逐一相等。 */
+  --bg: var(--rf-bg);
+  --surface: var(--rf-panel);
+  --surface-2: var(--rf-elevated);
+  --surface-3: var(--rf-dialog);
+  --border: var(--rf-line);
+  --border-strong: var(--rf-line-strong);
+  --fg: var(--rf-fg);
+  --fg-muted: var(--rf-muted);
+  --fg-subtle: var(--rf-subtle);
+
+  --primary: var(--rf-cyan);
+  --primary-hover: var(--rf-cyan-hover);
+  --primary-fg: var(--rf-bg);
+  --primary-soft: var(--rf-cyan-soft);
+
+  /* rf 把「生成中」画成琥珀，和站内 --running 是同一个语义槽 */
+  --running: var(--rf-warning);
+  --running-soft: var(--rf-warning-soft);
+  --success: var(--rf-success);
+  --success-soft: var(--rf-success-soft);
+  --danger: var(--rf-danger);
+  --danger-soft: var(--rf-danger-soft);
+
+  --ring: var(--rf-cyan);
+
+  background: var(--rf-bg);
+  color: var(--rf-fg);
+}
+
+.theme-reelflow .rf-shot-placeholder {
+  background-image:
+    linear-gradient(var(--rf-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--rf-line) 1px, transparent 1px),
+    radial-gradient(circle at 18% 18%, var(--rf-cyan-soft), transparent 48%),
+    radial-gradient(circle at 82% 78%, var(--rf-agent-soft), transparent 52%);
+  background-size: 24px 24px, 24px 24px, auto, auto;
 }
 
 @layer base {

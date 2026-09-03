@@ -65,45 +65,6 @@ export const NODE_TYPES_NEEDING_BACKEND: readonly FreeflowNodeType[] = [
   "loop",
 ];
 
-export type FreeflowTemplateCategory = "漫剧动画" | "营销广告" | "解说视频" | "短剧";
-
-export type FreeflowTemplate = {
-  id: string;
-  name: string;
-  category: FreeflowTemplateCategory;
-  /** 新建项目时整体复制为初始工作流（REQ-011）。原型里只是摆设，
-   *  点了不会真的建项目——建项目走 projects.create()，这个字段留着
-   *  是为了让后端接线时结构已经在。 */
-  presetGraph: FreeflowGraph;
-};
-
-export const QUICK_START_ITEMS = [
-  {
-    id: "director",
-    title: "AI 导演模式",
-    description: "对话驱动，AI 自动推进到确认点",
-    href: "/dashboard",
-  },
-  {
-    id: "canvas",
-    title: "自由画布模式",
-    description: "空画布 + 输入起始节点，自己拖节点连线",
-    href: null, // 新建项目后跳 /freeflow/projects/[id]/canvas，原型里点了就近似
-  },
-  {
-    id: "import",
-    title: "导入已有作品",
-    description: "上传小说/剧本，自动识别可复用素材",
-    href: null,
-  },
-  {
-    id: "template",
-    title: "模板中心",
-    description: "从预置节点图开始",
-    href: null,
-  },
-] as const;
-
 /** 素材库一级类型筛选（REQ-030）。角色/场景/分镜/Workflow/Skill 是
  *  结构化产出而非文件——目前只有角色（CharacterEntry）接了真实索引，
  *  场景/分镜/Workflow/Skill 后端还没有跨类型索引表，chip 存在但筛出来

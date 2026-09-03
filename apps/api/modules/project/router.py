@@ -6,6 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Query, status
 
 from apps.api.core.errors import AppError
+from apps.api.modules.agent import service as agent_service
 from apps.api.modules.auth.deps import CurrentUser, DbSession
 from apps.api.modules.project import service
 from apps.api.modules.project.schemas import (
@@ -13,6 +14,7 @@ from apps.api.modules.project.schemas import (
     ProjectModelPreferenceIn,
     ProjectOut,
     ProjectPage,
+    ProjectStateOut,
     ProjectUpdateIn,
 )
 
@@ -66,6 +68,38 @@ async def list_projects(
 async def get_project(project_id: uuid.UUID, user: CurrentUser, db: DbSession) -> ProjectOut:
     row = await service.get_project(db, org_id=user.org_id, project_id=project_id)
     return ProjectOut.model_validate(row)
+
+
+@router.get("/{project_id}/state", response_model=ProjectStateOut)
+async def get_project_state(
+    project_id: uuid.UUID, user: CurrentUser, db: DbSession
+) -> ProjectStateOut:
+    """读这个项目的编排状态（ADR-008 的唯一权威），**只读**。
+
+    为什么需要它：在这之前 `current_state_json` 没有任何 GET 接口。
+    `ProjectOut` 只透出了它派生的 `stale_roles`，阶段和五份产出都读不到，
+    于是：
+
+    - 前端只能从 `agent_runs` 反推当前阶段，反推不出被 `changes_requested`
+      退回的情形以外的边界；
+    - ADR-029 的字段级 Patch 写进 `current_state_json`，而界面读 `agent_runs`
+      ——保存成功、刷新回旧值，等于没有写路径。
+
+    阶段走 `agent.service.current_stage`，不是直接把 JSONB 里的字符串抛出去：
+    存量项目还带着 `story` / `visual` 这类旧阶段名，那两个值在现行 `_NEXT`
+    里根本不存在。
+
+    跨租户与不存在一律 404（由 `service.get_project` 保证），不返回 403。
+    """
+    row = await service.get_project(db, org_id=user.org_id, project_id=project_id)
+    state = dict(row.current_state_json or {})
+    return ProjectStateOut(
+        project_id=row.id,
+        stage=agent_service.current_stage(state),
+        current_state_json=state,
+        stale_roles=agent_service.stale_roles_of(state),
+        updated_at=row.updated_at,
+    )
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)

@@ -92,6 +92,8 @@ ban-relative-imports = "all"
 "apps.api.modules.billing.models".msg = "跨模块请走 billing.service"
 "apps.api.modules.skill.repository".msg = "跨模块请走 skill.service"
 "apps.api.modules.skill.models".msg = "跨模块请走 skill.service"
+"apps.api.modules.content.repository".msg = "跨模块请走 content.service"
+"apps.api.modules.content.models".msg = "跨模块请走 content.service"
 
 [tool.ruff.lint.per-file-ignores]
 # 各模块自己的文件当然可以 import 自己的 models/repository。

@@ -1,30 +1,58 @@
 "use client";
 
 import { use } from "react";
+import { usePathname } from "next/navigation";
 
-import { ProjectHeader } from "@/components/freeflow/project-header";
+import { AdvanceAction } from "@/components/freeflow/project/production-actions";
+import {
+  advancePrimaryAction,
+  ProjectWorkbench,
+} from "@/components/freeflow/project/project-workbench";
+import { RevisePanel } from "@/components/freeflow/project/revise-panel";
 import { ScenesView } from "@/components/project/scenes-view";
-import { useProjectOutput } from "@/lib/freeflow/use-project-output";
-import { useRenders } from "@/lib/useRenders";
+import { useImages } from "@/lib/freeflow/use-images";
+import { useProjectState } from "@/lib/freeflow/use-project-state";
+import { useTasks } from "@/lib/freeflow/use-tasks";
 
-// REQ-001：复用现有 ScenesView（含出图）。出图进度走项目 SSE，
-// 跟主线四栏工作台看到的是同一份状态——`useRenders` 本来就是通用 hook。
-export default function FreeflowScenesPage({ params }: { params: Promise<{ id: string }> }) {
+/**
+ * 世界美术。出图三条路（AI 生成 / 从资产库选 / 本地上传）由 `ScenesView` 里的
+ * `RenderSlot` 提供，都走 `useImages`——全站只有这一份实现。
+ */
+export default function FreeflowScenesViewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { project, output, loading, error } = useProjectOutput(id);
-  const renders = useRenders(id);
+  const state = useProjectState(id);
+  const tasks = useTasks(id);
+  const images = useImages(id);
+  const pathname = usePathname();
+  const data = state.output.scenes;
 
   return (
-    <>
-      <ProjectHeader projectId={id} title={project?.title ?? "…"} />
-      <main className="min-h-0 flex-1 overflow-y-auto p-6">
-        {error && <p className="text-sm text-danger">{error}</p>}
-        {!error && loading && <p className="text-sm text-fg-subtle">加载中…</p>}
-        {!error && !loading && !output.scenes && (
-          <p className="text-sm text-fg-subtle">还没有场景档案。</p>
+    <ProjectWorkbench
+      projectId={id}
+      state={state}
+      tasks={tasks}
+      images={images}
+      activeHref={pathname}
+      primaryAction={advancePrimaryAction(state)}
+    >
+      <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-4 p-4 lg:p-6">
+        {state.error && <p className="text-sm text-danger">{state.error}</p>}
+        {!state.error && state.loading && <p className="text-sm text-fg-subtle">加载中…</p>}
+        {!state.error && !state.loading && (
+          <>
+            {!data && (
+              <>
+                <p className="text-sm text-fg-subtle">
+                  还没有世界美术。推进生产跑到这一步就会出现。
+                </p>
+                <AdvanceAction state={state} />
+              </>
+            )}
+            {data && <ScenesView data={data} renders={images} />}
+            <RevisePanel state={state} target="scenes" />
+          </>
         )}
-        {output.scenes && <ScenesView data={output.scenes} renders={renders} />}
-      </main>
-    </>
+      </div>
+    </ProjectWorkbench>
   );
 }

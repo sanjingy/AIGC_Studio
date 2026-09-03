@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FileText,
   FileVideo,
@@ -8,6 +8,7 @@ import {
   MapPin,
   Music,
   Puzzle,
+  Loader2,
   Upload,
   Users,
   type LucideIcon,
@@ -15,11 +16,13 @@ import {
 
 import { charactersMeta } from "@/components/project/characters-view";
 import { scenesMeta } from "@/components/project/scenes-view";
+import { SKILLS_CHANGED, useSkillUpload } from "@/components/project/skill-upload";
 import { Button } from "@/components/ui/button";
 import {
   ApiRequestError,
   assets as assetsApi,
   orgSkills,
+  UPLOAD_ACCEPT,
   type CharacterEntry,
   type Library,
   type LibraryAsset,
@@ -95,7 +98,7 @@ const UNINDEXED: readonly AssetKind[] = ["storyboard", "workflow"];
 const EMPTY_TEXT: Partial<Record<AssetKind, string>> = {
   character: "还没有独立角色档案。在主线资产库页用一段描述就能生成一份。",
   scene: "还没有场景档案。项目跑到「场景档案」那一步之后会出现在这里。",
-  skill: "技能库里还没有 Skill。在对话框的「+」附件菜单里可以传一份 YAML。",
+  // Skill 的空态不走这张表：它自带上传入口，见 SkillEmptyState。
 };
 
 const KIND_ORDER: readonly AssetKind[] = [
@@ -139,6 +142,19 @@ export function AssetLibraryGrid() {
   const [skills, setSkills] = useState<OrgSkill[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  /** 上传成功后靠它重拉列表。计数器而不是布尔：连传两个也要各刷新一次。 */
+  const [reloadKey, setReloadKey] = useState(0);
+
+  /**
+   * Skill 上传（ADR-026 / 决策记录 §11.5 裁决 8）。
+   *
+   * 入口原本长在旧壳对话框的「+」附件菜单里，那个菜单随旧壳一起删了，
+   * 所以上传能力搬到这里——技能 chip 是列 Skill 的地方，也就是找它的人
+   * 会去的地方。复用 `useSkillUpload` 这个既有 hook，不抄第二份上传实现：
+   * 校验规则是安全边界（处理器白名单、导出路径白名单），全在后端，
+   * 前端两份实现迟早分叉。
+   */
+  const skillUpload = useSkillUpload();
 
   useEffect(() => {
     let alive = true;
@@ -160,7 +176,7 @@ export function AssetLibraryGrid() {
     return () => {
       alive = false;
     };
-  }, [kind]);
+  }, [kind, reloadKey]);
 
   // Skill 不在 `/assets/library` 里，是 `/skills` 这个独立接口。只在切到
   // 这个 chip 时发一次，之后留在内存里——每个 chip 都带上它等于给九个
@@ -180,6 +196,15 @@ export function AssetLibraryGrid() {
       alive = false;
     };
   }, [kind, skills]);
+
+  // 传完一份 Skill 之后重拉清单。`useSkillUpload` 成功时会广播
+  // SKILLS_CHANGED，这里把缓存清空，上面那个 effect 就会重新拉一次
+  // ——不在两处各写一遍"上传成功后做什么"。
+  useEffect(() => {
+    const onChanged = () => setSkills(null);
+    window.addEventListener(SKILLS_CHANGED, onChanged);
+    return () => window.removeEventListener(SKILLS_CHANGED, onChanged);
+  }, []);
 
   // 文件：结构化类型的 chip 不展示文件；`all` 和四个文件类 chip 才展示。
   // 后者的过滤已经由后端的 type 参数做完了，前端不再筛一遍。
@@ -205,14 +230,23 @@ export function AssetLibraryGrid() {
     <div className="mx-auto flex max-w-[1200px] flex-col">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h1 className="text-base font-semibold text-fg">我的素材</h1>
-        {/* 上传还没接：`lib/api.ts` 里没有上传接口（直传要先建资产记录
-            再拿预签名 URL，那条链路前端一行都还没写）。放一个能点的按钮
-            比放一个禁用的更糟。 */}
-        <Button size="sm" disabled title="原型阶段还没接上传链路">
-          <Upload aria-hidden className="size-3.5" />
-          上传素材
-        </Button>
+        {/* 技能 chip 下换成传 Skill：Skill 不进 `assets` 表，走的是 /skills
+            这条完全不同的链路，摆一个「上传素材」在这里点下去不会多出一份
+            Skill。两个上传按钮并排则要用户先分辨自己在传哪一种。 */}
+        {kind === "skill" ? (
+          <Button size="sm" disabled={skillUpload.busy} onClick={skillUpload.pick}>
+            {skillUpload.busy ? (
+              <Loader2 aria-hidden className="size-3.5 animate-spin" />
+            ) : (
+              <Upload aria-hidden className="size-3.5" />
+            )}
+            上传 Skill
+          </Button>
+        ) : (
+          <UploadButton onUploaded={() => setReloadKey((n) => n + 1)} onError={setError} />
+        )}
       </div>
+      {skillUpload.input}
 
       {data && <UsageLine usage={data.usage} />}
 
@@ -245,6 +279,8 @@ export function AssetLibraryGrid() {
         </p>
       )}
 
+      {kind === "skill" && skillUpload.notice && <div className="mt-3">{skillUpload.notice}</div>}
+
       {(loading && !data) || (kind === "skill" && skills === null) ? (
         <p className="mt-6 text-sm text-fg-subtle">加载中…</p>
       ) : UNINDEXED.includes(kind) ? (
@@ -254,7 +290,13 @@ export function AssetLibraryGrid() {
           得先有一张跨类型的资产索引。
         </EmptyState>
       ) : total === 0 ? (
-        <EmptyState>{EMPTY_TEXT[kind] ?? "这个类型下还没有素材。出图或上传之后会出现在这里。"}</EmptyState>
+        kind === "skill" ? (
+          <SkillEmptyState onPick={skillUpload.pick} busy={skillUpload.busy} />
+        ) : (
+          <EmptyState>
+            {EMPTY_TEXT[kind] ?? "这个类型下还没有素材。出图或上传之后会出现在这里。"}
+          </EmptyState>
+        )
       ) : (
         <>
           <p className="tnum mt-4 mb-2 text-xs text-fg-subtle">
@@ -385,6 +427,42 @@ function EmptyState({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * 技能 chip 的空态：一句说明 + 上传入口 + 「运行时未接线」。
+ *
+ * 三件事缺一不可——
+ * 说明要写清 Skill 是一份 YAML（用户不知道该拖什么进去）；
+ * 上传入口要在这里（决策记录 §11.5 裁决 8：旧壳的「+」菜单没了，
+ * 不能留一句指向已删菜单的文案）；
+ * 「运行时未接线」是 ADR-026 的验收标准，传上去只会被校验和存档，
+ * 生产流程仍走后端硬编码的阶段图。不说清楚，传完的人会以为下一次
+ * 跑生产就按他这份 Skill 走。
+ */
+function SkillEmptyState({ onPick, busy }: { onPick: () => void; busy: boolean }) {
+  return (
+    <div className="mt-6 rounded-md border border-dashed border-border-strong px-4 py-10 text-center">
+      <Puzzle aria-hidden className="mx-auto size-6 text-fg-subtle" />
+      <p className="mt-2 text-sm text-fg-subtle">
+        技能库里还没有 Skill。Skill 是一份声明式的生产模板（`.yaml` / `.yml`），
+        上传后由后端校验并存进本组织的技能库。
+      </p>
+      <Button className="mt-3" size="sm" disabled={busy} onClick={onPick}>
+        {busy ? (
+          <Loader2 aria-hidden className="size-3.5 animate-spin" />
+        ) : (
+          <Upload aria-hidden className="size-3.5" />
+        )}
+        上传 Skill
+      </Button>
+      <p className="mt-3 text-xs text-fg-subtle">
+        校验不通过的也会存进来并显示错误原文；但
+        <span className="text-fg-muted">运行时尚未接线</span>
+        ——当前生产流程仍走内置阶段图，传上来的 Skill 暂时不会生效。
+      </p>
+    </div>
+  );
+}
+
 function FileCard({ asset }: { asset: LibraryAsset }) {
   const [url, setUrl] = useState<string | null>(null);
   const Icon = TYPE_ICON[asset.type] ?? FileText;
@@ -493,5 +571,76 @@ function CharacterCard({ entry }: { entry: CharacterEntry }) {
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * 上传素材。走仓库现成的那条三段式直传（`assets.upload`）：
+ * 建 pending 记录拿预签名地址 → 客户端 PUT 到对象存储 → complete 让服务端
+ * HEAD 校验后置 ready。**不另写一套阈值**——MIME 白名单、大小上限、
+ * 容量配额全长在那条链路上，前端再写一遍只会和 `s3_max_upload_bytes` 分叉。
+ *
+ * `accept` 用后端白名单的全集，只是给文件选择器过滤，不是第二套校验。
+ * 多选时串行传：并发会同时打满配额检查那一行的锁，也让失败的那个说不清是哪一个。
+ */
+function UploadButton({
+  onUploaded,
+  onError,
+}: {
+  onUploaded: () => void;
+  onError: (message: string | null) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
+
+  const pick = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      const list = Array.from(files);
+      onError(null);
+      setBusy({ done: 0, total: list.length });
+      try {
+        let done = 0;
+        for (const file of list) {
+          await assetsApi.upload(file);
+          done += 1;
+          setBusy({ done, total: list.length });
+        }
+        onUploaded();
+      } catch (e) {
+        onError(e instanceof ApiRequestError ? e.error.user_message : "上传失败，请重试");
+      } finally {
+        setBusy(null);
+        // 清空 value，否则再选同一个文件不会触发 change
+        if (inputRef.current) inputRef.current.value = "";
+      }
+    },
+    [onError, onUploaded],
+  );
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept={UPLOAD_ACCEPT}
+        className="sr-only"
+        onChange={(e) => void pick(e.target.files)}
+      />
+      <Button
+        size="sm"
+        disabled={busy !== null}
+        onClick={() => inputRef.current?.click()}
+        title="图片 / 视频 / 音频 / 文本 / PDF；类型与大小由后端校验"
+      >
+        {busy ? (
+          <Loader2 aria-hidden className="size-3.5 animate-spin" />
+        ) : (
+          <Upload aria-hidden className="size-3.5" />
+        )}
+        {busy ? `上传中 ${busy.done}/${busy.total}` : "上传素材"}
+      </Button>
+    </>
   );
 }
