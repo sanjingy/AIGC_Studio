@@ -12,7 +12,22 @@ export type ApiError = {
   user_message: string;
   retryable: boolean;
   trace_id: string;
-  detail?: { errors?: { field: string; message: string; type: string }[] };
+  /**
+   * 结构化补充信息。**形状随错误来源而变**，所以除了 `errors` 之外都不定型：
+   *
+   * - FastAPI 的请求体校验（`main.py` 的 `handle_validation_error`）给
+   *   `errors: [{field, message, type}]`；
+   * - `AppError` 自己带的 detail 什么都可能有——ADR-029 的字段级编辑
+   *   校验不过时给 `errors: [{loc, type, msg}]`（pydantic 原始 loc），
+   *   撤销冲突时给 `conflicts: string[]`。
+   *
+   * 想读非 `errors` 的键就自己收窄类型，不要往这里堆联合——每加一个后端
+   * 错误就改一次公共类型，最后没人知道哪个键属于哪条接口。
+   */
+  detail?: {
+    errors?: { field: string; message: string; type: string }[];
+    [key: string]: unknown;
+  };
 };
 
 export class ApiRequestError extends Error {
@@ -164,6 +179,110 @@ export type ChatMessage = {
   changed_fields: string[];
   created_at: string;
 };
+
+// ---------------------------------------------------------------- 字段级编辑（ADR-029）
+
+/**
+ * 一处字段改动。**只有"替换"一种语义**：`path` 指向的字段必须已经存在，
+ * 不能新建键，也不能往数组里追加（后端 `content/patching.py` 规则 1）。
+ * 要多一个角色 / 多一镜，只能重跑 Agent。
+ */
+export type PatchOp = {
+  /**
+   * RFC 6901 JSON Pointer，**相对于这个 role 的整块产出**，
+   * 例如分镜第 1 镜的景别是 `/shots/0/shot_size`。
+   *
+   * 下标是**数组位置**，不是 `shot.index` 那个业务镜号。两者在正常产出里
+   * 恰好差 1，但 Agent 并不保证——照镜号算会改到别的镜上去。
+   */
+  path: string;
+  value: unknown;
+};
+
+/** 写路径的统一返回体。PATCH 和撤销共用——它们在后端是同一种操作。 */
+export type PatchResult = {
+  batch_id: string;
+  role: ReviseTarget;
+  changed: number;
+  /**
+   * 改完之后这个 role 的整块产出。**直接拿它更新本地状态**，
+   * 不要改完再 GET 一次：那中间有一个窗口界面还是旧值，会闪。
+   */
+  output: Record<string, any>;
+  /**
+   * **因为这次改动而新过期的下游**，不是"当前全部过期的阶段"。
+   *
+   * 后端 `mark_role_edited` 返回的是 `downstream_of(role)`，同时把 `role`
+   * 自己从过期账上划掉；比 `role` 更靠前的阶段如果本来就是过期的，
+   * 那个标记还在，只是不出现在这个字段里。所以本地合并要算
+   * `(旧的 ∪ 这次的) \ {role}`，直接拿它整个替换会把已有的过期标记抹掉。
+   */
+  stale_roles: ReviseTarget[];
+};
+
+/** 一批里的一行：改了哪个字段、从什么变成什么。 */
+export type RevisionChange = {
+  id: string;
+  field_path: string;
+  old_value: unknown;
+  new_value: unknown;
+};
+
+export type RevisionBatch = {
+  batch_id: string;
+  role: ReviseTarget;
+  /** `user_edit` = 用户改的，`undo` = 一次撤销。撤销本身也是一批。 */
+  source: string;
+  reason: string | null;
+  actor_user_id: string | null;
+  created_at: string;
+  changes: RevisionChange[];
+  /** 有值 = 这批已经被撤销过了，不能再撤第二次。 */
+  undone_by_batch_id: string | null;
+  /** 有值 = 这批本身是一次撤销。不能靠 `undone_by_batch_id` 反推。 */
+  undoes_batch_id: string | null;
+};
+
+export type RevisionPage = { items: RevisionBatch[]; next_cursor: string | null };
+
+/**
+ * 把字段级编辑的报错变成能贴到界面上的一句话。
+ *
+ * 为什么不像别处那样只用 `user_message`：这条链路上的错误几乎都是
+ * `common.validation_failed` / `common.conflict`，它们的 `user_message`
+ * 是目录里那句通用的「请求参数有误」「操作冲突，请刷新后重试」，
+ * 而用户真正需要知道的是**哪个字段、为什么不行**——那句话在 `message`
+ * 里（后端为这条链路专门写的中文原文，如「这些字段在这批之后又被改过」）。
+ *
+ * 两种 `detail.errors` 形状都要认：FastAPI 请求体校验给 `field/message`，
+ * ADR-029 的整块 schema 校验给 pydantic 原始的 `loc/msg`。
+ */
+export function editErrorText(cause: unknown): string {
+  if (!(cause instanceof ApiRequestError)) return "操作失败，请稍后重试";
+
+  const { message, user_message, detail } = cause.error;
+  // message 默认值是错误码本身（后端 AppError：`self.message = message or code`），
+  // 那种情况下它不比 user_message 有信息量。
+  const head = message && !message.startsWith("common.") ? message : user_message;
+
+  const parts: string[] = [head];
+
+  const rows = Array.isArray(detail?.errors) ? (detail.errors as Record<string, unknown>[]) : [];
+  const fields = rows
+    .slice(0, 5)
+    .map((e) => {
+      const where = String(e.field ?? e.loc ?? "");
+      const why = String(e.message ?? e.msg ?? "");
+      return where ? `${where}：${why}` : why;
+    })
+    .filter(Boolean);
+  if (fields.length > 0) parts.push(fields.join("；"));
+
+  const conflicts = Array.isArray(detail?.conflicts) ? (detail.conflicts as string[]) : [];
+  if (conflicts.length > 0) parts.push(`冲突字段：${conflicts.slice(0, 5).join("、")}`);
+
+  return parts.join(" — ");
+}
 
 /**
  * 一次出图。提示词由后端用一致性引擎合成，前端不传也传不了——
@@ -412,6 +531,55 @@ export const projects = {
     apiFetch<Project>(`/projects/${id}/model-preference`, {
       method: "PATCH",
       body: JSON.stringify({ capability, model_id: modelId }),
+    }),
+
+  // ---------------------------------------------------------------- 字段级编辑（ADR-029）
+
+  /**
+   * 按字段改一个阶段的产出。**一次调用 = 一次用户操作 = 一个可撤销的批次。**
+   *
+   * `patches` 必须把这次保存里改动的字段**一次全带上**：撤销是按批走的，
+   * 拆成 N 个请求，用户眼里的"一次保存"就要点 N 次撤销才能退回去。
+   *
+   * 这条路径**一分钱不花**：不建任务、不跑 Agent、不预扣也不结算。
+   * 改动由后端按该阶段自己的 Pydantic schema 校验——**前端不要另写一套
+   * 字段白名单**，两套规则必然分叉，且分叉方向永远是前端更松。
+   */
+  patchOutput: (id: string, role: ReviseTarget, patches: PatchOp[], reason?: string) =>
+    apiFetch<PatchResult>(`/projects/${id}/outputs/${role}`, {
+      method: "PATCH",
+      body: JSON.stringify({ patches, reason: reason?.trim() || null }),
+    }),
+
+  /**
+   * 变更历史，按批分组、按时间倒序、游标分页。
+   *
+   * `role` 只是过滤条件：不传就是整个项目的改动。分页按**批**不按行，
+   * 所以一批里的 `changes` 永远是全的。
+   */
+  revisions: (
+    id: string,
+    opts: { role?: ReviseTarget; limit?: number; cursor?: string } = {},
+  ) => {
+    const q = new URLSearchParams({ limit: String(opts.limit ?? 20) });
+    if (opts.role) q.set("role", opts.role);
+    if (opts.cursor) q.set("cursor", opts.cursor);
+    return apiFetch<RevisionPage>(`/projects/${id}/revisions?${q}`);
+  },
+
+  /**
+   * 撤销一整批改动。返回体和 `patchOutput` 完全一样——撤销在后端就是
+   * "反向重放一批 patch"，是同一种操作，所以它自己也会进历史、也能再被撤销。
+   *
+   * 只要批次里有任何一个字段在这批之后又被改过，整批 409
+   * （`detail.conflicts` 是冲突的路径）。已经撤过的批也是 409
+   * （`detail.undone_by_batch_id`）——所以按钮要靠 `undone_by_batch_id`
+   * 提前禁用，不要让用户点下去吃一个错误。
+   */
+  undoRevision: (id: string, batchId: string, reason?: string) =>
+    apiFetch<PatchResult>(`/projects/${id}/revisions/${batchId}/undo`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason?.trim() || null }),
     }),
 };
 

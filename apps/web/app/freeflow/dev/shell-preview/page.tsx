@@ -30,7 +30,11 @@ import {
 } from "@/components/freeflow/shell/workbench-shell";
 import { BatchRenderDialog } from "@/components/freeflow/storyboard/batch-render-dialog";
 import { ShotGrid, type ShotCardData } from "@/components/freeflow/storyboard/shot-card";
-import { ShotDetail } from "@/components/freeflow/storyboard/shot-detail";
+import {
+  ShotDetail,
+  type ShotDraft,
+  type ShotFieldKey,
+} from "@/components/freeflow/storyboard/shot-detail";
 import { Button } from "@/components/ui/button";
 
 const PREVIEW_PATH = "/freeflow/dev/shell-preview";
@@ -120,12 +124,41 @@ const SHOTS: PreviewShot[] = [
   },
 ];
 
+/**
+ * 把预览用的展示字段摊成一份编辑草稿。
+ *
+ * `ShotDetail` 现在是编辑面板（ADR-029），要的是后端 `StoryboardShot` 的
+ * 字段。这个页面只有展示用的文案（`characters` 里是"林遥 / C01"这种
+ * 人读的标签，不是 ref），所以这里是**为了看版式而拼的假数据**——
+ * 这条路由 `NODE_ENV=production` 时直接 404，不会到用户面前。
+ */
+/** 预览页不保存，所以永远没有"改过还没保存"的字段。 */
+const NO_DIRTY: ReadonlySet<ShotFieldKey> = new Set<ShotFieldKey>();
+
+function draftOfPreview(shot: PreviewShot): ShotDraft {
+  return {
+    scene_ref: shot.scene ?? "",
+    character_refs: shot.characters,
+    shot_size: shot.framing,
+    angle: "",
+    camera_move: shot.camera,
+    content: shot.description,
+    speaker_ref: shot.characters[0] ?? "",
+    dialogue: shot.dialogue ?? "",
+    sfx: "",
+  };
+}
+
 export default function ShellPreviewPage() {
   if (process.env.NODE_ENV === "production") notFound();
 
   const [selectedIndex, setSelectedIndex] = React.useState<number | null>(1);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const selectedShot = SHOTS[selectedIndex ?? 0] ?? SHOTS[0]!;
+  const [draft, setDraft] = React.useState<ShotDraft>(() => draftOfPreview(selectedShot));
+
+  // 换一镜就重置草稿。预览页不写库，这里只是让控件看起来像真的。
+  React.useEffect(() => setDraft(draftOfPreview(selectedShot)), [selectedShot]);
 
   return (
     <WorkbenchShell
@@ -191,7 +224,12 @@ export default function ShellPreviewPage() {
 
         <div className="mt-6">
           <ShotDetail
-            shot={selectedShot}
+            shot={{ ...selectedShot, nodeIndex: selectedShot.index }}
+            draft={draft}
+            dirty={NO_DIRTY}
+            options={{ scenes: [], characters: [] }}
+            disabled={false}
+            onChange={(field, value) => setDraft((prev) => ({ ...prev, [field]: value }))}
             actions={
               <>
                 <Button variant="ghost" size="sm" className="border border-border">

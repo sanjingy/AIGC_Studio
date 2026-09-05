@@ -41,6 +41,14 @@ export type RenderView = {
   errorCode: string | null;
   assetId: string | null;
   source: RenderSource;
+  /**
+   * 这一版图是什么时候产生的。
+   *
+   * 有它才能回答"这张图是不是在分镜被改之前出的"——ADR-029 的字段级编辑
+   * 只改 `current_state_json`，不会碰任何一条出图记录，所以图的过期与否
+   * 只能靠两个时间戳比出来（见 `use-content-edit.ts` 的 `editedAfter`）。
+   */
+  createdAt: string;
 };
 
 /**
@@ -112,6 +120,7 @@ export function useRenders(projectId: string | null) {
         errorCode: t?.error_code ?? r.error_code,
         assetId: r.asset_id,
         source: r.source,
+        createdAt: r.created_at,
       });
     }
     return out;

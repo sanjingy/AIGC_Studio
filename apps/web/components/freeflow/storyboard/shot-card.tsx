@@ -1,7 +1,7 @@
 // 视觉来自 ReelFlow 原型，数据由页面注入
 "use client";
 
-import { Check } from "lucide-react";
+import { Check, RefreshCw } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -17,6 +17,13 @@ export interface ShotCardData {
   durationLabel?: string;
   status: "ready" | "draft" | "rendering" | "failed";
   imageUrl?: string;
+  /**
+   * 这一版图出在这一镜最后一次改动之前，可能已经对不上了。
+   *
+   * **只标记**：不自动重跑、不删旧图（ADR-033 第 4 条）。要不要重出由
+   * 用户决定——重出是一次真实的出图调用，会再扣一次 Credits。
+   */
+  outdated?: boolean;
 }
 
 /**
@@ -55,6 +62,15 @@ export function ShotCard(props: { shot: ShotCardData; selected: boolean; onSelec
         {shot.durationLabel && (
           <span className="tnum absolute right-3 bottom-3 rounded-md bg-rf-overlay px-2 py-1 font-mono text-[10px] text-fg backdrop-blur">
             {shot.durationLabel}
+          </span>
+        )}
+        {shot.outdated && (
+          <span
+            title="这张图出在这一镜被改之前，可能与当前内容不符"
+            className="absolute bottom-3 left-3 inline-flex items-center gap-1 rounded-full border border-running/25 bg-running-soft px-2 py-0.5 text-[10px] text-running"
+          >
+            <RefreshCw aria-hidden className="size-2.5" />
+            图可能过期
           </span>
         )}
         {selected && (

@@ -41,7 +41,7 @@ export default function FreeflowStoryboardPage({ params }: { params: Promise<{ i
         </p>
       )}
       {!state.error && state.loading && <p className="p-6 text-sm text-fg-subtle">加载中…</p>}
-      {!state.error && !state.loading && <StoryboardEditor state={state} renders={images} />}
+      {!state.error && !state.loading && <StoryboardEditor projectId={id} state={state} renders={images} />}
     </ProjectWorkbench>
   );
 }

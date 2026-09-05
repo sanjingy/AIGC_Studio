@@ -38,6 +38,19 @@ export const ROLE_LABEL: Record<ReviseTarget, string> = {
   storyboard: "分镜",
 };
 
+/**
+ * 生产顺序。与后端 `orchestrator.PRODUCING_STAGES` 同序——过期记账
+ * （`stale_roles`）按这个顺序返回，本地合并时也要按它排，否则同一份状态
+ * 在"刚改完"和"刷新之后"会给出两种顺序。
+ */
+export const ROLE_ORDER: ReviseTarget[] = [
+  "plot_index",
+  "screenplay",
+  "characters",
+  "scenes",
+  "storyboard",
+];
+
 export const STAGE_LABEL: Record<Stage, string> = {
   routing: "路线判断",
   plot_index: "情节目录",
@@ -247,6 +260,51 @@ export function useProjectState(projectId: string) {
     [projectId, run],
   );
 
+  /**
+   * 把一次字段级编辑（或撤销）的结果并回本地状态。**不重新拉接口。**
+   *
+   * ADR-029 的 PATCH / undo 都把"改完之后这个 role 的整块产出"放在响应里，
+   * 就是为了省掉这一次 GET：中间隔着一次网络往返的话，界面上会有一段
+   * 时间显示的还是旧值，看起来像"保存了但没生效"。
+   *
+   * 过期记账要**合并**不能替换：响应里的 `stale_roles` 只是"因为这次改动
+   * 而新过期的下游"，比 `role` 更靠前的阶段如果本来就过期，那个标记仍然
+   * 在库里（后端 `mark_stale` 是并集），直接替换会把它在界面上抹掉。
+   * 这里做的是和后端同一件事的本地投影：并上新的，划掉刚改过的那个。
+   *
+   * `snapshot` 为 null（那次 state 接口没取到，产出正走 `agent_runs` 兜底）
+   * 时无处可写，只能退回重新拉一次——那种情况下宁可闪一下也不能显示旧值。
+   */
+  const applyPatchedOutput = useCallback(
+    (role: ReviseTarget, patched: Record<string, any>, newlyStale: ReviseTarget[]) => {
+      // 判断走闭包里的 snapshot，不在 setState 的 updater 里记标志位——
+      // updater 什么时候跑由 React 决定（StrictMode 下还会跑两次），
+      // 拿它的副作用当条件必然读到过期的值。
+      if (!snapshot) {
+        void reload().catch(() => undefined);
+        return;
+      }
+      const mergeStale = (prev: ReviseTarget[]) => {
+        const merged = new Set<ReviseTarget>([...prev, ...newlyStale]);
+        merged.delete(role);
+        return ROLE_ORDER.filter((r) => merged.has(r));
+      };
+      setSnapshot((prev) =>
+        prev
+          ? {
+              ...prev,
+              current_state_json: { ...prev.current_state_json, [role]: patched },
+              stale_roles: mergeStale(prev.stale_roles),
+            }
+          : prev,
+      );
+      setProject((prev) =>
+        prev ? { ...prev, stale_roles: mergeStale(prev.stale_roles ?? []) } : prev,
+      );
+    },
+    [snapshot, reload],
+  );
+
   return {
     project,
     runs,
@@ -271,6 +329,8 @@ export function useProjectState(projectId: string) {
     approve,
     reject,
     revise,
+    /** 字段级编辑 / 撤销之后把新产出并回本地状态。见上面的说明。 */
+    applyPatchedOutput,
     reload,
     clearActionError: () => setActionError(null),
   };
