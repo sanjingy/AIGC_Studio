@@ -21,7 +21,12 @@ x-backend: &backend
     POSTGRES_HOST: postgres
     REDIS_HOST: redis
     S3_ENDPOINT_URL: http://minio:9000
-    S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
+    # 这一条**不是**容器内地址，是签进预签名 URL、由访问者的浏览器直接去取的地址。
+    # 因此它必须能被部署方覆盖：本机开发是 localhost，装到服务器上就得是那台机器
+    # 对外可达的地址。写死会让 .env 里的同名配置静默失效——2026-09-04 在香港测试机
+    # 上就是这样：`.env` 改了没反应，页面全对但图片全部加载失败，且后端日志一片正常
+    # （图是浏览器直接去取的，失败根本不经过服务端）。
+    S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
   volumes:
     - ./apps:/app/apps
     - ./packages:/app/packages

@@ -3,7 +3,7 @@
 > 状态：**部分实现**（L0 提示词锁定 + 出图链路已实现；L1 参考图条件化、质量评分、候选版本未实现）
 > 优先级：P0
 > 负责人：待定
-> 最近核对：2026-09-02
+> 最近核对：2026-09-05（FR-CONS-011 无 Key 回退落地）
 
 ## 1. 模块目标与边界
 
@@ -46,6 +46,8 @@
 | 上游 URL 立即转存自有对象存储（DashScope 链接只有 24 小时有效期） | `worker/jobs/generation.py` |
 | 上游若改写提示词（`actual_prompt`）必须记下来 | 同上，写进 asset metadata |
 | 缺角色档案时出图报可读错误而不是 500 | `errors.py` 的 `consistency.profile.missing` |
+| **无 Key 时出图回退到 Mock**（FR-CONS-011）：`ENV=test` 一律 Mock、有 Key（平台或 BYOK）走真实 Gateway、都没有才 Mock | `gateway/mock_image.py`；`gateway/service._resolve`；`tests/unit/test_mock_image_provider.py` |
+| Mock 走的是**同一条**路径（Gateway 返 URL → `_download` → `register_generated`），因此 worker 那段第一次有了自动化覆盖 | `tests/integration/test_image_generation_worker.py` |
 
 出图接口（与 `apps/api/modules/consistency/router.py` 逐条核对，前缀 `/api/v1`）：
 
@@ -109,6 +111,26 @@ PUT  /api/v1/projects/{id}/images/scenes/{ref}         同上
 - **FR-CONS-004**：生成前的模型选择按钮（ADR-031 第 4 条）：出图入口旁边能选本次用哪个图像模型，
   只对本次生效、不回写默认，且换模型必须重算 Credits 预估（ADR-024 硬约束 1）。
 - **FR-CONS-005**：`resolved_prompt` 继续必存（已实现，列为需求是因为它不能被"优化"掉）。
+- **FR-CONS-011**：图像能力的 Mock Provider。**已实现（2026-09-05）**，见
+  `apps/api/modules/gateway/mock_image.py`。三条规则与 `llm.py` 一致：`ENV=test` 一律 Mock、
+  有 Key 走真实 Gateway、没 Key 用 Mock；规则 1 压过 BYOK（测试环境里存了自有 Key 也不许打真上游），
+  规则 3 让位于 BYOK（平台没 Key、用户自带 Key，该用他的）。
+  占位图 1024×1024 PNG，同提示词稳定同图、不同提示词明显不同，写进对象存储后签一个预签名 URL 返回，
+  所以 `_download` → `register_generated` 一步不少地被走了一遍——worker 那段因此第一次有了自动化覆盖
+  （`tests/integration/test_image_generation_worker.py`）。
+  **与原需求的两处偏差**：① 图上标的是提示词指纹（sha256 前 16 位）+ seed，不是"镜号 / 角色名"——
+  Provider 层拿到的是 `ImageRequest`，里面只有 prompt / negative / size / n / seed，镜号与角色 ref
+  留在任务 payload 里，为了让 Mock 能读到而往这个共享契约上加字段，是拿真实链路的接口去迁就假实现；
+  且 Pillow 自带字体没有中文字形，中文标注只会画成方框。指纹同样能把图对回日志里的那一次调用。
+  ② Credits 照常扣，见下方"计费"一段。
+  依据：2026-09-04 Lead 手动验收，配 Key 前 10 镜出图全部 `provider.unavailable`，
+  配 Key 后同一条路径 10/10 成功——说明缺的只是无 Key 时的回退，不是链路本身有问题。
+
+  > **计费**：Mock 跑完照样按普通出图预扣与结算，`billing` 里没有任何 `if mock` 分支。
+  > 预扣发生在建任务时（`pricing._shape` 按请求的模型算，此时 Gateway 还没解析），
+  > 结算取 `task.reserved_cost`——真实路径上 failover 换了模型也是同一个行为。
+  > 要让 Mock 免费就得在计费链路上开一条只有无 Key 环境才走的分支，那比"无 Key 环境里 Credits 照扣"
+  > 危险得多。无 Key 环境本来就不产生真实上游费用，扣的只是平台内部的记账额度。
 
 ### P1
 
@@ -192,6 +214,7 @@ pgvector 的用途是**角色 / 场景基准图的 embedding 与相似度检索*
 | `score_shot` 无调用方 | 废片率永远测不出来，`image_retry_factor = 250` 一直是拍值，**不可用于对外报价** | P1 |
 | `lock_style` 无调用方 | 风格可以在出图中途被改掉，已生成镜头静默不一致 | P1 |
 | `consistency_tier` 恒为 `"L1"` 且从未被读 | 让人误以为分层策略已经实现 | P1 |
+| 图像链路无 Mock 回退 | 没有 Provider Key 的环境（测试机、新同事本机、CI）出图必失败，`CLAUDE.md` 里"没有 Key 也能跑通全链路"这句对图像不成立 | P1 |
 | 无 L1 参考图 | 换装 / 侧脸 / 远景 / 多人同框仍是最容易崩的场景（§8.1 数据） | P2（决策记录已定不做） |
 | 视频时序一致性 | 廉价感的主要来源，M2 才会遇到 | 见模块 12 |
 
@@ -204,6 +227,12 @@ pgvector 的用途是**角色 / 场景基准图的 embedding 与相似度检索*
 5. 人工逐张判可用性，回填真实废片率到 `pricing_rules`（`validation/` 里有 10 张图）。
 6. 风格冻结生效；`consistency_tier` 要么用起来要么删掉。
 7. M2：把当前版首帧图交给视频阶段，并记录消费版本。
+
+> **2026-09-04 实测记录（Lead 手动验收，香港测试机）**：配置 BYOK 的 DashScope Key 之后，
+> 「注册 → 新建项目 → 推进 → 剧本门 → 角色出图 → 分镜门 → 批量出图 10 镜」全链路跑通，
+> 10 张分镜首帧图 **10/10 成功、零失败**，每张实扣 7 Credits，落在批量弹窗给出的
+> 60–105 估算区间内。worker 日志 `key_source=org` 确认走的是租户自己的 Key
+> （ADR-024 的 `org_id` 传递修复有效）。这是出图链路第一次在非本机环境上端到端验证。
 
 ## 11. 验收标准与测试
 

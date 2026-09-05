@@ -43,8 +43,12 @@ cd apps/web && npm run dev
 `npm run dev` 报 `EADDRINUSE` 说明已经有一个在跑，直接用即可；要重启先
 `npx kill-port 3000`。
 
-**Provider Key** 在 `.env`（已 gitignore，从未入库）。没有 Key 也能跑通全链路
-——`get_provider()` 会自动退回 Mock。
+**Provider Key** 在 `.env`（已 gitignore，从未入库）。没有 Key 也能跑通全链路：
+文本退回 `MockLLM`（`agent/llm.py::get_provider`），出图退回 Mock 出图
+（`gateway/mock_image.py`，2026-09-05 补上，在此之前没配 DashScope Key 时出图 100% 失败）。
+两处规则相同：`ENV=test` 一律 Mock、有 Key 走真实 Gateway、没 Key 用 Mock。
+无 Key 时出的是标注了提示词指纹的 1024×1024 占位图，同提示词稳定同图；
+它和真图一样要扣 Credits（计费链路上没有 Mock 特例），只是不产生上游费用。
 
 常用命令：
 

@@ -26,6 +26,12 @@ dependencies = [
     # BYOK 的 provider_credentials.key_encrypted 走应用层 AES-GCM（ADR-025）。
     # 标准库没有 AEAD 实现，自己写分组密码是绝对不能碰的红线。
     "cryptography>=44.0",
+    # 无 Key 时的出图回退要画一张能辨认的占位图（FR-CONS-011）。
+    # 进主依赖而不是 dev：它服务的正是"部署了但没配 Provider Key"这个
+    # 真实环境，而那种环境装的是主依赖。
+    # 需要 >=10.1 的 `ImageFont.load_default(size=...)`——它返回 Pillow
+    # 自带的矢量字体，因此不必往镜像里塞字体文件。
+    "pillow>=11.0",
 ]
 
 [project.optional-dependencies]

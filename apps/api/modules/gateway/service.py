@@ -46,7 +46,7 @@ from apps.api.core.db import session_scope
 from apps.api.core.errors import ERRORS, AppError
 from apps.api.core.logging import get_logger
 from apps.api.modules.billing import credentials
-from apps.api.modules.gateway import breaker, catalog, probe
+from apps.api.modules.gateway import breaker, catalog, mock_image, probe
 from apps.api.modules.project import service as project_service
 
 log = get_logger(__name__)
@@ -247,6 +247,27 @@ async def _load_org_key(*, org_id: uuid.UUID, capability: str) -> credentials.Re
         return await credentials.resolve_for_call(db, org_id=org_id, capability=capability)
 
 
+def _mock_resolution(capability: str) -> Resolution:
+    """一条临时的 Mock 路由。**不进 `registry()`**。
+
+    路由表是按 `catalog.SPECS` 建的，而 Mock 刻意不在那份目录里
+    （目录就是模型页面的数据源）。在解析出口处兜一条，既不污染目录，
+    也让下游（熔断、failover、`_attempt`）完全按原样工作。
+    """
+    return Resolution(
+        capability=capability,
+        routes=[
+            Route(
+                mock_image.PROVIDER_ID,
+                mock_image.MODEL_ID,
+                priority=0,
+                factory=mock_image.MockImageProvider,
+            )
+        ],
+        key_source=KeySource.PLATFORM,
+    )
+
+
 async def _resolve(
     capability: str,
     *,
@@ -262,7 +283,16 @@ async def _resolve(
     `preferred_model_id` 是项目级模型覆盖（ADR-024），作用在**两条路的
     出口上**——BYOK 也吃这份偏好，那时候候选集是同一把 Key 的几个模型，
     "用户想用哪个模型"这个诉求跟 Key 是谁的无关。
+
+    出图还有第三条路：一把 Key 都没有时回退到 Mock（`mock_image`，
+    FR-CONS-011）。它分两段插在这里而不是合成一个判断，因为
+    `ENV=test` 那一条必须**压过 BYOK**（测试环境里 org 存了自己的 Key
+    也不许打真上游），而"平台没配 Key"那一条必须**让位于 BYOK**
+    （平台没 Key、用户自带 Key，该用他的）。
     """
+    if mock_image.forced(capability):
+        return _mock_resolution(capability)
+
     if org_id is not None:
         own = await _load_org_key(org_id=org_id, capability=capability)
         if own is not None:
@@ -294,6 +324,9 @@ async def _resolve(
                 key_source=KeySource.ORG,
                 secret=own.api_key,
             )
+
+    if mock_image.fallback(capability):
+        return _mock_resolution(capability)
 
     # 取副本再重排：`registry()` 是进程级单例，就地排序会让一个项目的
     # 偏好泄漏给所有租户的后续调用。

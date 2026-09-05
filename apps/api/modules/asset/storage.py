@@ -59,12 +59,19 @@ async def presign_put(*, key: str, content_type: str) -> str:
     return url
 
 
-async def presign_get(*, key: str, download_name: str | None = None) -> str:
+async def presign_get(*, key: str, download_name: str | None = None, internal: bool = False) -> str:
+    """签发下载 URL。
+
+    `internal=True` 用**容器内地址**签名，给"我们自己的进程去取"的场景用
+    （Worker 下载出图结果就是一例）。默认的对外地址是签给浏览器的，
+    在容器里它指向进程自己的 localhost，服务端拿着它只会连到自己身上。
+    签名把 host 算进去了，所以这不是"换个域名"能补救的，必须签的时候就选对。
+    """
     s = get_settings()
     params: dict[str, Any] = {"Bucket": s.s3_bucket, "Key": key}
     if download_name:
         params["ResponseContentDisposition"] = f'attachment; filename="{download_name}"'
-    async with _client(public=True) as s3:
+    async with _client(public=not internal) as s3:
         url: str = await s3.generate_presigned_url(
             "get_object", Params=params, ExpiresIn=s.s3_presign_ttl_seconds
         )

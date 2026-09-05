@@ -99,6 +99,7 @@ Credits 规则；它只保证承载这些语义的进程活着、能观测、能
 | FR-OPS-016 | `billing.audit()` 接定时调度 + 不平时告警（现在有函数无调度） |
 | FR-OPS-017 | 基础指标：API 的 QPS / P95 / 5xx / DB pool、Worker 的队列深度与等待时长、Provider 的延迟 / 错误率 / failover 率 / 花费。先落到日志字段可聚合，不强求上 Prometheus |
 | FR-OPS-018 | 新增顶层目录时同步改 Compose 挂载（见 §11.1），或写一条 CI 检查防止再犯 |
+| FR-OPS-019 | **部署时必须把 `S3_PUBLIC_ENDPOINT_URL` 配成访问者真正可达的地址**，并在它明显不可达时让部署方尽早发现。机制本身已经有了（见下方更正说明），缺的是配置纪律和一条护栏：非 `local` 环境下这个值仍是 `localhost` 时，启动或 `/readyz` 应给出明确告警，而不是等用户看到一整页空图 |
 
 ### 4.3 P2
 
@@ -291,6 +292,10 @@ Compose 把 `./apps` **整个**挂进 api / worker，所以 `apps/web/node_modul
   否则 Worker 收到任务报 unknown function。
 - SSE 长连接不要用 ASGITransport 测（流式行为与真实 HTTP 有差异），
   拆成部件测 + 真实 HTTP 手工验证。
+- **远程验收要同时把 3000 和 9000 两个端口带过来**。前端页面走 3000（Next 内部把
+  `/api/*` 转给 8000，所以 8000 不用单开），但图片是浏览器**直接**去取 MinIO 的
+  9000。只开 3000 的话，页面全对、图全空。在 FR-OPS-019 修好之前，验收命令是：
+  `ssh -N -L 3100:127.0.0.1:3000 -L 9000:127.0.0.1:9000 root@<host>`。
 
 ---
 
@@ -322,6 +327,26 @@ Compose 把 `./apps` **整个**挂进 api / worker，所以 `apps/web/node_modul
    有了用户之后这条会立刻变成 P0——**要在开放注册之前补上**。
 9. **本机与容器工具链不完全一致**，容易出现"本地跑不全套"。命令一律以
    `docker compose exec api ...` 为准。
+10. **预签名地址在部署上没配对**（FR-OPS-019）。2026-09-04 在香港测试机验收时实测：
+    页面和接口都正常，出图也成功，但 `<img>` 全部 `naturalWidth=0`——签出来的地址是
+    `http://localhost:9000/...`，对浏览器而言指向的是访问者自己的机器。
+
+    > **2026-09-05 更正**：最初记成"代码里一个 endpoint 当两用"，**这是错的**。
+    > `apps/api/core/config.py` 早就有 `s3_endpoint_url`（服务端用）和
+    > `s3_public_endpoint_url`（签名用）两个配置，`asset/storage.py::_client(public=...)`
+    > 也一直按这个区分建两个客户端，文件开头的注释把理由写得很清楚。
+    > 真实情况是**香港测试机的 `.env` 把 `S3_PUBLIC_ENDPOINT_URL` 留成了默认值
+    > `http://localhost:9000`**，而那台机器的 MinIO 只监听回环，外部访问者拿到这个地址
+    > 必然连不上。这是部署配置问题，不是代码缺陷。
+    >
+    > 留下的真实缺口有两条。第一条已修：`docker-compose.yml` 的 `environment:` 把
+    > `S3_PUBLIC_ENDPOINT_URL` **写死**成 `http://localhost:9000`，而 `environment:`
+    > 的优先级高于 `env_file:`——也就是说 `.env` 和 `.env.example` 里那一行**从来没生效过**，
+    > 改了没有任何反应也没有任何提示。2026-09-05 改成 `${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}`，
+    > 本机默认行为不变，部署方终于能覆盖它。
+    >
+    > 第二条仍开着：**没有任何东西会告诉你配错了**。后端日志一片正常，图片是浏览器
+    > 直接去取的，失败不经过服务端。所以 FR-OPS-019 收窄成"加一条护栏"。
 
 ---
 
