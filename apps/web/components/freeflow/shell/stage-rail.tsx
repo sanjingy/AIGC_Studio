@@ -65,7 +65,7 @@ export function StageRail({ stages }: { stages: StageState[] }) {
 
   return (
     <nav aria-label="制作阶段" className="min-w-0 overflow-x-auto">
-      <ol className="flex min-w-max items-center gap-0.5 rounded-xl border border-border bg-surface p-1 shadow-rf-card">
+      <ol className="flex min-w-max items-center gap-1 p-1">
         {items.map((stage, index) => {
           const meta = STATE_META[stage.state];
           const Icon = meta.icon;
@@ -78,7 +78,7 @@ export function StageRail({ stages }: { stages: StageState[] }) {
             >
               <div
                 className={cn(
-                  "w-24 rounded-lg border px-1.5 py-1.5",
+                  "w-24 rounded-lg border px-2 py-1.5",
                   "transition-[color,background-color,border-color] duration-200 motion-reduce:transition-none",
                   meta.shell,
                 )}

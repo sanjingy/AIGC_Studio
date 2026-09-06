@@ -339,7 +339,7 @@ export function ProjectOverview({
                   icon={AlertTriangle}
                   tone="danger"
                   title={renders.error ? "出图状态读取失败" : `${runCounts.failed} 次运行失败`}
-                  detail={renders.error ?? "打开任务页查看真实错误码、模型和运行耗时。"}
+                  detail={renders.error ?? "打开生成队列，查看失败原因和运行详情。"}
                 />
               )}
             </section>
@@ -348,15 +348,12 @@ export function ProjectOverview({
           <section aria-labelledby="dependency-heading" className="rf-panel-card rounded-2xl border border-border p-4 lg:p-5">
             <div className="mb-4 flex items-end justify-between gap-3">
               <div>
-                <div className="text-[10px] font-medium tracking-[0.16em] text-fg-subtle uppercase">
-                  Dependency map
-                </div>
                 <h2 id="dependency-heading" className="mt-1 text-base font-semibold text-fg">
-                  生产依赖与准备度
+                  创作进度
                 </h2>
               </div>
               <p className="hidden max-w-md text-right text-xs leading-5 text-fg-subtle lg:block">
-                数量、运行、审核与出图状态全部来自当前项目接口；点击节点只进入对应真实页面。
+                从故事到画面，查看每个阶段的产出与待办。
               </p>
             </div>
 
@@ -390,7 +387,7 @@ export function ProjectOverview({
             />
             <SummaryCard
               icon={QueueIcon}
-              label="真实运行记录"
+              label="生成记录"
               value={runs.length}
               detail={`${runCounts.running} 进行中 · ${runCounts.failed} 失败 · ${runCounts.succeeded} 成功`}
             />

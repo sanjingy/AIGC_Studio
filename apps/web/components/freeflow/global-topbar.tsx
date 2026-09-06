@@ -1,7 +1,16 @@
+"use client";
+
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { ChevronRight } from "lucide-react";
 import { AssetLibraryIcon } from "@/components/icons/studio-icons";
 
+const TITLES: Record<string, string> = {
+  "/freeflow": "创作首页", "/freeflow/projects": "我的项目", "/freeflow/assets": "资产库",
+  "/freeflow/models": "模型库", "/freeflow/settings": "设置", "/freeflow/billing": "账单",
+};
+
 export function GlobalTopbar() {
-  return <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-4 lg:px-6"><div className="min-w-0 flex-1"><p className="text-[10px] font-semibold tracking-[0.16em] text-fg-subtle uppercase">AIGC Studio</p><p className="truncate text-sm font-semibold text-fg">创作工作台</p></div><Link href="/freeflow/assets" className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm text-fg-muted transition-colors duration-150 hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"><AssetLibraryIcon aria-hidden className="size-3.5" />资产</Link><Link href="/freeflow" aria-label="新建项目" className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-fg transition-colors duration-150 hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"><Plus aria-hidden className="size-3.5" />新建</Link><div className="flex size-8 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-fg" aria-label="当前用户">A</div></header>;
+  const pathname = usePathname();
+  return <header className="ff-topbar"><div className="flex min-w-0 flex-1 items-center gap-3 text-sm"><span className="hidden text-fg-subtle sm:inline">工作空间</span><ChevronRight aria-hidden className="hidden size-3.5 text-fg-subtle sm:block" /><span className="truncate font-medium text-fg">{TITLES[pathname] ?? "创作工作台"}</span></div><Link href="/freeflow/assets" className="ff-quiet-button"><AssetLibraryIcon aria-hidden className="size-4" /><span>浏览资产</span></Link></header>;
 }

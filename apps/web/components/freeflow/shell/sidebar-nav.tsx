@@ -38,9 +38,9 @@ export function SidebarNav({
   return (
     <aside
       className={cn(
-        "flex h-full shrink-0 flex-col border-r border-border bg-surface",
+        "ff-workbench-sidebar flex h-full shrink-0 flex-col border-r border-border bg-surface",
         "transition-[width] duration-200 motion-reduce:transition-none",
-        collapsed ? "w-[4.5rem]" : "w-60",
+        collapsed ? "w-[4.5rem]" : "w-[216px]",
         "max-md:w-[4.5rem]",
       )}
     >
@@ -52,7 +52,7 @@ export function SidebarNav({
         aria-label="返回项目主页"
         title="返回项目主页"
         className={cn(
-          "flex h-16 items-center gap-3 border-b border-border px-4",
+          "ff-workbench-brand flex h-16 items-center gap-3 border-b border-border px-4",
           "transition-colors duration-150 hover:bg-surface-2",
           "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",
         )}
@@ -62,8 +62,8 @@ export function SidebarNav({
         </div>
         <div className={cn("min-w-0", collapsed && "hidden", "max-md:hidden")}>
           <p className="truncate text-sm font-semibold tracking-tight text-fg">AIGC Studio</p>
-          <p className="truncate text-[10px] tracking-[0.14em] text-fg-subtle uppercase">
-            Production workspace
+          <p className="mt-1 truncate text-[11px] text-fg-subtle">
+            影像创作工作台
           </p>
         </div>
       </Link>

@@ -101,13 +101,13 @@ export function WorkbenchShell(props: {
         />
 
         <div className="relative flex min-h-0 flex-1">
-          <main className="min-w-0 flex-1 overflow-y-auto bg-bg">{children}</main>
+          <main className="ff-workbench-content min-w-0 flex-1 overflow-y-auto bg-bg">{children}</main>
 
           {aside && (
             <>
               <aside
                 aria-label="项目上下文"
-                className="hidden w-80 shrink-0 flex-col border-l border-border bg-surface xl:flex"
+                className="ff-context-aside hidden shrink-0 flex-col border-l border-border xl:flex"
               >
                 <div className="min-h-0 flex-1 overflow-y-auto p-4">{aside}</div>
               </aside>

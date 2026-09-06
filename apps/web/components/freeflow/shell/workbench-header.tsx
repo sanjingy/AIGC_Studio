@@ -32,7 +32,7 @@ export function WorkbenchHeader({
   asideToggle?: { controls: string; open: boolean; onOpen: () => void };
 }) {
   return (
-    <header className="z-30 flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b border-border bg-bg px-4 py-2 backdrop-blur-xl lg:flex-nowrap lg:px-6">
+    <header className="ff-workbench-header z-30 flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b border-border bg-bg px-4 py-2 lg:flex-nowrap lg:px-6">
       <div className="min-w-0 shrink-0 lg:w-44">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-semibold text-fg">{project.title}</span>
@@ -58,6 +58,7 @@ export function WorkbenchHeader({
           <Button
             variant="ghost"
             size="sm"
+            aria-label="打开项目上下文"
             aria-controls={asideToggle.controls}
             aria-expanded={asideToggle.open}
             onClick={asideToggle.onOpen}
