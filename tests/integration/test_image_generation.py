@@ -254,7 +254,15 @@ async def test_scenes_stage_lands_scene_profiles(alice: AsyncClient) -> None:
     gate = next(s for s in scenes if s.ref == "gate")
     axis = gate.spatial_json["camera_axis"]
     assert axis["position"] and axis["facing"] and axis["far_end"], "摄影主轴必须逐字段存下来"
-    assert gate.spatial_json["fixed_references"], "固定参照物必须存下来"
+    anchors = gate.spatial_json["fixed_references"]
+    assert anchors, "固定参照物必须存下来"
+    # 两段式：名称给人和给引用，描述给出图模型。落库时少哪一半都不成立。
+    assert all(a["name"] and a["description"] for a in anchors), f"锚点不是两段式：{anchors}"
+    # 光照是一组具名状态，且默认状态必须指得到实处——否则漏填 lighting_ref
+    # 的镜头行为未定义。
+    states = gate.spatial_json["lighting_states"]
+    assert states, "光照状态必须存下来"
+    assert gate.spatial_json["default_lighting"] in {s["name"] for s in states}
     assert gate.spatial_json["setting"]
 
 
@@ -271,7 +279,13 @@ async def test_scene_rerun_does_not_overwrite_frozen_profile(alice: AsyncClient)
     async with session_scope() as db:
         scenes = await consistency.list_scenes(db, org_id=org_id, project_id=project_id)
         gate = next(s for s in scenes if s.ref == "gate")
-        gate.spatial_json = {**gate.spatial_json, "lighting": "冻结后的光影"}
+        gate.spatial_json = {
+            **gate.spatial_json,
+            "lighting_states": [
+                {"name": "冻结后", "description": "冻结后的光影", "origin": "authored"}
+            ],
+            "default_lighting": "冻结后",
+        }
         gate.locked_at = datetime.now(UTC)
         scene_id = gate.id
         await db.commit()
@@ -290,7 +304,8 @@ async def test_scene_rerun_does_not_overwrite_frozen_profile(alice: AsyncClient)
 
     gate = next(s for s in scenes if s.ref == "gate")
     assert gate.id == scene_id, "不能因为重跑就新建一份场景档案"
-    assert gate.spatial_json["lighting"] == "冻结后的光影", "冻结的场景被覆盖了"
+    states = gate.spatial_json["lighting_states"]
+    assert [s["description"] for s in states] == ["冻结后的光影"], "冻结的场景被覆盖了"
 
 
 async def test_scene_reference_task_carries_spatial_anchors(alice: AsyncClient) -> None:
@@ -320,7 +335,8 @@ async def test_scene_reference_task_carries_spatial_anchors(alice: AsyncClient) 
     # 锚点：这两样不进提示词，场景出图就只是"看着像"而没有一致性
     assert "铁门外的路面" in payload["prompt"], "摄影主轴的站位没进提示词"
     assert "朝向建筑正面" in payload["prompt"]
-    assert "铁门在画面正前方" in payload["prompt"], "固定参照物没进提示词"
+    assert "锈迹铁门" in payload["prompt"], "固定参照物的名称没进提示词"
+    assert "右扇下缘锈穿" in payload["prompt"], "固定参照物的描述没进提示词"
     assert "摄影主轴" in payload["prompt"], "主轴必须是构图指令，不只是描述"
     assert positive in payload["prompt"], "场景版风格词必须由系统注入"
     assert character_only not in payload["prompt"], "场景参考图不该带人物质感词"
@@ -411,7 +427,8 @@ async def test_shot_prompt_carries_its_scene(alice: AsyncClient) -> None:
 
     # mock 分镜表第 1 镜的 scene_ref 是 gate
     assert "铁门外的路面" in payload["prompt"], "摄影主轴没进镜头提示词"
-    assert "铁门在画面正前方" in payload["prompt"], "固定参照物没进镜头提示词"
+    assert "锈迹铁门" in payload["prompt"], "固定参照物的名称没进镜头提示词"
+    assert "右扇下缘锈穿" in payload["prompt"], "固定参照物的描述没进镜头提示词"
     # 顺序：角色 → 场景 → 画面 → 风格
     assert payload["prompt"].index("主角") < payload["prompt"].index("铁门外的路面")
     assert payload["prompt"].index("铁门外的路面") < payload["prompt"].index("第 1 镜的画面内容")
@@ -433,6 +450,80 @@ async def test_shot_prompt_carries_its_scene(alice: AsyncClient) -> None:
             )
         ).scalar_one()
     assert record.scene_profile_id == scene.id, "这一镜用了哪个场景档案要记下来"
+
+
+async def test_shot_prompt_carries_only_the_referenced_lighting_state(
+    alice: AsyncClient,
+) -> None:
+    """这一镜引用了哪个光照状态，就只注入那一个的描述。
+
+    这条是整个多光照状态改动的价值所在。把场景声明的全部状态一起塞进
+    提示词，模型看到的是互相矛盾的指令（"上午"和"傍晚"同时成立），
+    结果只会是它自己挑一个——那和改动之前"每镜自由发挥"没有区别。
+
+    Mock 的 gate 场景声明了「上午」「傍晚」两个状态，第 1 镜引用「上午」。
+    """
+    pid = await _run_to_storyboard(alice)
+
+    r = await alice.post(f"{P}/{pid}/images/shots/1")
+    assert r.status_code == 201, r.text
+    prompt = dict((await _task_row(r.json()["id"])).input_json)["prompt"]
+
+    assert "均匀自然日光" in prompt, "被引用的光照状态没进提示词"
+    assert "低角度侧光" not in prompt, "没被引用的那个状态漏进提示词了"
+
+
+async def test_shot_referencing_an_unknown_lighting_state_falls_back(
+    alice: AsyncClient,
+) -> None:
+    """分镜引用了这个场景没声明过的状态 → 用默认状态出图，不报错。
+
+    降级而不是报错的理由见 `compose.resolve_lighting`：这条引用跨两份
+    Agent 产出，schema 层判不了；而为一镜写错名字让整份分镜表失败，
+    代价完全不成比例。降级之后的行为**正是这个字段存在之前的行为**。
+
+    这里改的是**项目状态里的分镜表**，不是场景档案——模拟的正是模型
+    自己编了一个状态名的情况。
+    """
+    org_id = await _org(alice)
+    pid = await _run_to_storyboard(alice)
+    project_id = uuid.UUID(pid)
+
+    async with session_scope() as db:
+        project = await project_service.get_project(db, org_id=org_id, project_id=project_id)
+        state = dict(project.current_state_json)
+        board = dict(state["storyboard"])
+        shots = [dict(sh) for sh in board["shots"]]
+        shots[0]["lighting_ref"] = "这个场景根本没声明过的状态"
+        project.current_state_json = {**state, "storyboard": {**board, "shots": shots}}
+        await db.commit()
+
+    r = await alice.post(f"{P}/{pid}/images/shots/1")
+    assert r.status_code == 201, "引用错一个名字不该让整镜出不了图"
+    prompt = dict((await _task_row(r.json()["id"])).input_json)["prompt"]
+    # gate 的默认状态是「上午」
+    assert "均匀自然日光" in prompt, "没落到默认光照状态上"
+
+
+async def test_shot_in_a_single_state_scene_uses_that_state(alice: AsyncClient) -> None:
+    """只声明一个光照状态的场景，镜头怎么引用都得到那一个。
+
+    室内不分时的场景就是这种。Mock 的 office 只有「常态」一个状态，
+    分镜后半段的镜头都落在它上面。
+    """
+    pid = await _run_to_storyboard(alice)
+
+    async with session_scope() as db:
+        project = await project_service.get_project(
+            db, org_id=await _org(alice), project_id=uuid.UUID(pid)
+        )
+        shots = project.current_state_json["storyboard"]["shots"]
+    index = next(sh["index"] for sh in shots if sh["scene_ref"] == "office")
+
+    r = await alice.post(f"{P}/{pid}/images/shots/{index}")
+    assert r.status_code == 201, r.text
+    prompt = dict((await _task_row(r.json()["id"])).input_json)["prompt"]
+    assert "顶部吊灯与桌面台灯为主" in prompt
 
 
 async def test_shot_without_scene_profile_still_renders(alice: AsyncClient) -> None:

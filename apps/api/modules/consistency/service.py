@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agents import schemas as agent_schemas
 from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
 from apps.api.modules.consistency import compose, metrics
@@ -312,22 +313,32 @@ async def upsert_scenes(
 def _spatial(design: dict[str, Any]) -> dict[str, Any]:
     """只取结构化空间字段，丢掉其余。
 
-    `camera_axis` 和 `fixed_references` 是场景一致性的全部依据，
-    比 setting 那段散文重要得多——它们必须是可拼装的字段，
-    所以这里逐字段取，不整份塞进去。
+    `camera_axis` / `fixed_references` / `lighting_states` 是场景一致性的全部
+    依据，比 setting 那段散文重要得多——它们必须是可拼装的字段，所以这里
+    逐字段取，不整份塞进去。
+
+    锚点与光照的形状归一化直接复用 `agents.schemas` 里的两个纯函数，**不在
+    这里再写一份**：它们回答的是"这份产出的合法形状是什么"，那是 schema 层的
+    问题。抄一份过来就会有两套判断，改一处忘一处——本文件顶上"同样不做字段
+    翻译"那条注释防的就是这件事。
+
+    迁移已经把库里的存量数据改成结构化形状；复用这两个函数同时让**运行时**
+    也扛得住扁平形状（备份恢复、模型照着旧样例输出），代价只是一次纯函数调用。
     """
     axis = design.get("camera_axis")
     axis = axis if isinstance(axis, dict) else {}
+    lighting_states, default_lighting = agent_schemas.coerce_lighting_states(design)
     return {
         "time_slot": str(design.get("time_slot", "")),
         "setting": str(design.get("setting", "")),
-        "lighting": str(design.get("lighting", "")),
+        "lighting_states": lighting_states,
+        "default_lighting": default_lighting,
         "camera_axis": {
             "position": str(axis.get("position", "")),
             "facing": str(axis.get("facing", "")),
             "far_end": str(axis.get("far_end", "")),
         },
-        "fixed_references": [str(f) for f in design.get("fixed_references", []) or []],
+        "fixed_references": agent_schemas.coerce_fixed_references(design.get("fixed_references")),
         "key_elements": [str(e) for e in design.get("key_elements", []) or []],
     }
 

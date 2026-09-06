@@ -519,6 +519,10 @@ async def request_shot_image(
     场景按分镜表的 `scene_ref` 取，取不到就不带场景信息（见
     `_scene_for_shot`）——镜头出图在场景档案存在之前就跑通了，
     不能因为多了一张表就让存量项目出不了图。
+
+    光照按分镜表的 `lighting_ref` 取该场景已声明的那一个状态。引用了不存在
+    的状态就降级到该场景的默认状态并记一条 warning（见
+    `compose.resolve_lighting`），不为此让整镜失败。
     """
     project, state = await _project_state(db, org_id=org_id, project_id=project_id)
     shot = _find_shot(state, shot_index)
@@ -537,13 +541,27 @@ async def request_shot_image(
 
     scene = await _scene_for_shot(db, org_id=org_id, project_id=project_id, state=state, shot=shot)
 
+    lighting_ref = str(shot.get("lighting_ref", "") or "").strip()
     composed = compose.compose_shot(
         content=str(shot.get("content", "")),
         style=style,
         characters=characters,
         shot_index=shot_index,
         scene=scene,
+        lighting_ref=lighting_ref,
     )
+    if lighting_ref and composed.lighting_state != lighting_ref:
+        # 分镜表引用了这个场景没声明过的光照状态。和未知 `scene_ref` /
+        # 未知 `character_refs` 一样降级而不是报错（理由见
+        # `compose.resolve_lighting`），但降级必须留痕——否则"这一镜的光
+        # 为什么和分镜表上写的不一样"永远查不出来。
+        log.warning(
+            "consistency.shot_unknown_lighting_ref",
+            project_id=str(project_id),
+            shot_index=shot_index,
+            requested=lighting_ref,
+            used=composed.lighting_state,
+        )
 
     payload: dict[str, Any] = {
         "prompt": composed.prompt,

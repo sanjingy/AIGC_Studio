@@ -76,7 +76,7 @@ FULL_OUTPUTS: dict[str, Any] = {
                 "ref": "gate",
                 "name": "资料馆门口",
                 "camera_axis": {"position": "铁门外路面", "facing": "朝向建筑正面"},
-                "fixed_references": ["铁门在画面正前方"],
+                "fixed_references": [{"name": "锈迹铁门", "description": "铁门在画面正前方"}],
             }
         ]
     },

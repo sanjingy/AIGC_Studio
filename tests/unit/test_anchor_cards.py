@@ -57,7 +57,10 @@ def _sheet(ref: str, name: str, *, anchored: bool = True) -> dict[str, Any]:
     sheet: dict[str, Any] = {"ref": ref, "name": name}
     if anchored:
         sheet["camera_axis"] = {"position": "门外路面", "facing": "朝向建筑正面"}
-        sheet["fixed_references"] = ["铁门在正前方", "石阶在右侧"]
+        sheet["fixed_references"] = [
+            {"name": "锈迹铁门", "description": "铁门在正前方，右扇下缘锈穿一个洞"},
+            {"name": "青石台阶", "description": "石阶在右侧，第三级缺一角"},
+        ]
     return sheet
 
 

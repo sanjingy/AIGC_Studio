@@ -353,28 +353,64 @@ def _scene_sheets(_seed: int, _user: str) -> dict[str, Any]:
                 "name": "资料馆门口",
                 "time_slot": "上午",
                 "setting": "爬满爬山虎的水泥墙围出的院落，锈迹斑斑的滑动铁门",
-                "lighting": "上午均匀自然日光，阴影清晰短小",
+                "lighting_states": [
+                    {
+                        "name": "上午",
+                        "description": "均匀自然日光自左上方射入，阴影清晰短小",
+                    },
+                    {
+                        "name": "傍晚",
+                        "description": "低角度侧光从围墙西侧射入，阴影拉长，明暗对比强",
+                    },
+                ],
+                "default_lighting": "上午",
                 "key_elements": ["铁门", "门柱牌子", "红砖建筑", "停车场"],
                 "camera_axis": {
                     "position": "铁门外的路面",
                     "facing": "朝向建筑正面",
                     "far_end": "红砖三层建筑的正门石阶",
                 },
-                "fixed_references": ["铁门在画面正前方", "门柱牌子在铁门右侧"],
+                "fixed_references": [
+                    {
+                        "name": "锈迹铁门",
+                        "description": "画面正前方的双开滑动铁门，右扇下缘锈穿一个巴掌大的洞",
+                    },
+                    {
+                        "name": "门柱牌子",
+                        "description": "铁门右侧砖柱上齐胸高的白底黑字铜牌，右下角螺丝缺一颗",
+                    },
+                ],
             },
             {
                 "ref": "office",
                 "name": "馆长室",
                 "time_slot": "室内不分时",
                 "setting": "约八叠大小，两侧顶天书架，正中黑檀木书桌",
-                "lighting": "窗帘遮蔽，室内灯光为主，整体偏暗",
+                "lighting_states": [
+                    {
+                        "name": "常态",
+                        "description": "窗帘遮蔽，顶部吊灯与桌面台灯为主，整体偏暗",
+                    },
+                ],
+                "default_lighting": "常态",
                 "key_elements": ["黑檀木书桌", "书架", "窗帘"],
                 "camera_axis": {
                     "position": "房门内侧",
                     "facing": "朝向书桌",
                     "far_end": "书桌后的窗帘墙",
                 },
-                "fixed_references": ["书桌在房间正中", "书架沿左右两墙"],
+                "fixed_references": [
+                    {
+                        "name": "黑檀木书桌",
+                        "description": (
+                            "房间正中的宽面书桌，右前角一盏铜制台灯，桌面右侧压着一摞卷宗"
+                        ),
+                    },
+                    {
+                        "name": "顶天书架",
+                        "description": "沿左右两墙各一排到顶书架，左排第三格空着一段，露出墙面",
+                    },
+                ],
             },
         ],
     }
@@ -398,6 +434,10 @@ def _storyboard(seed: int, _user: str) -> dict[str, Any]:
                 "shot_size": sizes[i % len(sizes)],
                 "angle": "斜前方45度" if i % 3 == 0 else "",
                 "camera_move": moves[i % len(moves)],
+                # 门口那半段戏在上午拍，馆长室只有一个状态。**引用的都是
+                # 对应场景真的声明过的名字**——Mock 也是下游的输入样例，
+                # 这里写个不存在的名字等于教后来的人怎么写错。
+                "lighting_ref": "上午" if i < shots // 2 else "常态",
                 "content": f"第 {i + 1} 镜的画面内容。",
                 "speaker_ref": "guan_zhang" if i == shots - 2 else "",
                 "dialogue": "有问题想问你。" if i == shots - 2 else "",

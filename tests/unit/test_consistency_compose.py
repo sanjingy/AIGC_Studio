@@ -14,9 +14,11 @@ import uuid
 from apps.api.modules.consistency.compose import (
     compose_shot,
     describe_character,
+    describe_fixed_reference,
     describe_scene,
     reference_portrait_prompt,
     reference_scene_prompt,
+    resolve_lighting,
     strip_style_words,
 )
 from apps.api.modules.consistency.models import CharacterProfile, SceneProfile, StyleProfile
@@ -52,17 +54,55 @@ def _style(**over: object) -> StyleProfile:
     return StyleProfile(**base)  # type: ignore[arg-type]
 
 
+# 光照给两个状态、锚点给两段式：这是 `_spatial()` 落库之后的真实形状。
+# 两个状态是必须的——只给一个的话"注入被引用的那一个、不注入另一个"
+# 这条断言就退化成"注入了唯一的那一个"，测不出任何东西。
 SPATIAL = {
     "time_slot": "上午",
     "setting": "爬满爬山虎的水泥墙围出的院落，锈迹斑斑的滑动铁门",
-    "lighting": "上午均匀自然日光",
+    "lighting_states": [
+        {
+            "name": "上午",
+            "description": "均匀自然日光自左上方射入，阴影短小",
+            "origin": "authored",
+        },
+        {
+            "name": "夜巡灯",
+            "description": "门柱顶灯自上方直射，围墙外一片死黑",
+            "origin": "authored",
+        },
+    ],
+    "default_lighting": "上午",
     "camera_axis": {
         "position": "铁门外的路面",
         "facing": "朝向建筑正面",
         "far_end": "红砖三层建筑的正门石阶",
     },
-    "fixed_references": ["铁门在画面正前方", "门柱牌子在铁门右侧"],
+    "fixed_references": [
+        {
+            "name": "锈迹铁门",
+            "description": "画面正前方的双开滑动铁门，右扇下缘锈穿一个巴掌大的洞",
+            "origin": "authored",
+        },
+        {
+            "name": "门柱铜牌",
+            "description": "铁门右侧砖柱上齐胸高的白底黑字铜牌，右下角螺丝缺一颗",
+            "origin": "authored",
+        },
+    ],
     "key_elements": ["铁门", "红砖建筑"],
+}
+
+# 存量形状：迁移之前落库的样子。留着它是为了证明**运行时**也扛得住——
+# 迁移把库里的数据改过来了，但备份恢复、以及模型照着旧样例输出时还会
+# 出现这个形状，那时不该表现为"光照凭空消失"。
+LEGACY_SPATIAL = {
+    "time_slot": "上午",
+    "setting": "爬满爬山虎的水泥墙围出的院落",
+    "lighting": "上午均匀自然日光",
+    "camera_axis": {"position": "铁门外的路面", "facing": "朝向建筑正面", "far_end": "石阶"},
+    "fixed_references": ["铁门在画面正前方", "门柱牌子在铁门右侧"],
+    "key_elements": ["铁门"],
 }
 
 
@@ -242,17 +282,23 @@ def test_scene_description_carries_camera_axis_and_fixed_references() -> None:
     assert isinstance(axis, dict)
     for value in axis.values():
         assert value in text, f"摄影主轴的 {value} 没进描述"
-    for ref in SPATIAL["fixed_references"]:
-        assert ref in text, f"固定参照物 {ref} 没进描述"
+    refs = SPATIAL["fixed_references"]
+    assert isinstance(refs, list)
+    for ref in refs:
+        assert isinstance(ref, dict)
+        # 名称和描述都要在：名称是名词（模型才知道画的是什么东西），
+        # 描述是能复现的细节。少哪一半这条锚点都不成立。
+        assert ref["name"] in text, f"固定参照物名称 {ref['name']} 没进描述"
+        assert ref["description"] in text, f"固定参照物 {ref['name']} 的描述没进描述"
     assert SPATIAL["setting"] in text
-    assert SPATIAL["lighting"] in text
 
 
 def test_scene_missing_fields_do_not_leave_empty_separators() -> None:
     sc = _scene()
     sc.spatial_json = {
         **SPATIAL,
-        "lighting": "",
+        "lighting_states": [{"name": "默认", "description": "", "origin": "migrated"}],
+        "default_lighting": "默认",
         "fixed_references": [],
         "camera_axis": {"position": "门内", "facing": "", "far_end": ""},
     }
@@ -260,6 +306,149 @@ def test_scene_missing_fields_do_not_leave_empty_separators() -> None:
     assert "，，" not in text
     assert not text.endswith("，")
     assert "门内" in text
+
+
+# ------------------------------------------------------------------ 光照状态
+
+
+def test_shot_gets_only_the_referenced_lighting_state() -> None:
+    """引用了哪个状态就注入哪个，**另一个不能出现**。
+
+    这是这次改动的全部价值所在。把全部状态一起塞进去，模型看到的是
+    互相矛盾的指令（"上午"和"夜巡灯"同时成立），结果只会是它自己挑一个
+    ——那和改动之前的"每镜自由发挥"一模一样。
+    """
+    text = describe_scene(_scene(), "夜巡灯")
+    assert "门柱顶灯自上方直射" in text
+    assert "均匀自然日光" not in text, "没被引用的那个状态漏进提示词了"
+
+
+def test_unknown_lighting_ref_degrades_to_default() -> None:
+    """引用了这个场景没声明过的状态 → 落到默认状态，不报错。
+
+    降级而不是报错的理由见 `compose.resolve_lighting`：引用跨两份 Agent
+    产出，pydantic 层判不了；而为一镜写错名字让 600 镜的分镜表整份失败，
+    代价完全不成比例。降级后的行为**正是这个字段存在之前的行为**。
+    """
+    text = describe_scene(_scene(), "黄昏")
+    assert "均匀自然日光" in text, "没落到默认状态上"
+    assert "门柱顶灯" not in text
+
+
+def test_empty_lighting_ref_uses_default() -> None:
+    """留空 = 用默认状态。分镜提示词明说"拿不准就留空"，这条路必须是安全的。"""
+    assert describe_scene(_scene(), "") == describe_scene(_scene(), "上午")
+
+
+def test_single_state_scene_always_resolves_to_that_state() -> None:
+    """只声明一个状态的场景：填什么、不填什么，都得到那一个。
+
+    室内不分时的场景就是这种。它必须**永远解析得出一个状态**——
+    "没有默认状态"意味着漏填的镜头行为未定义，那正是这次要消灭的东西。
+    """
+    sc = _scene()
+    only = {"name": "常态", "description": "顶灯与台灯为主，整体偏暗", "origin": "authored"}
+    sc.spatial_json = {**SPATIAL, "lighting_states": [only], "default_lighting": "常态"}
+    for ref in ("常态", "", "根本不存在的状态"):
+        assert resolve_lighting(sc.spatial_json, ref)["name"] == "常态"
+        assert only["description"] in describe_scene(sc, ref)
+
+
+def test_default_lighting_pointing_nowhere_falls_back_to_first_state() -> None:
+    """场景自己的 `default_lighting` 指向一个不存在的状态时也不能悬空。
+
+    模型漏填、或者用户在字段级编辑里把某个状态改了名，都会造出这种数据。
+    """
+    sc = _scene()
+    sc.spatial_json = {**SPATIAL, "default_lighting": "已经被改名的状态"}
+    assert resolve_lighting(sc.spatial_json, "")["name"] == "上午"
+
+
+def test_composed_reports_which_lighting_state_was_actually_used() -> None:
+    """`Composed.lighting_state` 带回实际用的名字——降级要能被发现。
+
+    合成这一层是纯函数，拿不到 project_id / shot_index，所以不在这里记
+    日志；把实际用的名字带回去，`render` 那一层一比就知道发生了降级。
+    """
+    out = compose_shot(
+        content="站在铁门外",
+        style=_style(),
+        characters=[],
+        shot_index=1,
+        scene=_scene(),
+        lighting_ref="黄昏",
+    )
+    assert out.lighting_state == "上午", "降级之后没有把真正用的状态带回去"
+
+    ok = compose_shot(
+        content="站在铁门外",
+        style=_style(),
+        characters=[],
+        shot_index=1,
+        scene=_scene(),
+        lighting_ref="夜巡灯",
+    )
+    assert ok.lighting_state == "夜巡灯"
+
+
+def test_shot_without_scene_reports_no_lighting_state() -> None:
+    """没有场景就谈不上光照状态，不能凭空报一个名字出来。"""
+    out = compose_shot(content="特写", style=_style(), characters=[], shot_index=1)
+    assert out.lighting_state == ""
+
+
+def test_scene_reference_prompt_uses_the_default_state() -> None:
+    """场景基准图用默认状态。
+
+    这张图是同一场景后续所有镜头的空间基准，用哪种光当基准不该由某一镜
+    决定——默认状态就是场景档案自己选出来的那一个。
+    """
+    prompt = reference_scene_prompt(_scene(), _style())
+    assert "均匀自然日光" in prompt
+    assert "门柱顶灯" not in prompt
+
+
+# ------------------------------------------------------------------ 结构化锚点
+
+
+def test_fixed_reference_shows_name_and_description() -> None:
+    """名称是名词、描述是细节，两段都要进提示词。
+
+    只给描述会让"绿锈斑驳，缆绳打着水手结"悬在半空没有主语；
+    只给名称就退回到"有一个铜铃"，在扩散模型里等价于没写。
+    """
+    text = describe_fixed_reference(
+        {"name": "船头铜铃", "description": "拳头大的旧铜铃挂在篷杆前端，绿锈斑驳"}
+    )
+    assert text == "船头铜铃（拳头大的旧铜铃挂在篷杆前端，绿锈斑驳）"
+
+
+def test_migrated_fixed_reference_is_not_said_twice() -> None:
+    """存量锚点的名称是描述的前若干字，拼一起会把同一句话说两遍。
+
+    "铁门在画面正前（铁门在画面正前方）"不报错，只是让模型把注意力
+    分给一句废话——和摄影主轴那条"朝向朝向建筑正面"是同一类问题。
+    """
+    text = describe_fixed_reference(
+        {"name": "铁门在画面正前", "description": "铁门在画面正前方", "origin": "migrated"}
+    )
+    assert text == "铁门在画面正前方"
+
+
+# --------------------------------------------------------------- 存量形状兜底
+
+
+def test_legacy_flat_spatial_still_yields_lighting_and_anchors() -> None:
+    """没被迁移到的存量行（备份恢复）不能表现为"光照和锚点凭空消失"。
+
+    迁移把库里的数据改过来了，但这一层仍要扛得住旧形状：少一段光照描述
+    不报错，只会让这一镜的光由模型自由发挥，而那是查起来最费劲的一类问题。
+    """
+    sc = _scene()
+    sc.spatial_json = dict(LEGACY_SPATIAL)
+    text = describe_scene(sc)
+    assert "上午均匀自然日光" in text, "旧的 lighting 字段没被读到"
+    assert "铁门在画面正前方" in text, "旧的扁平锚点没进描述"
 
 
 # ------------------------------------------------------------------ 场景 → 镜头

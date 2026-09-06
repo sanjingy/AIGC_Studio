@@ -385,19 +385,232 @@ class CameraAxis(_Strict):
     far_end: str = Field(max_length=80, description="远景末端")
 
 
+# 存量数据迁移时，用描述的前若干字充当锚点/光照状态的名称。
+#
+# **这不是"会变的阈值"**，所以不入库：它只在一处生效——把没有名称的存量扁平
+# 字符串补出一个名称来，好让它在界面上和下游引用里有个把手。既不参与任何业务
+# 判定，也不随上游价格或供应商变化。它唯一的约束来自同一个文件里
+# `FixedReference.name` / `LightingState.name` 的 max_length，改名称上限时才需要
+# 一起看。同类先例见 `apps/api/modules/agent/anchors.py` 里的判据常量。
+MIGRATED_NAME_CHARS = 12
+
+# 存量的单个 `lighting` 字符串迁过来之后叫什么，也是模型漏填 `default_lighting`
+# 时兜底状态的名字。
+DEFAULT_LIGHTING_NAME = "默认"
+
+# 数据来源。`migrated` = 由存量扁平字段自动补出来的，不是谁真的写过。
+# 界面要能把它和作者写的区分开，否则用户看到一个"名称"会以为有人取过名。
+ORIGINS = Literal["authored", "migrated"]
+
+
+class FixedReference(_Strict):
+    """一个固定参照物：名称 + 能复现的描述。
+
+    **为什么拆两段而不是一句话。** 这两段是给两个不同的读者看的：
+
+        name         给人、也给下游引用——用户扫一眼就知道这个场景钉死了
+                     哪几样东西，界面和分镜按这个把手指过来
+        description  给出图模型复现——它要的是"篷布右后角一块颜色更深的
+                     方形补丁，漏下一道光缝"这种能画出来的细节
+
+    合成一句话两头不讨好：人扫不出这个场景有哪几个锚点，模型也拿不到足够
+    细节。"有补丁"是不合格的描述——它在扩散模型里等价于没写，而同一块补丁
+    这镜在左下镜在右，正是空间锚点要防的东西。
+    """
+
+    name: str = Field(max_length=20, description="短名称，如 补丁船篷 / 磨白的坐板")
+    description: str = Field(max_length=160, description="具体到能复现的描述，必须带方位")
+    origin: ORIGINS = "authored"
+
+
+class LightingState(_Strict):
+    """场景的一个具名光照状态。
+
+    **为什么光照是集合而不是一个字段。** 同一个场景在一部剧里会在不同时刻
+    反复出现——渡口的清晨、正午、夜里。一个 `lighting` 字段只有两种结局：
+    要么全场景共用一种光（夜戏用白天的光），要么每个镜头让模型自由发挥，
+    而后者正是一致性引擎要防的东西。正确形态是：光照是一个**有限集合**，
+    镜头从集合里选一个（`StoryboardShot.lighting_ref`），而不是每镜自己编。
+    """
+
+    name: str = Field(max_length=20, description="短名称，如 晨雾 / 正午 / 夜巡灯")
+    description: str = Field(max_length=100, description="光线的来源与方向")
+    origin: ORIGINS = "authored"
+
+
+def _text(value: object) -> str:
+    return str(value).strip() if value is not None else ""
+
+
+def _derived_name(description: str) -> str:
+    """没有名称时从描述里截一个出来。
+
+    截断而不是留空：留空的锚点在界面上是一行没有标题的描述，在分镜里也没法
+    被引用。截出来的名字不好看，但它是个能用的把手，且**原文一个字都没丢**
+    ——完整描述仍在 `description` 里，截出来的名称是副本不是替换。
+    """
+    return description[:MIGRATED_NAME_CHARS]
+
+
+def coerce_fixed_references(value: object) -> list[dict[str, Any]]:
+    """把固定参照物统一成 `{name, description, origin}` 的形状。
+
+    接受三种输入，因为这三种都真实存在：
+
+        新产出   [{"name": ..., "description": ...}]      原样规范化
+        存量     ["铁门在画面正前方"]                       补名称，标 migrated
+        半成品   只有 name 或只有 description             缺哪段补哪段
+
+    **任何一种都不丢原文。**
+    """
+    if not isinstance(value, list):
+        return []
+
+    out: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict):
+            name = _text(item.get("name"))
+            description = _text(item.get("description"))
+            if not name and not description:
+                continue
+            origin = _text(item.get("origin"))
+            if not description:
+                # 只有名称：它就是全部原文，同时当描述用。
+                description = name
+                origin = origin or "migrated"
+            if not name:
+                name = _derived_name(description)
+                origin = origin or "migrated"
+            out.append(
+                {
+                    "name": name,
+                    "description": description,
+                    "origin": origin if origin in ("authored", "migrated") else "authored",
+                }
+            )
+            continue
+
+        text = _text(item)
+        if not text:
+            continue
+        out.append({"name": _derived_name(text), "description": text, "origin": "migrated"})
+    return out
+
+
+def coerce_lighting_states(design: Any) -> tuple[list[dict[str, Any]], str]:
+    """把光照统一成 `(状态列表, 默认状态名)`。
+
+    存量的单个 `lighting` 字符串迁成**一个名为「默认」的状态**——既不丢掉它，
+    也不给存量场景凭空编出四个时段。老数据里只有一种光，迁完仍然只有一种，
+    行为与迁移前逐字相同。
+
+    **一定会返回至少一个状态**：`SceneSheet.lighting_states` 是 `min_length=1`，
+    而"没有默认状态"意味着漏填 `lighting_ref` 的镜头行为未定义——那正是这次
+    改动要消灭的东西。真的一个字都没有时给一个空描述的默认状态，注入的内容
+    与改动前（`lighting` 为空串）一致。
+    """
+    empty: list[dict[str, Any]] = [
+        {"name": DEFAULT_LIGHTING_NAME, "description": "", "origin": "migrated"}
+    ]
+    if not isinstance(design, dict):
+        return empty, DEFAULT_LIGHTING_NAME
+
+    raw = design.get("lighting_states")
+    states: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                name = _text(item.get("name"))
+                description = _text(item.get("description"))
+                origin = _text(item.get("origin"))
+            else:
+                name, description, origin = "", _text(item), "migrated"
+            if not name and not description:
+                continue
+            if not name:
+                name = _derived_name(description)
+                origin = origin or "migrated"
+            if name in seen:
+                # 同名状态第二次出现永远选不到（按名字解析取第一个匹配），
+                # 留在列表里只会在界面上多一个点了没用的选项。
+                log.warning("agent.lighting_state_duplicate", name=name)
+                continue
+            seen.add(name)
+            states.append(
+                {
+                    "name": name,
+                    "description": description,
+                    "origin": origin if origin in ("authored", "migrated") else "authored",
+                }
+            )
+
+    if not states:
+        # 存量形状：单个 `lighting` 字符串。空串也要建状态，见 docstring。
+        states = [
+            {
+                "name": DEFAULT_LIGHTING_NAME,
+                "description": _text(design.get("lighting")),
+                "origin": "migrated",
+            }
+        ]
+        seen = {DEFAULT_LIGHTING_NAME}
+
+    default = _text(design.get("default_lighting"))
+    if default not in seen:
+        if default:
+            log.warning("agent.default_lighting_unknown", default=default, known=sorted(seen))
+        default = str(states[0]["name"])
+    return states, default
+
+
 class SceneSheet(_Strict):
     ref: str = Field(pattern=r"^[a-z][a-z0-9_]{1,30}$")
     name: str = Field(max_length=40)
     time_slot: str = Field(max_length=20, description="从标准时间词库中选")
     setting: str = Field(max_length=300)
-    lighting: str = Field(max_length=100)
+
+    # 光照是有限集合，不是一个字段——理由见 `LightingState`。
+    lighting_states: list[LightingState] = Field(
+        min_length=1,
+        max_length=6,
+        description="这个地点在剧本里实际出现过的光照状态，各带一段描述",
+    )
+    # 没有显式指定光照的镜头用哪一个。必须是上面已声明的状态之一；留空或指向
+    # 未知状态时由 `_accept_legacy_shape` 落到第一个状态上，绝不留成未定义。
+    default_lighting: str = Field(default="", max_length=20, description="默认光照状态的名称")
+
     key_elements: list[str] = Field(min_length=1, max_length=12)
     camera_axis: CameraAxis
-    fixed_references: list[str] = Field(
+    fixed_references: list[FixedReference] = Field(
         default_factory=list,
         max_length=8,
         description="固定参照物及其位置，构成空间锚点卡的固定层",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_shape(cls, data: Any) -> Any:
+        """把存量的扁平形状就地翻译成结构化形状。
+
+        字段级编辑（`PATCH .../outputs/scenes`）会拿**现行 schema** 去校验库里
+        早就存下的场景档案，而那些档案里 `lighting` 是一个字符串、
+        `fixed_references` 是一串句子。没有这一步，所有存量项目的场景档案立刻
+        变成不可编辑——`extra="forbid"` 会直接因为多出来的 `lighting` 报错。
+        这与 `CharacterSheet.build` 保留那一列是同一类兼容措施。
+
+        迁移脚本把库里的数据一次性改过来；这里是运行时的第二道保险，管的是
+        备份恢复、以及模型偶尔照着旧样例输出的情况。
+        """
+        if not isinstance(data, dict):
+            return data
+        patched = {k: v for k, v in data.items() if k != "lighting"}
+        states, default = coerce_lighting_states(data)
+        patched["lighting_states"] = states
+        patched["default_lighting"] = default
+        if "fixed_references" in patched:
+            patched["fixed_references"] = coerce_fixed_references(patched["fixed_references"])
+        return patched
 
 
 def fallback_character_ref(name: str, index: int) -> str:
@@ -521,6 +734,16 @@ class StoryboardShot(_Strict):
     # 只写画面内容。风格词由系统统一注入——
     # Agent 自行编写风格词是画风漂移的头号来源。
     content: str = Field(max_length=300)
+
+    # 这一镜用该场景的哪个光照状态。**必须是该场景已声明的状态之一**
+    # （`SceneSheet.lighting_states`），留空 = 用该场景的 `default_lighting`。
+    #
+    # 只写名字不写描述：描述由系统按名字从场景档案里取，注入被引用的**那一个**
+    # 状态。让分镜自己写光照描述就退回到"每镜自由发挥"，那正是这个字段要消灭的
+    # 东西——同一个渡口的两个夜戏镜头会得到两种夜色。
+    lighting_ref: str = Field(
+        default="", max_length=20, description="引用场景已声明的光照状态名，留空用默认"
+    )
 
     speaker_ref: str = Field(default="", max_length=32)
     dialogue: str = Field(default="", max_length=200)

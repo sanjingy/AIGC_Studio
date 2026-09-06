@@ -196,8 +196,13 @@ async def test_patch_syncs_scene_projection(alice: AsyncClient) -> None:
     org_id = await _org(alice)
     pid = await run_to_storyboard(alice)
 
+    # 改的是**某一个光照状态的描述**，不是一个叫 lighting 的字段——
+    # 光照已经是一组具名状态，"这个场景的光"没有单数形式了。
     code, body = await patch(
-        alice, pid, "scenes", [{"path": "/scenes/0/lighting", "value": "顶灯惨白，无阴影"}]
+        alice,
+        pid,
+        "scenes",
+        [{"path": "/scenes/0/lighting_states/0/description", "value": "顶灯惨白，无阴影"}],
     )
     assert code == 200, body
     ref = body["output"]["scenes"][0]["ref"]
@@ -205,7 +210,7 @@ async def test_patch_syncs_scene_projection(alice: AsyncClient) -> None:
     async with session_scope() as db:
         profiles = await consistency.list_scenes(db, org_id=org_id, project_id=uuid.UUID(pid))
     scene = next(s for s in profiles if s.ref == ref)
-    assert scene.spatial_json["lighting"] == "顶灯惨白，无阴影"
+    assert scene.spatial_json["lighting_states"][0]["description"] == "顶灯惨白，无阴影"
 
 
 async def test_patch_costs_nothing(alice: AsyncClient) -> None:

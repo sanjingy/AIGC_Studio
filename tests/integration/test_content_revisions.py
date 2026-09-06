@@ -93,7 +93,12 @@ async def test_history_records_who_what_and_from_to(alice: AsyncClient) -> None:
 async def test_history_can_filter_by_role(alice: AsyncClient) -> None:
     pid = await run_to_storyboard(alice)
     await patch(alice, pid, "characters", [{"path": "/characters/0/name", "value": "陈默"}])
-    await patch(alice, pid, "scenes", [{"path": "/scenes/0/lighting", "value": "顶灯惨白"}])
+    await patch(
+        alice,
+        pid,
+        "scenes",
+        [{"path": "/scenes/0/lighting_states/0/description", "value": "顶灯惨白"}],
+    )
 
     assert len(await _history(alice, pid)) == 2
     only = await _history(alice, pid, role="scenes")

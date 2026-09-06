@@ -311,11 +311,30 @@ def prompt_contracts() -> dict[str, list[str]]:
         ],
         # 空间锚点卡的固定层：这两个字段在 schema 上一直存在、一直没人填，
         # 提示词不点名要求填，它们就会继续空着（ADR-037 第 3 条）
+        #
+        # 锚点的两段式和多光照状态同理，而且更容易退化：模型完全可以把
+        # 名称和描述写成同一句话（"船篷 → 船篷"），或者机械地把一天四段
+        # 都列成状态。所以除了字段名，这里还钉住**反例**和**"按剧本时刻"**
+        # 那两句——它们是这次改动里唯一防退化的东西，被谁顺手删掉时
+        # 只有这条断言会红。
         "visual.scene.v1": [
             "camera_axis",
             "fixed_references",
             *_placeholder_terms("era"),
             "完全一致",
+            "lighting_states",
+            "default_lighting",
+            "给它加一个「正午」",
+            "正例",
+            "反例",
+            "有补丁",
+        ],
+        # 镜头引用光照状态：不点名要求"只能填场景列出的那几个"，模型就会
+        # 自己造名字，而造出来的名字解析不到，只会静默降级成默认光照
+        "visual.storyboard.v1": [
+            "lighting_ref",
+            "只能填对应场景列出的那几个名字之一",
+            "剧本时序",
         ],
     }
 
@@ -444,13 +463,31 @@ SCHEMA_SAMPLES: dict[str, dict[str, Any]] = {
                 "name": "资料馆门口",
                 "time_slot": "上午",
                 "setting": "爬满爬山虎的院墙与锈迹铁门",
-                "lighting": "上午自然日光",
+                # 光照是一组具名状态，不是一个字段。样例给两个：给一个的话
+                # 作者照抄样例就得不到"同一地点在不同时刻反复出现"这件事。
+                "lighting_states": [
+                    {"name": "上午", "description": "均匀自然日光自左上方射入，阴影短小"},
+                    {"name": "傍晚", "description": "低角度侧光自西侧射入，阴影拉长"},
+                ],
+                "default_lighting": "上午",
                 "key_elements": ["铁门"],
                 "camera_axis": {
                     "position": "铁门外路面",
                     "facing": "朝向建筑正面",
                     "far_end": "红砖建筑正门石阶",
                 },
+                # 锚点是两段式。样例里的描述**刻意写得很细**——样例是提示词
+                # 作者最先照抄的东西，这里写"铁门"，产线上就会得到"铁门"。
+                "fixed_references": [
+                    {
+                        "name": "锈迹铁门",
+                        "description": "画面正前方的双开滑动铁门，右扇下缘锈穿一个巴掌大的洞",
+                    },
+                    {
+                        "name": "门柱铜牌",
+                        "description": "铁门右侧砖柱上齐胸高的白底黑字铜牌，右下角螺丝缺一颗",
+                    },
+                ],
             }
         ],
     },
@@ -462,6 +499,10 @@ SCHEMA_SAMPLES: dict[str, dict[str, Any]] = {
                 "node_index": 1,
                 "scene_ref": "gate",
                 "shot_size": "全景",
+                # 引用的是上面 SceneSheets 样例里 gate 真的声明过的状态名。
+                # 两份样例要对得上，否则样例本身就在示范"引用一个不存在的
+                # 状态"，而那正是这个字段要防的事。
+                "lighting_ref": "上午",
                 "content": "主角站在铁门外",
             }
         ],

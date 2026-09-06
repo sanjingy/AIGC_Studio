@@ -44,6 +44,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from agents.schemas import coerce_fixed_references
+
 # 三条判据的阈值。**这是产品判据，不是运营参数**，所以写成常量而不是入库。
 #
 # 判据出自 ADR-037 第 3 条的正文，改动它等于改动这条 ADR，要走同一套流程
@@ -72,7 +74,9 @@ class AnchorCard:
     ref: str
     name: str
     camera_axis: dict[str, str] = field(default_factory=dict)
-    fixed_references: list[str] = field(default_factory=list)
+    # 结构化锚点：每条是 {name, description, origin}。门③ 上要分两列显示——
+    # 名称是用户扫一眼就能点数的把手，描述是他真正要核对的那句话。
+    fixed_references: list[dict[str, str]] = field(default_factory=list)
     # 为什么这个场景要出卡。空列表 = 不出卡，用内联描述即可。
     reasons: list[str] = field(default_factory=list)
     signals: AnchorSignals = field(default_factory=AnchorSignals)
@@ -107,6 +111,24 @@ class AnchorCard:
             },
             "incomplete": self.incomplete,
         }
+
+
+def _fixed_references(scene: dict[str, Any]) -> list[dict[str, str]]:
+    """场景档案上的固定参照物，规范成 `{name, description, origin}` 一列。
+
+    形状归一化复用 `agents.schemas` 的纯函数，理由同
+    `consistency/service.py::_spatial`：合法形状是 schema 层的问题，抄一份
+    过来就会有两套判断。存量项目的扁平字符串在这里也能显示成一张有名称的
+    卡，而不是一行没有标题的句子。
+    """
+    return [
+        {
+            "name": str(item.get("name", "")),
+            "description": str(item.get("description", "")),
+            "origin": str(item.get("origin", "authored")),
+        }
+        for item in coerce_fixed_references(scene.get("fixed_references"))
+    ]
 
 
 def _script_scenes(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -209,9 +231,7 @@ def anchor_cards(state: dict[str, Any]) -> list[AnchorCard]:
                 camera_axis={
                     k: str(v) for k, v in (axis if isinstance(axis, dict) else {}).items()
                 },
-                fixed_references=[
-                    str(f) for f in scene.get("fixed_references", []) or [] if str(f).strip()
-                ],
+                fixed_references=_fixed_references(scene),
                 reasons=_reasons(sig),
                 signals=sig,
             )

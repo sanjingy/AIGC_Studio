@@ -585,6 +585,56 @@ def _screenplay_block(state: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _location_moments(state: dict[str, Any]) -> str:
+    """每个地点在剧本里出现过哪些时刻，一行一个。
+
+    场景 Agent 要按这个生成光照状态。没有它，模型只能机械地把一天四段列全
+    ——剧本里只在夜里出现过的渡口凭空多出一个"正午"，而多出来的状态是死的：
+    没有任何镜头会引用它，用户却要在门③ 上确认它。
+
+    时刻取自剧本每一场的 `time_mood`（"冬日上午 - 压抑"这种），原样透传不做
+    解析：拆分它就要维护一张时间词表，而模型读整句比读一个被切坏的片段更准。
+    """
+    moments: dict[str, list[str]] = {}
+    for ep in state.get("screenplay", {}).get("episodes", []):
+        if not isinstance(ep, dict):
+            continue
+        for sc in ep.get("scenes", []):
+            if not isinstance(sc, dict):
+                continue
+            loc = str(sc.get("location", "")).strip()
+            if not loc:
+                continue
+            slot = moments.setdefault(loc, [])
+            mood = str(sc.get("time_mood", "")).strip()
+            if mood and mood not in slot:
+                slot.append(mood)
+    return "\n".join(
+        f"- {loc}：{'、'.join(slots) if slots else '剧本未写明时刻'}"
+        for loc, slots in sorted(moments.items())
+    )
+
+
+def _lighting_menu(state: dict[str, Any]) -> str:
+    """每个场景声明了哪些光照状态，一行一个。分镜 Agent 从里面挑。"""
+    lines: list[str] = []
+    for scene in state.get("scenes", {}).get("scenes", []):
+        if not isinstance(scene, dict):
+            continue
+        ref = str(scene.get("ref", "")).strip()
+        if not ref:
+            continue
+        names = [
+            name
+            for s in scene.get("lighting_states", []) or []
+            if isinstance(s, dict) and (name := str(s.get("name", "")).strip())
+        ]
+        default = str(scene.get("default_lighting", "")).strip()
+        marked = [f"{n}（默认）" if n == default else n for n in names]
+        lines.append(f"- {ref}：{'、'.join(marked) if marked else '未声明，留空即可'}")
+    return "\n".join(lines)
+
+
 def _input_for(stage: str, state: dict[str, Any]) -> str:
     """给每个阶段拼输入。
 
@@ -620,19 +670,12 @@ def _input_for(stage: str, state: dict[str, Any]) -> str:
         )
 
     if stage == "scenes":
-        scene_names = sorted(
-            {
-                sc.get("location", "")
-                for ep in state.get("screenplay", {}).get("episodes", [])
-                for sc in ep.get("scenes", [])
-                if sc.get("location")
-            }
-        )
         return (
             f"{_screenplay_block(state)}\n\n"
-            f"剧本涉及的地点：{'、'.join(scene_names)}\n\n"
+            f"剧本涉及的地点与它们出现过的时刻：\n{_location_moments(state)}\n\n"
             f"【原著节选】\n{source[:SOURCE_EXCERPT_CHARS]}\n\n"
             "请为每个地点建立场景档案。"
+            "lighting_states 只覆盖上面列出的时刻，不要把一天四段机械地列全。"
         )
 
     if stage == "storyboard":
@@ -644,6 +687,12 @@ def _input_for(stage: str, state: dict[str, Any]) -> str:
                 "",
                 "可用角色 ref：" + "、".join(f"{c.get('ref')}={c.get('name')}" for c in chars),
                 "可用场景 ref：" + "、".join(f"{s.get('ref')}={s.get('name')}" for s in scenes),
+                "",
+                # 光照状态是**按场景**声明的有限集合，所以必须按场景分行发下去。
+                # 合成一个大列表会让模型把 A 场景的"夜巡灯"填给 B 场景，
+                # 而那条引用解析不到，只会静默降级成 B 的默认光。
+                "各场景可用的光照状态（lighting_ref 只能填对应场景的这几个之一）：",
+                _lighting_menu(state),
                 "",
                 "请先列分镜节点清单，再逐节点拆镜号。",
                 "character_refs 和 scene_ref 只能用上面列出的 ref，不要新造。",

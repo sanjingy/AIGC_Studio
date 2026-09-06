@@ -16,8 +16,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from apps.api.modules.consistency.models import CharacterProfile, SceneProfile, StyleProfile
 
@@ -42,6 +43,11 @@ class Composed:
     character_ids: list[str]
     # 这一镜用了哪个场景档案。没有场景信息时为 None——见 compose_shot。
     scene_id: str | None = None
+    # 这一镜**实际**用了哪个光照状态的名字。调用方拿它和分镜表上写的
+    # `lighting_ref` 一比，就知道有没有发生降级（引用了不存在的状态）。
+    # 不在这里记日志：这一层是纯函数，而 project_id / shot_index 这些
+    # 真正有用的上下文只有 render 那一层才有。
+    lighting_state: str = ""
 
 
 # 三套描述词的用途（ADR-036 第 3 条）。**不得混用。**
@@ -125,7 +131,70 @@ def _labelled(label: str, value: object) -> str:
     return text if text.startswith(label) else f"{label}{text}"
 
 
-def describe_scene(profile: SceneProfile) -> str:
+def resolve_lighting(spatial: Mapping[str, Any], lighting_ref: str = "") -> dict[str, str]:
+    """这一镜到底用哪个光照状态。**永远返回一个状态，不返回 None。**
+
+    解析顺序：显式引用 → 场景声明的默认状态 → 列表里的第一个。
+
+    **非法引用降级到默认，不报错。** 三条理由：
+
+    1. 引用跨两份 Agent 产出。`Storyboard` 校验时手里没有 `SceneSheets`，
+       pydantic 层根本判不了这件事；要判就得把两个 schema 绑在一起。
+    2. 代价不对称。一个 600 镜的分镜表因为某一镜写了"黄昏"而场景声明的是
+       "傍晚"就整份失败，返工成本是重跑一次分镜（几分钟 + 一笔 Credits）；
+       降级的代价是这一镜用默认光照，那**正是这个字段存在之前的行为**。
+       仓库里同类判断已经有两处先例：未知 `character_refs` 跳过、未知
+       `scene_ref` 退回无场景，都写着"为它整镜失败不划算"。
+    3. 降级必须留痕，否则查不出来。所以 `Composed.lighting_state` 带回实际
+       用的名字，`render` 那一层比对后写 warning——那里才有 project_id 和
+       shot_index。
+
+    `spatial` 收 `Mapping` 而不是 `SceneProfile`：`reference_scene_prompt` 和
+    `describe_scene` 都只需要 `spatial_json`，收窄参数能让它单独被测。
+    """
+    states = [s for s in (spatial.get("lighting_states") or []) if isinstance(s, dict)]
+    if not states:
+        # 没有状态列表 = 这份 spatial_json 还是扁平形状（备份恢复、或者某行
+        # 漏掉了迁移）。退回读旧的 `lighting` 字段，而不是让光照凭空消失——
+        # 少一段光照描述不会报错，只会让这一镜的光由模型自由发挥，
+        # 而那是查起来最费劲的一类问题。
+        return {"name": "", "description": str(spatial.get("lighting", "") or "")}
+
+    by_name = {str(s.get("name", "")).strip(): s for s in states}
+    for candidate in (str(lighting_ref).strip(), str(spatial.get("default_lighting", "")).strip()):
+        if candidate and (hit := by_name.get(candidate)) is not None:
+            return {
+                "name": str(hit.get("name", "")),
+                "description": str(hit.get("description", "")),
+            }
+    first = states[0]
+    return {"name": str(first.get("name", "")), "description": str(first.get("description", ""))}
+
+
+def describe_fixed_reference(item: Any) -> str:
+    """一个固定参照物拼成一段。
+
+    形状是"名称（描述）"而不是只给描述：名称多半是个名词（"船头铜铃"），
+    模型需要它才知道画的是**什么东西**，描述给的是这东西长什么样、在哪。
+    只给描述会让"绿锈斑驳，缆绳打着水手结"悬在半空没有主语。
+
+    存量的扁平字符串在 `agents/schemas.coerce_fixed_references` 里已经被补出
+    了名称（名称是描述的前若干字），此时名称和描述前缀重复，拼出来是
+    "铁门在画面正前（铁门在画面正前方）"——所以这里对"名称是描述的前缀"
+    这种情况只取描述，避免把同一句话说两遍。
+    """
+    if not isinstance(item, dict):
+        return str(item).strip()
+    name = str(item.get("name", "")).strip()
+    description = str(item.get("description", "")).strip()
+    if not description:
+        return name
+    if not name or description.startswith(name):
+        return description
+    return f"{name}（{description}）"
+
+
+def describe_scene(profile: SceneProfile, lighting_ref: str = "") -> str:
     """把结构化空间信息拼成稳定的一句描述。
 
     **字段顺序固定**，理由和 `describe_character` 一模一样：同一个场景
@@ -136,6 +205,14 @@ def describe_scene(profile: SceneProfile) -> str:
     哪些东西钉死在哪 → 还有什么"：先立空间，再立机位，最后才是陈设。
     `camera_axis` 和 `fixed_references` 是场景一致性的全部依据
     （`agents/schemas.py` 的 `SceneSheet`），它们必须在，不能省。
+
+    光照那一格注入的是**被引用的那一个状态的描述**，不是全部状态。把三种
+    光一起塞进去，模型看到的是互相矛盾的指令（"晨雾"和"夜巡灯"同时成立），
+    结果只会是它自己挑一个——那和没有这个字段一样。
+
+    只注入描述、不注入状态名：名称是给人和给引用用的把手（"晨雾"），
+    描述才是给模型的光线指令（"雾中散射光，无明确方向，对比度极低"）。
+    这一点与固定参照物相反，那里名称是个名词，模型需要它才知道画什么。
     """
     a = profile.spatial_json
     axis = a.get("camera_axis") or {}
@@ -143,7 +220,7 @@ def describe_scene(profile: SceneProfile) -> str:
         profile.name,
         a.get("time_slot", ""),
         a.get("setting", ""),
-        a.get("lighting", ""),
+        resolve_lighting(a, lighting_ref)["description"],
     ]
     if isinstance(axis, dict):
         # 摄影主轴拼成一句而不是三段：它描述的是同一件事——机位怎么摆。
@@ -156,7 +233,7 @@ def describe_scene(profile: SceneProfile) -> str:
         if axis_text := "，".join(b for b in axis_bits if b):
             parts.append(axis_text)
 
-    fixed = [str(f) for f in (a.get("fixed_references") or []) if str(f).strip()]
+    fixed = [t for f in (a.get("fixed_references") or []) if (t := describe_fixed_reference(f))]
     if fixed:
         parts.append("固定参照物：" + "；".join(fixed))
 
@@ -174,6 +251,7 @@ def compose_shot(
     characters: list[CharacterProfile],
     shot_index: int,
     scene: SceneProfile | None = None,
+    lighting_ref: str = "",
 ) -> Composed:
     """合成一个镜头的最终提示词。
 
@@ -187,14 +265,21 @@ def compose_shot(
     根本还没跑到场景阶段时，就退回到"角色 → 画面 → 风格"的旧行为。
     做成硬要求会让所有存量项目突然出不了镜头图，而镜头出图在没有场景
     档案的年代本来就跑得好好的——多一份空间锚点是改进，不是新的前置条件。
+
+    `lighting_ref` 同理可空：留空、或者指向一个该场景没声明过的状态，都落到
+    该场景的默认光照上（见 `resolve_lighting`）。实际用了哪个由
+    `Composed.lighting_state` 带回去，调用方一比就知道有没有降级。
     """
     segments: list[str] = []
+    lighting_state = ""
 
     if characters:
         segments.append("；".join(describe_character(c) for c in characters))
 
-    if scene is not None and (scene_text := describe_scene(scene)):
-        segments.append(scene_text)
+    if scene is not None:
+        lighting_state = resolve_lighting(scene.spatial_json, lighting_ref)["name"]
+        if scene_text := describe_scene(scene, lighting_ref):
+            segments.append(scene_text)
 
     if cleaned := strip_style_words(content):
         segments.append(cleaned)
@@ -211,6 +296,7 @@ def compose_shot(
         seed=(style.seed_base + shot_index) if style.seed_base else None,
         character_ids=[str(c.id) for c in characters],
         scene_id=str(scene.id) if scene is not None else None,
+        lighting_state=lighting_state,
     )
 
 
@@ -242,6 +328,10 @@ def reference_scene_prompt(profile: SceneProfile, style: StyleProfile) -> str:
     唯一不能省的是摄影主轴：`describe_scene` 已经把它和固定参照物拼进去
     了，这里再点一次"按上述摄影主轴取景"，让它成为构图指令而不只是描述。
     没有这一句，模型每次自己挑一个角度，这张图就当不了基准。
+
+    光照用**默认状态**（不传 `lighting_ref`）：这张图是空间基准，同一场景的
+    多种光照共用它，用哪一种当基准都不该由某一镜决定。默认状态就是场景档案
+    自己选出来的那一个。
     """
     return "。".join(
         [

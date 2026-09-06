@@ -3,7 +3,7 @@
 > 状态：**部分实现**（L0 提示词锁定 + 出图链路已实现；L1 参考图条件化、质量评分、候选版本未实现）
 > 优先级：P0
 > 负责人：待定
-> 最近核对：2026-09-06（ADR-036 第 3 条风格词拆三套 + ADR-037 受控词表与空间锚点）
+> 最近核对：2026-09-06（ADR-036 第 3 条风格词拆三套 + ADR-037 受控词表与空间锚点；同日补：场景锚点两段式 + 多光照状态 + 镜头引用光照）
 
 ## 1. 模块目标与边界
 
@@ -40,6 +40,9 @@
 | 角色 / 场景档案从 Agent 产出自动同步 | `service.sync_from_characters_output` / `sync_from_scenes_output`，由 `orchestrator` 在对应阶段调用 |
 | 确定性提示词合成，结构固定为 **角色 → 场景 → 画面 → 风格** | `compose.compose_shot` |
 | 场景一致性锚点真的进提示词：摄影主轴 `camera_axis` + 固定参照物 `fixed_references` | `compose.describe_scene`、`agents/schemas.py:SceneSheet` |
+| 固定参照物是**两段式**（名称 + 能复现的描述），不是一串句子 | `agents/schemas.py:FixedReference`；`compose.describe_fixed_reference` |
+| 光照是**一组具名状态**而不是一个字段，镜头按名字引用其中一个 | `agents/schemas.py:LightingState` / `StoryboardShot.lighting_ref`；`compose.resolve_lighting` |
+| 只注入**被引用的那一个**光照状态的描述，不是全部 | `compose.describe_scene(profile, lighting_ref)`；`tests/unit/test_consistency_compose.py` |
 | Agent 写的风格词被剥掉 | `compose.strip_style_words`；`tests/unit/test_consistency_compose.py` |
 | 项目级基准 seed + 镜号偏移，同项目重跑同一镜得同一张图 | `compose.compose_shot` 的 `seed=style.seed_base + shot_index` |
 | 三类出图入口：角色 / 场景 / 镜头，各自建 `image.generate` 任务，走完整 Task + Billing + Gateway + Asset + SSE 链路 | `consistency/render.py`、`worker/jobs/generation.py`；`tests/integration/test_image_generation.py` |
@@ -66,6 +69,61 @@ PUT  /api/v1/projects/{id}/images/scenes/{ref}         同上
 
 > POST 与 PUT 用不同动词是刻意的：POST 是"再生成一张"（每次扣费、结果不同），
 > PUT 是"基准图就是它"（幂等）。用同一个动词会让"点两下多扣一次钱"和"点两下没事"混在一起。
+
+#### 3.1.1 场景锚点与光照的形状
+
+这两项在 2026-09-06 之前都只做了一半，现在补齐。**改动前后的差别不在字段多少，
+而在下游拿到的是不是可引用、可复现的东西。**
+
+**固定参照物：两段式。** 之前 `fixed_references: list[str]`，一串句子。
+现在每条是 `{name, description, origin}`：
+
+```
+补丁船篷 → 篷布右后角一块颜色更深的方形补丁，漏下一道光缝
+磨白的坐板 → 第二排坐板中段被四十年乘客磨出浅色包浆，木纹发亮
+```
+
+`name` 是**给人和给下游引用的把手**（用户扫一眼就知道这个场景钉死了哪几样东西），
+`description` 是**给出图模型复现用的**。合成一句话两头不讨好：人扫不出有几个锚点，
+模型也拿不到足够细节。`compose.describe_fixed_reference` 拼成 `名称（描述）`——
+名称多半是个名词，模型需要它才知道画的是什么东西。
+
+**光照：一个有限集合。** 之前 `lighting: str`。同一个地点在一部剧里会在不同时刻
+反复出现（渡口的清晨、正午、夜里），一个字段只有两种结局：全场景共用一种光，
+或者每镜让模型自由发挥——**而后者正是一致性引擎要防的东西**。现在：
+
+| 字段 | 位置 | 作用 |
+|---|---|---|
+| `lighting_states: list[LightingState]` | `SceneSheet` | 该地点**在剧本里实际出现过**的光照状态，1~6 个，各带名称与描述 |
+| `default_lighting: str` | `SceneSheet` | 没有显式指定的镜头用哪一个。必须是已声明的状态之一，校验器保证它指得到实处 |
+| `lighting_ref: str` | `StoryboardShot` | 这一镜用哪个状态。留空 = 用默认 |
+
+`visual_scene.yaml` 按编排器发下去的"地点 → 出现过的时刻"清单生成状态：
+剧本里只在夜里出现过的场景**不该**有「正午」，多出来的状态没有任何镜头会引用，
+用户却要在门③ 上多看一行。
+
+**非法引用降级到默认，不报错**（`compose.resolve_lighting`）。三条理由：
+引用跨两份 Agent 产出，`Storyboard` 校验时手里没有 `SceneSheets`，schema 层判不了；
+为一镜写错名字让 600 镜的分镜表整份失败，代价完全不成比例；
+降级后的行为**正是这个字段存在之前的行为**。仓库里同类判断已有两处先例
+（未知 `character_refs` 跳过、未知 `scene_ref` 退回无场景）。
+
+降级必须留痕：`Composed.lighting_state` 带回实际用的名字，
+`render.request_shot_image` 与分镜表上写的一比，不一致就记
+`consistency.shot_unknown_lighting_ref`（带 project_id / shot_index）。
+合成那一层是纯函数，不在那里记日志。
+
+**存量数据**（迁移 `f1c8d05e37a2`，`scene_profiles.spatial_json` +
+`projects.current_state_json` 两处）：扁平字符串整句进 `description`，
+名称是从它前 12 个字**截出来的副本**，标 `origin='migrated'`；
+单个 `lighting` 迁成一个名为「默认」的状态；已有分镜的镜头一律显式指向默认状态
+（不留空——空格会被用户当成还没填的待办）。原文一个字都不丢，
+所以 `downgrade` 能把 migrated 的那些逐字还原。作者写的两段式降级时拼成
+`名称：描述`，**那一半是有损的**——旧 schema 里没有第二段的归宿。
+
+`SceneSheet` 上还有一层**运行时**兼容（`_accept_legacy_shape`）：扁平形状仍然能过
+校验。少了它，所有存量项目的场景档案会因为字段级编辑的再校验
+（`extra="forbid"` 撞上多出来的 `lighting`）立刻变成不可编辑。
 
 ### 3.2 部分实现
 
