@@ -3,15 +3,15 @@
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
-  FileText,
-  LayoutDashboard,
-  LayoutGrid,
-  Library,
-  Palette,
-  Settings,
-  UserRound,
-  Workflow,
-} from "lucide-react";
+  AssetLibraryIcon,
+  CharacterIcon,
+  ProjectOverviewIcon,
+  QueueIcon,
+  SceneIcon,
+  SettingsIcon,
+  StoryIcon,
+  StoryboardIcon,
+} from "@/components/icons/studio-icons";
 
 import {
   AsideConsistency,
@@ -39,11 +39,11 @@ import { taskTitle, type TasksState } from "@/lib/freeflow/use-tasks";
 /** 制作流程。顺序就是生产顺序，和阶段条对得上。 */
 function navigationOf(base: string): NavItem[] {
   return [
-    { id: "overview", label: "项目总览", href: `${base}/overview`, icon: LayoutDashboard },
-    { id: "story", label: "故事与剧本", href: `${base}/story`, icon: FileText },
-    { id: "characters", label: "角色设定", href: `${base}/characters`, icon: UserRound },
-    { id: "scenes", label: "世界美术", href: `${base}/scenes`, icon: Palette },
-    { id: "storyboard", label: "镜头工作台", href: `${base}/storyboard`, icon: LayoutGrid },
+    { id: "overview", label: "项目总览", href: `${base}/overview`, icon: ProjectOverviewIcon },
+    { id: "story", label: "故事与剧本", href: `${base}/story`, icon: StoryIcon },
+    { id: "characters", label: "角色设定", href: `${base}/characters`, icon: CharacterIcon },
+    { id: "scenes", label: "世界美术", href: `${base}/scenes`, icon: SceneIcon },
+    { id: "storyboard", label: "镜头工作台", href: `${base}/storyboard`, icon: StoryboardIcon },
   ];
 }
 
@@ -65,12 +65,12 @@ function utilityNavigationOf(base: string, runningTasks: number): NavItem[] {
       id: "tasks",
       label: "生成队列",
       href: `${base}/tasks`,
-      icon: Workflow,
+      icon: QueueIcon,
       // 0 不显示徽标：一个写着 0 的红点只是噪音
       badge: runningTasks > 0 ? runningTasks : undefined,
     },
-    { id: "assets", label: "资产库", href: `${base}/assets`, icon: Library },
-    { id: "settings", label: "项目设置", href: `${base}/settings`, icon: Settings },
+    { id: "assets", label: "资产库", href: `${base}/assets`, icon: AssetLibraryIcon },
+    { id: "settings", label: "项目设置", href: `${base}/settings`, icon: SettingsIcon },
   ];
 }
 

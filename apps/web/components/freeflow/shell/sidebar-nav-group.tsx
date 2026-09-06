@@ -53,9 +53,11 @@ export function SidebarNavGroup({
           const accessibleLabel =
             item.badge === undefined ? item.label : `${item.label}，${item.badge}`;
           const itemClassName = cn(
-            "relative flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-medium",
-            "transition-colors duration-200 motion-reduce:transition-none",
-            active ? "bg-primary-soft text-primary" : "text-fg-muted hover:bg-surface-2 hover:text-fg",
+            "relative flex h-10 w-full items-center gap-3 rounded-lg border px-3 text-left text-sm font-medium",
+            "transition-[color,background-color,border-color] duration-200 motion-reduce:transition-none",
+            active
+              ? "border-primary/20 bg-primary-soft text-primary shadow-[inset_2px_0_0_var(--primary)]"
+              : "border-transparent text-fg-muted hover:border-border hover:bg-surface-2 hover:text-fg",
             item.disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer",
             collapsed && "justify-center px-0",
             "max-md:justify-center max-md:px-0",

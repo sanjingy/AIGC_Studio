@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Loader2, MessageSquareText, RefreshCw } from "lucide-react";
 
+import { StaleIcon } from "@/components/icons/studio-icons";
 import { Button } from "@/components/ui/button";
 import type { ReviseTarget } from "@/lib/api";
 import { ROLE_LABEL, type ProjectState } from "@/lib/freeflow/use-project-state";
@@ -36,14 +37,14 @@ export function RevisePanel({
   return (
     <section
       aria-label={`${ROLE_LABEL[target]}返工`}
-      className={cn("rounded-xl border border-border bg-surface p-3.5", className)}
+      className={cn("rf-panel-card rounded-xl border border-border p-3.5", className)}
     >
       <div className="flex items-center gap-2">
         <MessageSquareText aria-hidden className="size-4 text-fg-muted" />
         <h3 className="text-sm font-semibold text-fg">用一句话改{ROLE_LABEL[target]}</h3>
         {stale && (
-          <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-running/25 bg-running-soft px-2 py-0.5 text-[10px] text-running">
-            <RefreshCw aria-hidden className="size-3" />
+          <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-rf-agent/25 bg-rf-agent-soft px-2 py-0.5 text-[10px] text-rf-agent">
+            <StaleIcon aria-hidden className="size-3" />
             上游已变
           </span>
         )}

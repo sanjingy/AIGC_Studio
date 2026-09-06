@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FolderKanban, Home, Images, type LucideIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+
+import {
+  AssetLibraryIcon,
+  ProjectIcon,
+  StudioMarkIcon,
+} from "@/components/icons/studio-icons";
 
 import { cn } from "@/lib/utils";
 
@@ -21,19 +27,19 @@ const ITEMS: RailItem[] = [
   {
     href: "/freeflow",
     label: "工作台",
-    icon: Home,
+    icon: StudioMarkIcon,
     active: (pathname) => pathname === "/freeflow",
   },
   {
     href: "/freeflow/projects",
     label: "项目",
-    icon: FolderKanban,
+    icon: ProjectIcon,
     active: (pathname) => pathname.startsWith("/freeflow/projects"),
   },
   {
     href: "/freeflow/assets",
     label: "资产库",
-    icon: Images,
+    icon: AssetLibraryIcon,
     active: (pathname) => pathname.startsWith("/freeflow/assets"),
   },
 ];
@@ -50,9 +56,9 @@ export function ProjectGlobalRail() {
         href="/freeflow"
         aria-label="返回 AIGC Studio 工作台"
         title="AIGC Studio"
-        className="mx-auto mt-3 flex size-9 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-fg transition-colors duration-150 hover:bg-primary-hover"
+        className="mx-auto mt-3 flex size-9 items-center justify-center rounded-lg border border-primary/30 bg-primary-soft text-primary transition-colors duration-150 hover:bg-primary hover:text-primary-fg"
       >
-        A
+        <StudioMarkIcon aria-hidden className="size-5" />
       </Link>
 
       <ul className="mt-5 flex flex-col gap-1 px-2">

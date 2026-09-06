@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw, X } from "lucide-react";
 
+import { QueueIcon } from "@/components/icons/studio-icons";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status";
 import { projects, type Render, type Task, type TaskStatus } from "@/lib/api";
@@ -168,14 +169,20 @@ export function TaskCenter({
         </p>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
-        {tasks.loading && <p className="px-4 py-8 text-center text-sm text-fg-subtle">加载中…</p>}
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-rf-card">
+        {tasks.loading && <TaskSkeleton />}
         {!tasks.loading && visible.length === 0 && (
-          <p className="px-4 py-8 text-center text-sm text-fg-subtle">
-            {tasks.items.length === 0
-              ? "这个项目还没有任务。出图、批量出图会在这里出现——文本阶段（advance / revise）是同步调用，只落 agent_runs，不建任务。"
-              : "当前筛选下没有任务。"}
-          </p>
+          <div className="rf-empty-state px-4 py-9 text-center">
+            <span className="rf-empty-icon"><QueueIcon aria-hidden className="size-6" /></span>
+            <h2 className="mt-2.5 text-sm font-semibold text-fg">
+              {tasks.items.length === 0 ? "还没有生成任务" : "当前筛选下没有任务"}
+            </h2>
+            <p className="mx-auto mt-1 max-w-2xl text-sm leading-6 text-fg-subtle">
+              {tasks.items.length === 0
+                ? "出图、批量出图会在这里出现——文本阶段（advance / revise）是同步调用，只落 agent_runs，不建任务。"
+                : "切换上方筛选即可查看其他状态的任务。"}
+            </p>
+          </div>
         )}
         {visible.map((task) => (
           <TaskRow
@@ -193,6 +200,24 @@ export function TaskCenter({
         重试会<strong className="font-medium text-fg-muted">重新预扣一笔</strong> Credits，不是免费再跑一次。取消只对还没开始或
         正在排队的任务有意义——已经发给上游的那一段拦不住（决策记录 §11.5 裁决 6）。
       </p>
+    </div>
+  );
+}
+
+function TaskSkeleton() {
+  return (
+    <div role="status" aria-label="加载中" className="divide-y divide-border">
+      <span className="sr-only">加载中…</span>
+      {[0, 1, 2].map((row) => (
+        <div key={row} className="flex items-center gap-4 px-4 py-3.5">
+          <div className="min-w-0 flex-1 space-y-2">
+            <span className="rf-skeleton block h-3 w-2/5 rounded-sm" />
+            <span className="rf-skeleton block h-2.5 w-3/5 rounded-sm" />
+          </div>
+          <span className="rf-skeleton hidden h-1 w-28 rounded-full sm:block" />
+          <span className="rf-skeleton block h-5 w-14 rounded-full" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -215,7 +240,7 @@ function TaskRow({
   const cost = task.actual_cost || task.estimated_cost;
 
   return (
-    <div className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-0">
+    <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-3 transition-colors duration-150 last:border-0 hover:bg-surface-2/55">
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-fg">
           {title}

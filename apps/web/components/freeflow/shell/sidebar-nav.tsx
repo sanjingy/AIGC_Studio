@@ -2,8 +2,9 @@
 "use client";
 
 import * as React from "react";
-import { PanelLeftClose, PanelLeftOpen, Sparkles } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
+import { StudioMarkIcon } from "@/components/icons/studio-icons";
 import { cn } from "@/lib/utils";
 
 import { SidebarNavGroup } from "./sidebar-nav-group";
@@ -43,8 +44,8 @@ export function SidebarNav({
       )}
     >
       <div className="flex h-16 items-center gap-3 border-b border-border px-4">
-        <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-fg shadow-rf-glow">
-          <Sparkles aria-hidden className="size-4" />
+        <div className="grid size-9 shrink-0 place-items-center rounded-lg border border-primary/35 bg-primary-soft text-primary shadow-rf-glow">
+          <StudioMarkIcon aria-hidden className="size-5" />
         </div>
         <div className={cn("min-w-0", collapsed && "hidden", "max-md:hidden")}>
           <p className="truncate text-sm font-semibold tracking-tight text-fg">AIGC Studio</p>

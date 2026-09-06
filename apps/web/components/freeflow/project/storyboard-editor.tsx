@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { History, Layers, Loader2, RefreshCw, Sparkles } from "lucide-react";
 
+import { StoryboardIcon } from "@/components/icons/studio-icons";
 import { ConfirmDialog } from "@/components/freeflow/project/feedback";
 import { BatchRenderDialog } from "@/components/freeflow/storyboard/batch-render-dialog";
 import { RevisionHistoryDrawer } from "@/components/freeflow/storyboard/revision-history";
@@ -222,9 +223,13 @@ export function StoryboardEditor({
   if (shots.length === 0) {
     return (
       <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 p-4 lg:p-6">
-        <p className="rounded-2xl border border-border bg-surface px-6 py-8 text-center text-sm leading-6 text-fg-subtle">
-          还没有分镜产出。推进生产把「确认剧本 → 角色档案 → 场景档案 → 分镜」这条链路跑到分镜这一步。
-        </p>
+        <div className="rf-empty-state rounded-2xl border border-dashed border-border-strong px-6 py-9 text-center">
+          <span className="rf-empty-icon"><StoryboardIcon aria-hidden className="size-7" /></span>
+          <h2 className="mt-3 text-sm font-semibold text-fg">还没有分镜产出</h2>
+          <p className="mx-auto mt-1 max-w-xl text-sm leading-6 text-fg-subtle">
+            推进生产把「确认剧本 → 角色档案 → 场景档案 → 分镜」这条链路跑到分镜这一步。
+          </p>
+        </div>
         <AdvanceAction state={state} />
       </div>
     );

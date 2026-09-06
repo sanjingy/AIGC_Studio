@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { BookOpenText } from "lucide-react";
 
+import { StoryIcon } from "@/components/icons/studio-icons";
 import { PlotIndexView, plotIndexMeta } from "@/components/project/plot-index-view";
 import { ScreenplayView, screenplayMeta } from "@/components/project/screenplay-view";
 import type { ProjectState } from "@/lib/freeflow/use-project-state";
@@ -37,8 +37,8 @@ export function StoryWorkspace({ state }: { state: ProjectState }) {
     return (
       <main className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4">
-          <div className="rounded-xl border border-border bg-surface px-6 py-8 text-center">
-            <BookOpenText aria-hidden className="mx-auto size-7 text-fg-subtle" />
+          <div className="rf-empty-state rounded-xl border border-dashed border-border-strong px-6 py-8 text-center">
+            <span className="rf-empty-icon"><StoryIcon aria-hidden className="size-7" /></span>
             <h2 className="mt-3 text-sm font-semibold text-fg">还没有故事产出</h2>
             <p className="mt-1 text-sm leading-6 text-fg-subtle">
               给一段小说原文或一句创意，然后推进生产：编排器会依次跑路线判断、情节目录、剧本，

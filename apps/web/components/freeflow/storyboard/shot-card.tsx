@@ -1,8 +1,9 @@
 // 视觉来自 ReelFlow 原型，数据由页面注入
 "use client";
 
-import { Check, RefreshCw } from "lucide-react";
+import { Check } from "lucide-react";
 
+import { StaleIcon, StoryboardIcon } from "@/components/icons/studio-icons";
 import { cn } from "@/lib/utils";
 
 import { ShotImage } from "./shot-image";
@@ -67,9 +68,9 @@ export function ShotCard(props: { shot: ShotCardData; selected: boolean; onSelec
         {shot.outdated && (
           <span
             title="这张图出在这一镜被改之前，可能与当前内容不符"
-            className="absolute bottom-3 left-3 inline-flex items-center gap-1 rounded-full border border-running/25 bg-running-soft px-2 py-0.5 text-[10px] text-running"
+            className="absolute bottom-3 left-3 inline-flex items-center gap-1 rounded-full border border-rf-agent/25 bg-rf-agent-soft px-2 py-0.5 text-[10px] text-rf-agent"
           >
-            <RefreshCw aria-hidden className="size-2.5" />
+            <StaleIcon aria-hidden className="size-2.5" />
             图可能过期
           </span>
         )}
@@ -113,9 +114,10 @@ export function ShotGrid(props: {
 
   if (shots.length === 0) {
     return (
-      <p className="rounded-2xl border border-dashed border-border px-4 py-12 text-center text-xs text-fg-subtle">
-        还没有镜头。先完成分镜，这里会列出每一镜。
-      </p>
+      <div className="rf-empty-state rounded-2xl border border-dashed border-border-strong px-4 py-10 text-center">
+        <span className="rf-empty-icon"><StoryboardIcon aria-hidden className="size-6" /></span>
+        <p className="mt-2 text-xs text-fg-subtle">还没有镜头。先完成分镜，这里会列出每一镜。</p>
+      </div>
     );
   }
 

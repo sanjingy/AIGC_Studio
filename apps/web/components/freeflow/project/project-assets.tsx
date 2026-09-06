@@ -1,8 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FileText, Film, Image as ImageIcon, Music, Users, MapPin } from "lucide-react";
+import { FileText, type LucideIcon } from "lucide-react";
 
+import {
+  AssetLibraryIcon,
+  CharacterIcon,
+  RenderImageIcon,
+  SceneIcon,
+  VideoIcon,
+  VoiceIcon,
+} from "@/components/icons/studio-icons";
 import { RenderThumb } from "@/components/project/render-slot";
 import { ApiRequestError, assets as assetsApi, type Library } from "@/lib/api";
 import { cn, formatBytes } from "@/lib/utils";
@@ -32,10 +40,10 @@ const KINDS: { key: Kind; label: string }[] = [
   { key: "scene", label: "场景" },
 ];
 
-const FILE_ICON: Record<string, typeof ImageIcon> = {
-  image: ImageIcon,
-  video: Film,
-  audio: Music,
+const FILE_ICON: Record<string, LucideIcon> = {
+  image: RenderImageIcon,
+  video: VideoIcon,
+  audio: VoiceIcon,
 };
 
 export function ProjectAssets({ projectId }: { projectId: string }) {
@@ -110,12 +118,13 @@ export function ProjectAssets({ projectId }: { projectId: string }) {
           {error}
         </p>
       )}
-      {loading && <p className="py-8 text-center text-sm text-fg-subtle">加载中…</p>}
+      {loading && <ProjectAssetsSkeleton />}
 
       {!loading && !error && visibleFiles.length === 0 && visibleProfiles.length === 0 && (
-        <p className="rounded-lg border border-border bg-surface px-4 py-10 text-center text-sm text-fg-subtle">
-          这个筛选下还没有素材。出图跑完之后会自动出现在这里。
-        </p>
+        <div className="rf-empty-state rounded-lg border border-dashed border-border-strong px-4 py-10 text-center">
+          <span className="rf-empty-icon"><AssetLibraryIcon aria-hidden className="size-6" /></span>
+          <p className="mt-2 text-sm text-fg-subtle">这个筛选下还没有素材。出图跑完之后会自动出现在这里。</p>
+        </div>
       )}
 
       {visibleFiles.length > 0 && (
@@ -125,13 +134,13 @@ export function ProjectAssets({ projectId }: { projectId: string }) {
             return (
               <li
                 key={a.id}
-                className="overflow-hidden rounded-md border border-border bg-surface"
+                className="rf-grid-card group overflow-hidden rounded-md border border-border transition-[border-color,box-shadow] duration-150 hover:border-border-strong hover:shadow-rf-card"
               >
                 <div className="flex aspect-square items-center justify-center bg-surface-2">
                   {a.type === "image" ? (
                     <RenderThumb assetId={a.id} alt={a.filename} />
                   ) : (
-                    <Icon aria-hidden className="size-7 text-fg-subtle" />
+                    <Icon aria-hidden className="size-7 text-fg-subtle transition-colors duration-150 group-hover:text-primary" />
                   )}
                 </div>
                 <div className="px-2 py-1.5">
@@ -158,14 +167,14 @@ export function ProjectAssets({ projectId }: { projectId: string }) {
           <ul className="overflow-hidden rounded-lg border border-border bg-surface">
             {visibleProfiles.map((p) => {
               const isChar = p.kind === "characters";
-              const Icon = isChar ? Users : MapPin;
+              const Icon = isChar ? CharacterIcon : SceneIcon;
               const count = isChar
                 ? (p.output?.characters?.length ?? 0)
                 : (p.output?.scenes?.length ?? 0);
               return (
                 <li
                   key={p.run_id}
-                  className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-0"
+                  className="flex items-center gap-3 border-b border-border px-4 py-2.5 transition-colors duration-150 last:border-0 hover:bg-surface-2/55"
                 >
                   <Icon aria-hidden className="size-4 shrink-0 text-fg-subtle" />
                   <div className="min-w-0 flex-1">
@@ -181,6 +190,23 @@ export function ProjectAssets({ projectId }: { projectId: string }) {
           </ul>
         </section>
       )}
+    </div>
+  );
+}
+
+function ProjectAssetsSkeleton() {
+  return (
+    <div role="status" aria-label="加载中" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+      <span className="sr-only">加载中…</span>
+      {[0, 1, 2, 3].map((item) => (
+        <div key={item} className="overflow-hidden rounded-md border border-border bg-surface">
+          <div className="rf-skeleton aspect-square" />
+          <div className="space-y-2 p-2">
+            <span className="rf-skeleton block h-3 w-3/4 rounded-sm" />
+            <span className="rf-skeleton block h-2.5 w-1/2 rounded-sm" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

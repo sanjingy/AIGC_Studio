@@ -2,8 +2,9 @@
 "use client";
 
 import * as React from "react";
-import { Camera, MapPin, MessageSquare, Plus, RefreshCw, UserRound, X } from "lucide-react";
+import { Camera, MapPin, MessageSquare, Plus, UserRound, X } from "lucide-react";
 
+import { StaleIcon } from "@/components/icons/studio-icons";
 import { cn } from "@/lib/utils";
 
 import type { ShotCardData } from "./shot-card";
@@ -521,8 +522,8 @@ export function ShotDetail(props: {
 /** 图比最后一次改动旧时的提示。**只标记，不自动重出**（ADR-033 第 4 条）。 */
 export function OutdatedNotice({ editedAt }: { editedAt: number }) {
   return (
-    <p className="flex items-start gap-2 rounded-md border border-running/25 bg-running-soft px-3 py-2 text-xs leading-5 text-running">
-      <RefreshCw aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+    <p className="flex items-start gap-2 rounded-md border border-rf-agent/25 bg-rf-agent-soft px-3 py-2 text-xs leading-5 text-rf-agent">
+      <StaleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
       <span>
         这张图出在 {new Date(editedAt).toLocaleString("zh-CN")} 的分镜改动之前，可能与当前镜头内容不符。
         要不要重出由你决定——系统不会自动重跑，也不会删掉现有的图。

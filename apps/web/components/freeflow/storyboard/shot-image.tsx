@@ -2,8 +2,8 @@
 "use client";
 
 import * as React from "react";
-import { Aperture } from "lucide-react";
 
+import { RenderImageIcon } from "@/components/icons/studio-icons";
 import { cn } from "@/lib/utils";
 
 /**
@@ -47,7 +47,7 @@ export function ShotImage({
 
   return (
     <div className="rf-shot-placeholder grid size-full place-items-center">
-      <Aperture aria-hidden className={cn("text-fg-subtle", iconClassName)} />
+      <RenderImageIcon aria-hidden className={cn("text-fg-subtle", iconClassName)} />
       <span className="sr-only">{failed ? "镜头图像加载失败" : "暂无镜头图像"}</span>
     </div>
   );

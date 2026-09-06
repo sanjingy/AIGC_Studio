@@ -12,7 +12,7 @@ export function AsideSection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-border bg-surface-2">
+    <section className="rf-panel-card overflow-hidden rounded-2xl border border-border">
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
         <span className="shrink-0 text-primary">{icon}</span>
         <h2 className="truncate text-xs font-semibold tracking-wide text-fg">{title}</h2>
@@ -25,7 +25,7 @@ export function AsideSection({
 /** 区块内的空状态。虚线框是"这里本来会有东西"，与真实内容区分得开。 */
 export function AsideEmpty({ children }: { children: React.ReactNode }) {
   return (
-    <p className="rounded-xl border border-dashed border-border px-3 py-5 text-center text-xs text-fg-subtle">
+    <p className="rf-empty-state rounded-xl border border-dashed border-border px-3 py-5 text-center text-xs text-fg-subtle">
       {children}
     </p>
   );

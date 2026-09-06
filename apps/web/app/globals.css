@@ -205,6 +205,14 @@
   color: var(--rf-fg);
 }
 
+.rf-shot-placeholder {
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--border) 56%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--border) 56%, transparent) 1px, transparent 1px),
+    radial-gradient(circle at 50% 45%, var(--primary-soft), transparent 52%);
+  background-size: 24px 24px, 24px 24px, auto;
+}
+
 .theme-reelflow .rf-shot-placeholder {
   background-image:
     linear-gradient(var(--rf-line) 1px, transparent 1px),
@@ -212,6 +220,62 @@
     radial-gradient(circle at 18% 18%, var(--rf-cyan-soft), transparent 48%),
     radial-gradient(circle at 82% 78%, var(--rf-agent-soft), transparent 52%);
   background-size: 24px 24px, 24px 24px, auto, auto;
+}
+
+/* 工作台的面板与网格卡共用同一套层次：外层面板更稳，内层卡片略抬起。
+   所有颜色都从语义 token 混合，亮暗主题不会分叉。 */
+.rf-panel-card {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--surface-2) 48%, var(--surface)) 0%,
+      var(--surface) 44%
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--fg) 5%, transparent),
+    0 18px 44px color-mix(in oklab, var(--fg) 5%, transparent);
+}
+
+.rf-grid-card {
+  background:
+    linear-gradient(
+      155deg,
+      color-mix(in oklab, var(--surface-2) 58%, var(--surface)) 0%,
+      var(--surface) 58%
+    );
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--fg) 4%, transparent);
+}
+
+/* 空态沿用取景框网格，但把对比度压低，避免它抢过真实画面。 */
+.rf-empty-state {
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--border) 52%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--border) 52%, transparent) 1px, transparent 1px),
+    radial-gradient(circle at 50% 38%, var(--primary-soft), transparent 46%);
+  background-size: 28px 28px, 28px 28px, auto;
+}
+
+.rf-empty-icon {
+  display: inline-grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--primary) 28%, var(--border));
+  border-radius: var(--radius-lg);
+  background: var(--primary-soft);
+  color: var(--primary);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--fg) 7%, transparent);
+}
+
+/* MASTER §6：骨架屏保持静态，不用 shimmer 干扰长时间工作的用户。 */
+.rf-skeleton {
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
+  background: color-mix(in oklab, var(--surface-3) 72%, var(--surface-2));
+}
+
+svg[data-studio-icon] {
+  shape-rendering: geometricPrecision;
 }
 
 @layer base {

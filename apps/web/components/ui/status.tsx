@@ -1,14 +1,16 @@
 import {
   AlertTriangle,
-  Check,
-  CircleDashed,
   Clock,
   Loader2,
-  Pause,
   X,
   type LucideIcon,
 } from "lucide-react";
 
+import {
+  GateApprovedIcon,
+  GatePendingIcon,
+  MissingFrameIcon,
+} from "@/components/icons/studio-icons";
 import { cn } from "@/lib/utils";
 
 /** 与后端 tasks.status 对齐（09_Database.md §8） */
@@ -30,7 +32,7 @@ type Spec = { label: string; icon: LucideIcon; className: string; spin?: boolean
 const SPEC: Record<Status, Spec> = {
   draft: {
     label: "草稿",
-    icon: CircleDashed,
+    icon: MissingFrameIcon,
     className: "text-fg-subtle bg-surface-2 border-border",
   },
   queued: {
@@ -46,12 +48,12 @@ const SPEC: Record<Status, Spec> = {
   },
   review: {
     label: "待确认",
-    icon: Pause,
+    icon: GatePendingIcon,
     className: "text-primary bg-primary-soft border-primary/25",
   },
   succeeded: {
     label: "已完成",
-    icon: Check,
+    icon: GateApprovedIcon,
     className: "text-success bg-success-soft border-success/25",
   },
   failed: {

@@ -6,23 +6,22 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowRight,
-  BookOpenText,
-  Check,
-  CircleDashed,
-  Clapperboard,
-  Film,
-  Images,
-  LayoutDashboard,
-  ListChecks,
   Loader2,
-  MapPin,
-  Pause,
-  RefreshCw,
-  ScrollText,
-  ShieldCheck,
-  Users,
 } from "lucide-react";
 
+import {
+  CharacterIcon,
+  GateApprovedIcon,
+  GatePendingIcon,
+  MissingFrameIcon,
+  QueueIcon,
+  RenderImageIcon,
+  SceneIcon,
+  ScreenplayIcon,
+  StaleIcon,
+  StoryIcon,
+  StoryboardIcon,
+} from "@/components/icons/studio-icons";
 import type { AgentRun, Approval, Project, ReviseTarget } from "@/lib/api";
 import { STAGE_LABEL, type ProjectState } from "@/lib/freeflow/use-project-state";
 import type { Images as ImagesState, RenderSubject } from "@/lib/freeflow/use-images";
@@ -64,17 +63,17 @@ const STAGE_SPEC: Record<
 > = {
   missing: {
     label: "尚未产出",
-    icon: CircleDashed,
+    icon: MissingFrameIcon,
     className: "border-border bg-surface-2 text-fg-subtle",
   },
   ready: {
     label: "已就绪",
-    icon: Check,
+    icon: GateApprovedIcon,
     className: "border-success/25 bg-success-soft text-success",
   },
   partial: {
     label: "部分完成",
-    icon: RefreshCw,
+    icon: QueueIcon,
     className: "border-running/25 bg-running-soft text-running",
   },
   blocked: {
@@ -90,13 +89,13 @@ const STAGE_SPEC: Record<
   },
   review: {
     label: "待确认",
-    icon: Pause,
+    icon: GatePendingIcon,
     className: "border-primary/25 bg-primary-soft text-primary",
   },
   stale: {
     label: "上游已变",
-    icon: RefreshCw,
-    className: "border-running/25 bg-running-soft text-running",
+    icon: StaleIcon,
+    className: "border-rf-agent/25 bg-rf-agent-soft text-rf-agent",
   },
 };
 
@@ -204,7 +203,7 @@ export function ProjectOverview({
       eyebrow: "Story source",
       description: String(output.plot_index?.logline ?? "等待情节目录产出"),
       href: `/freeflow/projects/${project.id}/story`,
-      icon: BookOpenText,
+      icon: StoryIcon,
       state: stateOf("plot_index"),
       metrics: [
         { label: "节点", value: storyNodes.length },
@@ -216,7 +215,7 @@ export function ProjectOverview({
       eyebrow: "Characters",
       description: characters.length > 0 ? "稳定角色实体与基准立绘" : "等待角色档案产出",
       href: `/freeflow/projects/${project.id}/characters`,
-      icon: Users,
+      icon: CharacterIcon,
       state: stateOf("characters"),
       metrics: [
         { label: "角色", value: characters.length },
@@ -229,7 +228,7 @@ export function ProjectOverview({
       eyebrow: "Scenes",
       description: scenes.length > 0 ? "空间设定与一致性参照" : "等待场景档案产出",
       href: `/freeflow/projects/${project.id}/scenes`,
-      icon: MapPin,
+      icon: SceneIcon,
       state: stateOf("scenes"),
       metrics: [
         { label: "场景", value: scenes.length },
@@ -242,7 +241,7 @@ export function ProjectOverview({
       eyebrow: "Screenplay",
       description: String(output.screenplay?.synopsis ?? "等待剧本产出"),
       href: `/freeflow/projects/${project.id}/story`,
-      icon: ScrollText,
+      icon: ScreenplayIcon,
       state: stateOf("screenplay"),
       metrics: [
         { label: "集", value: episodes.length },
@@ -254,7 +253,7 @@ export function ProjectOverview({
       eyebrow: "Storyboard",
       description: shots.length > 0 ? "镜号、画面描述与实体引用" : "等待分镜产出",
       href: `/freeflow/projects/${project.id}/storyboard`,
-      icon: Clapperboard,
+      icon: StoryboardIcon,
       state: stateOf("storyboard"),
       metrics: [
         { label: "段/节点", value: storyboardNodes.length },
@@ -270,7 +269,7 @@ export function ProjectOverview({
         shotRenders.missing + shotRenders.failed > 0
           ? `/freeflow/projects/${project.id}/storyboard`
           : `/freeflow/projects/${project.id}/assets`,
-      icon: Images,
+      icon: RenderImageIcon,
       state: renderState,
       metrics: [
         { label: "就绪", value: allRenders.completed },
@@ -285,7 +284,7 @@ export function ProjectOverview({
   // 一屏两条右栏，用户不知道该看哪条。
   return (
         <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-5 p-4 lg:p-6 2xl:max-w-[1480px]">
-          <section className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4 sm:flex-row sm:items-end sm:justify-between lg:p-5">
+          <section className="rf-panel-card flex flex-col gap-3 rounded-2xl border border-border p-4 sm:flex-row sm:items-end sm:justify-between lg:p-5">
             <div className="min-w-0">
               <div className="text-[10px] font-medium tracking-[0.18em] text-fg-subtle uppercase">
                 Production overview
@@ -319,7 +318,7 @@ export function ProjectOverview({
             <section aria-label="需要关注" className="grid gap-2 lg:grid-cols-3">
               {pendingApproval && (
                 <AttentionCard
-                  icon={ShieldCheck}
+                  icon={GatePendingIcon}
                   tone="review"
                   title={pendingApproval.gate === "setup" ? "剧本等待确认" : "分镜等待确认"}
                   detail="在上面的审核门里确认或打回；确认本身不花钱，下一次「推进生产」才会调用模型。"
@@ -327,8 +326,8 @@ export function ProjectOverview({
               )}
               {stale.size > 0 && (
                 <AttentionCard
-                  icon={RefreshCw}
-                  tone="warning"
+                  icon={StaleIcon}
+                  tone="stale"
                   title={`${stale.size} 个阶段的上游已变`}
                   detail={`${Array.from(stale)
                     .map((role) => ROLE_LABEL[role as ReviseTarget] ?? role)
@@ -346,7 +345,7 @@ export function ProjectOverview({
             </section>
           )}
 
-          <section aria-labelledby="dependency-heading" className="rounded-2xl border border-border bg-surface p-4 lg:p-5">
+          <section aria-labelledby="dependency-heading" className="rf-panel-card rounded-2xl border border-border p-4 lg:p-5">
             <div className="mb-4 flex items-end justify-between gap-3">
               <div>
                 <div className="text-[10px] font-medium tracking-[0.16em] text-fg-subtle uppercase">
@@ -378,19 +377,19 @@ export function ProjectOverview({
 
           <section className="grid gap-3 md:grid-cols-3">
             <SummaryCard
-              icon={Film}
+              icon={StoryboardIcon}
               label="内容实体"
               value={characters.length + scenes.length + shots.length}
               detail={`${characters.length} 角色 · ${scenes.length} 场景 · ${shots.length} 镜头`}
             />
             <SummaryCard
-              icon={Images}
+              icon={RenderImageIcon}
               label="当前图像就绪"
               value={allRenders.completed}
               detail={`共 ${allRenders.expected} 个当前出图位 · ${renders.count} 条历史记录`}
             />
             <SummaryCard
-              icon={ListChecks}
+              icon={QueueIcon}
               label="真实运行记录"
               value={runs.length}
               detail={`${runCounts.running} 进行中 · ${runCounts.failed} 失败 · ${runCounts.succeeded} 成功`}
@@ -422,11 +421,11 @@ function OverviewCard({
   return (
     <Link
       href={href}
-      className="group min-w-0 rounded-xl border border-border bg-bg p-4 transition-colors duration-150 hover:border-border-strong hover:bg-surface-2/45"
+      className="rf-grid-card group min-w-0 rounded-xl border border-border p-4 transition-[color,background-color,border-color,box-shadow] duration-150 hover:border-border-strong hover:shadow-rf-card"
     >
       <div className="flex min-w-0 items-start gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-fg-muted group-hover:text-primary">
-          <Icon aria-hidden className="size-4" />
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-2 text-fg-muted transition-colors duration-150 group-hover:border-primary/25 group-hover:bg-primary-soft group-hover:text-primary">
+          <Icon aria-hidden className="size-4.5" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-[10px] font-medium tracking-[0.13em] text-fg-subtle uppercase">
@@ -470,8 +469,10 @@ function StageBadge({ state }: { state: StageState }) {
 function FlowArrow({ label }: { label: string }) {
   return (
     <div aria-hidden className="flex h-11 items-center justify-center gap-2 text-[10px] text-fg-subtle">
-      <ArrowDown className="size-3.5" />
+      <span className="h-px w-8 bg-border" />
+      <ArrowDown className="size-3.5 text-primary/65" />
       {label}
+      <span className="h-px w-8 bg-border" />
     </div>
   );
 }
@@ -488,9 +489,9 @@ function SummaryCard({
   detail: string;
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4">
-      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-fg-muted">
-        <Icon aria-hidden className="size-4" />
+    <div className="rf-grid-card flex items-center gap-3 rounded-xl border border-border p-4">
+      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-2 text-fg-muted">
+        <Icon aria-hidden className="size-4.5" />
       </div>
       <div className="min-w-0">
         <div className="flex items-baseline gap-2">
@@ -512,7 +513,7 @@ function AttentionCard({
   detail,
 }: {
   icon: ComponentType<{ className?: string }>;
-  tone: "review" | "warning" | "danger";
+  tone: "review" | "stale" | "danger";
   title: string;
   detail: string;
 }) {
@@ -521,7 +522,7 @@ function AttentionCard({
       className={cn(
         "flex gap-3 rounded-xl border p-3",
         tone === "review" && "border-primary/25 bg-primary-soft",
-        tone === "warning" && "border-running/25 bg-running-soft",
+        tone === "stale" && "border-rf-agent/25 bg-rf-agent-soft",
         tone === "danger" && "border-danger/25 bg-danger-soft",
       )}
     >
@@ -530,7 +531,7 @@ function AttentionCard({
         className={cn(
           "mt-0.5 size-4 shrink-0",
           tone === "review" && "text-primary",
-          tone === "warning" && "text-running",
+          tone === "stale" && "text-rf-agent",
           tone === "danger" && "text-danger",
         )}
       />

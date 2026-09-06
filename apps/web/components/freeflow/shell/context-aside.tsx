@@ -1,8 +1,13 @@
 // 视觉来自 ReelFlow 原型，数据由页面注入
 "use client";
 
-import { AlertCircle, Check, ChevronRight, CircleDashed, Loader2, ShieldCheck } from "lucide-react";
+import { AlertCircle, ChevronRight, Loader2 } from "lucide-react";
 
+import {
+  GateApprovedIcon,
+  GatePendingIcon,
+  QueueIcon,
+} from "@/components/icons/studio-icons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +49,7 @@ export function AsideStageCard(props: {
     gate?.status === "needs_review" && Boolean(gate.onApprove || gate.onReject);
 
   return (
-    <AsideSection title="当前阶段" icon={<CircleDashed aria-hidden className="size-4" />}>
+    <AsideSection title="当前阶段" icon={<GatePendingIcon aria-hidden className="size-4" />}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-fg">{stage.label}</p>
@@ -108,7 +113,7 @@ export function AsideTaskList(props: {
   const tasks = props.tasks ?? [];
 
   return (
-    <AsideSection title="运行任务" icon={<Loader2 aria-hidden className="size-4" />}>
+    <AsideSection title="运行任务" icon={<QueueIcon aria-hidden className="size-4" />}>
       {tasks.length === 0 ? (
         <AsideEmpty>暂无运行任务</AsideEmpty>
       ) : (
@@ -140,7 +145,7 @@ export function AsideConsistency(props: {
   const items = props.items ?? [];
 
   return (
-    <AsideSection title="一致性档案" icon={<ShieldCheck aria-hidden className="size-4" />}>
+    <AsideSection title="一致性档案" icon={<GateApprovedIcon aria-hidden className="size-4" />}>
       {items.length === 0 ? (
         <AsideEmpty>还没有一致性档案</AsideEmpty>
       ) : (
@@ -148,7 +153,7 @@ export function AsideConsistency(props: {
           {items.map((item) => (
             <li
               key={item.label}
-              className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3"
+              className="rf-grid-card flex items-center gap-3 rounded-xl border border-border p-3"
             >
               <span
                 className={cn(
@@ -157,7 +162,7 @@ export function AsideConsistency(props: {
                 )}
               >
                 {item.ok ? (
-                  <Check aria-hidden className="size-3.5" />
+                  <GateApprovedIcon aria-hidden className="size-3.5" />
                 ) : (
                   <AlertCircle aria-hidden className="size-3.5" />
                 )}

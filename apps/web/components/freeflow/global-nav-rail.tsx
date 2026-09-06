@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, FolderKanban, Home, Images, Plus, type LucideIcon } from "lucide-react";
+import { Plus, type LucideIcon } from "lucide-react";
+import {
+  AssetLibraryIcon,
+  ModelRackIcon,
+  ProjectIcon,
+  StudioMarkIcon,
+} from "@/components/icons/studio-icons";
 import { cn } from "@/lib/utils";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
@@ -16,16 +22,16 @@ type NavItem = { href: string; label: string; icon: LucideIcon };
  * （同 §11.5 裁决 11）。节点画布按 ADR-030 第 5 条隐藏，代码保留。
  */
 const NAV: NavItem[] = [
-  { href: "/freeflow", label: "首页", icon: Home },
-  { href: "/freeflow/projects", label: "项目", icon: FolderKanban },
-  { href: "/freeflow/assets", label: "资产", icon: Images },
-  { href: "/freeflow/models", label: "模型", icon: Boxes },
+  { href: "/freeflow", label: "首页", icon: StudioMarkIcon },
+  { href: "/freeflow/projects", label: "项目", icon: ProjectIcon },
+  { href: "/freeflow/assets", label: "资产", icon: AssetLibraryIcon },
+  { href: "/freeflow/models", label: "模型", icon: ModelRackIcon },
 ];
 
 export function GlobalNavRail() {
   const pathname = usePathname();
   return <nav aria-label="全局导航" className="hidden w-[72px] shrink-0 flex-col border-r border-border bg-surface md:flex 2xl:w-20">
-    <div className="flex h-14 items-center justify-center border-b border-border"><div className="flex size-8 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-fg">A</div></div>
+    <div className="flex h-14 items-center justify-center border-b border-border"><div className="flex size-8 items-center justify-center rounded-md border border-primary/30 bg-primary-soft text-primary"><StudioMarkIcon aria-hidden className="size-4.5" /></div></div>
     <div className="px-3 pt-3"><Link href="/freeflow" aria-label="新建项目" title="新建项目" className="flex min-h-11 items-center justify-center rounded-md bg-primary text-primary-fg transition-colors duration-150 hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"><Plus aria-hidden className="size-4" /></Link></div>
     <ul className="mt-3 flex flex-col gap-1 px-3">{NAV.map(({ href, label, icon: Icon }) => {
       const active = href === "/freeflow" ? pathname === href : pathname.startsWith(href);

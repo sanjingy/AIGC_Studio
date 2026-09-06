@@ -1,11 +1,12 @@
 // 视觉来自 ReelFlow 原型，数据由页面注入
 import { Loader2, X, type LucideIcon } from "lucide-react";
 
+import { GateApprovedIcon, MissingFrameIcon } from "@/components/icons/studio-icons";
 import { cn } from "@/lib/utils";
 
 import type { ShotCardData } from "./shot-card";
 
-type StatusSpec = { label: string; dot: string; icon?: LucideIcon; iconClassName?: string };
+type StatusSpec = { label: string; icon: LucideIcon; iconClassName: string };
 
 /**
  * 状态一律「图标/圆点 + 文字」双重编码，不靠颜色单独传达含义——
@@ -15,15 +16,14 @@ type StatusSpec = { label: string; dot: string; icon?: LucideIcon; iconClassName
  * 只有 `--running`（专指生成中），借它来画一个静态状态会误导后来的人。
  */
 const SPEC: Record<ShotCardData["status"], StatusSpec> = {
-  ready: { label: "可生成", dot: "bg-success" },
-  draft: { label: "待完善", dot: "bg-rf-warning" },
+  ready: { label: "可生成", icon: GateApprovedIcon, iconClassName: "text-success" },
+  draft: { label: "待完善", icon: MissingFrameIcon, iconClassName: "text-rf-warning" },
   rendering: {
     label: "生成中",
-    dot: "bg-primary",
     icon: Loader2,
     iconClassName: "animate-spin text-primary",
   },
-  failed: { label: "失败", dot: "bg-danger", icon: X, iconClassName: "text-danger" },
+  failed: { label: "失败", icon: X, iconClassName: "text-danger" },
 };
 
 export function ShotStatus({ status }: { status: ShotCardData["status"] }) {
@@ -32,11 +32,7 @@ export function ShotStatus({ status }: { status: ShotCardData["status"] }) {
 
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px] text-fg-muted">
-      {Icon ? (
-        <Icon aria-hidden className={cn("size-3 shrink-0", spec.iconClassName)} />
-      ) : (
-        <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", spec.dot)} />
-      )}
+      <Icon aria-hidden className={cn("size-3 shrink-0", spec.iconClassName)} />
       {spec.label}
     </span>
   );

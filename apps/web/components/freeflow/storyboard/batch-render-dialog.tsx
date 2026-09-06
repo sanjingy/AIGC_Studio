@@ -2,8 +2,9 @@
 "use client";
 
 import * as React from "react";
-import { Aperture, Coins, Images, Loader2 } from "lucide-react";
+import { Coins, Loader2 } from "lucide-react";
 
+import { RenderImageIcon } from "@/components/icons/studio-icons";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogCloseButton } from "@/components/ui/dialog";
 
@@ -88,7 +89,7 @@ export function BatchRenderDialog(props: {
     >
       <header className="flex items-start gap-3 border-b border-border px-6 py-5">
         <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary">
-          <Aperture aria-hidden className="size-4" />
+          <RenderImageIcon aria-hidden className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
           <h2 id={titleId} className="text-lg font-semibold tracking-tight text-fg">
@@ -112,7 +113,7 @@ export function BatchRenderDialog(props: {
           <div className="mt-3 rounded-xl border border-primary bg-primary-soft p-4">
             <div className="flex items-center gap-3">
               <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-fg">
-                <Images aria-hidden className="size-4" />
+                <RenderImageIcon aria-hidden className="size-4" />
               </span>
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-fg">逐镜出图</p>

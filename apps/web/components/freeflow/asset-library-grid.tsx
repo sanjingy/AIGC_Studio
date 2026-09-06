@@ -3,17 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FileText,
-  FileVideo,
-  Image as ImageIcon,
-  MapPin,
-  Music,
   Puzzle,
   Loader2,
   Upload,
-  Users,
   type LucideIcon,
 } from "lucide-react";
 
+import {
+  AssetLibraryIcon,
+  CharacterIcon,
+  RenderImageIcon,
+  SceneIcon,
+  VideoIcon,
+  VoiceIcon,
+} from "@/components/icons/studio-icons";
 import { charactersMeta } from "@/components/project/characters-view";
 import { scenesMeta } from "@/components/project/scenes-view";
 import { SKILLS_CHANGED, useSkillUpload } from "@/components/project/skill-upload";
@@ -115,9 +118,9 @@ const KIND_ORDER: readonly AssetKind[] = [
 ];
 
 const TYPE_ICON: Record<string, LucideIcon> = {
-  image: ImageIcon,
-  video: FileVideo,
-  audio: Music,
+  image: RenderImageIcon,
+  video: VideoIcon,
+  audio: VoiceIcon,
 };
 
 /**
@@ -282,7 +285,7 @@ export function AssetLibraryGrid() {
       {kind === "skill" && skillUpload.notice && <div className="mt-3">{skillUpload.notice}</div>}
 
       {(loading && !data) || (kind === "skill" && skills === null) ? (
-        <p className="mt-6 text-sm text-fg-subtle">加载中…</p>
+        <AssetSkeleton />
       ) : UNINDEXED.includes(kind) ? (
         <EmptyState>
           该类型的统一索引还没有接入（REQ-030）。{ASSET_KIND_LABEL[kind]}
@@ -421,9 +424,27 @@ function SecondaryFilters() {
 
 function EmptyState({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mt-6 rounded-md border border-dashed border-border-strong px-4 py-10 text-center text-sm text-fg-subtle">
-      {children}
-    </p>
+    <div className="rf-empty-state mt-6 rounded-lg border border-dashed border-border-strong px-4 py-10 text-center">
+      <span className="rf-empty-icon"><AssetLibraryIcon aria-hidden className="size-6" /></span>
+      <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-fg-subtle">{children}</p>
+    </div>
+  );
+}
+
+function AssetSkeleton() {
+  return (
+    <div role="status" aria-label="加载中" className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+      <span className="sr-only">加载中…</span>
+      {[0, 1, 2, 3].map((item) => (
+        <div key={item} className="overflow-hidden rounded-lg border border-border bg-surface">
+          <div className="rf-skeleton aspect-square" />
+          <div className="space-y-2 p-2">
+            <span className="rf-skeleton block h-3 w-3/4 rounded-sm" />
+            <span className="rf-skeleton block h-2.5 w-1/2 rounded-sm" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -482,13 +503,13 @@ function FileCard({ asset }: { asset: LibraryAsset }) {
   }, [asset.id, asset.type]);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="flex aspect-square items-center justify-center bg-surface-3">
+    <div className="rf-grid-card group overflow-hidden rounded-lg border border-border transition-[border-color,box-shadow] duration-150 hover:border-border-strong hover:shadow-rf-card">
+      <div className="rf-shot-placeholder flex aspect-square items-center justify-center bg-surface-3">
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element -- 预签名 URL 是运行时才知道的外部地址，用不了 next/image 的构建期优化
           <img src={url} alt={asset.filename} className="size-full object-cover" />
         ) : (
-          <Icon aria-hidden className="size-6 text-fg-subtle" />
+          <Icon aria-hidden className="size-7 text-fg-subtle transition-colors duration-150 group-hover:text-primary" />
         )}
       </div>
       <div className="px-2 py-1.5">
@@ -507,11 +528,11 @@ function FileCard({ asset }: { asset: LibraryAsset }) {
 
 function SceneCard({ profile }: { profile: ProfileEntry }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
+    <div className="rf-grid-card group overflow-hidden rounded-lg border border-border transition-[border-color,box-shadow] duration-150 hover:border-border-strong hover:shadow-rf-card">
       {/* 场景档案同样是结构化文本。场景出图还没做（场景一致性未设计），
           所以这里没有图可放，不摆一张别处的图冒充。 */}
-      <div className="flex aspect-square items-center justify-center bg-surface-3">
-        <MapPin aria-hidden className="size-6 text-fg-subtle" />
+      <div className="rf-shot-placeholder flex aspect-square items-center justify-center bg-surface-3">
+        <SceneIcon aria-hidden className="size-7 text-fg-subtle transition-colors duration-150 group-hover:text-primary" />
       </div>
       <div className="px-2 py-1.5">
         <p className="truncate text-xs text-fg" title={profile.project_title}>
@@ -530,8 +551,8 @@ function SceneCard({ profile }: { profile: ProfileEntry }) {
 function SkillCard({ skill }: { skill: OrgSkill }) {
   const invalid = skill.status !== "valid";
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="flex aspect-square items-center justify-center bg-surface-3">
+    <div className="rf-grid-card group overflow-hidden rounded-lg border border-border transition-[border-color,box-shadow] duration-150 hover:border-border-strong hover:shadow-rf-card">
+      <div className="rf-shot-placeholder flex aspect-square items-center justify-center bg-surface-3">
         <Puzzle aria-hidden className="size-6 text-fg-subtle" />
       </div>
       <div className="px-2 py-1.5">
@@ -555,10 +576,10 @@ function SkillCard({ skill }: { skill: OrgSkill }) {
 
 function CharacterCard({ entry }: { entry: CharacterEntry }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
+    <div className="rf-grid-card group overflow-hidden rounded-lg border border-border transition-[border-color,box-shadow] duration-150 hover:border-border-strong hover:shadow-rf-card">
       {/* 角色档案是结构化文本，没有图。放一个纯色块比放一张假立绘诚实 */}
-      <div className="flex aspect-square items-center justify-center bg-surface-3">
-        <Users aria-hidden className="size-6 text-fg-subtle" />
+      <div className="rf-shot-placeholder flex aspect-square items-center justify-center bg-surface-3">
+        <CharacterIcon aria-hidden className="size-7 text-fg-subtle transition-colors duration-150 group-hover:text-primary" />
       </div>
       <div className="px-2 py-1.5">
         <p className="truncate text-xs text-fg" title={entry.title}>
