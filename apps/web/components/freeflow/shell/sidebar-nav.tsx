@@ -2,6 +2,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 import { StudioMarkIcon } from "@/components/icons/studio-icons";
@@ -43,7 +44,19 @@ export function SidebarNav({
         "max-md:w-[4.5rem]",
       )}
     >
-      <div className="flex h-16 items-center gap-3 border-b border-border px-4">
+      {/* 品牌区就是回主页的入口。工作台里没有别的路回项目列表——
+          左栏全是项目内的页面，顶栏是面包屑，用户只能按浏览器后退。
+          放在这里是因为左上角回首页是通行做法，用户会先来点它。 */}
+      <Link
+        href="/freeflow"
+        aria-label="返回项目主页"
+        title="返回项目主页"
+        className={cn(
+          "flex h-16 items-center gap-3 border-b border-border px-4",
+          "transition-colors duration-150 hover:bg-surface-2",
+          "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",
+        )}
+      >
         <div className="grid size-9 shrink-0 place-items-center rounded-lg border border-primary/35 bg-primary-soft text-primary shadow-rf-glow">
           <StudioMarkIcon aria-hidden className="size-5" />
         </div>
@@ -53,7 +66,7 @@ export function SidebarNav({
             Production workspace
           </p>
         </div>
-      </div>
+      </Link>
 
       <nav id={navId} aria-label="项目导航" className="min-h-0 flex-1 overflow-y-auto py-1">
         <SidebarNavGroup
