@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from apps.api.modules.project.models import ROUTE_TYPES
+from apps.api.modules.project.models import ADAPTATION_MODES, ROUTE_TYPES
 
 
 class ProjectCreateIn(BaseModel):
@@ -119,6 +119,73 @@ class ProjectStateOut(BaseModel):
     stale_roles: list[str]
     # 用来判断本地缓存新不新。项目行的 updated_at，不是某个阶段的。
     updated_at: datetime
+
+
+class StyleOptionOut(BaseModel):
+    """画风目录里的一条。
+
+    三套描述词也一并给出：门① 上用户选的是"画成什么样"，而唯一能让他
+    判断的就是这三段词本身。只给一个名字等于让他盲选。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str
+    name: str
+    description: str
+    character_tokens: str
+    scene_tokens: str
+    video_tokens: str
+
+
+class ProjectLockVariablesIn(BaseModel):
+    """门① 的四项决定里，落在这张表上的三项。
+
+    每个字段都可以不传，含义是"这次不动它"——用户在门① 上通常只改一两项，
+    要求前端把全部字段读出来再整份传回去，两个标签页同开就会互相覆盖
+    （与 `ProjectModelPreferenceIn` 是同一条理由）。
+    """
+
+    style_key: str | None = Field(default=None, max_length=64)
+    era: str | None = Field(default=None, max_length=40)
+    region: str | None = Field(default=None, max_length=40)
+    ethnicity: str | None = Field(default=None, max_length=60)
+    adaptation_mode: str | None = Field(default=None, max_length=16)
+
+    @field_validator("adaptation_mode")
+    @classmethod
+    def _known_mode(cls, v: str | None) -> str | None:
+        if v is not None and v not in ADAPTATION_MODES:
+            raise ValueError(f"未知的改编模式：{v}")
+        return v
+
+
+class ProjectLockVariablesOut(BaseModel):
+    """项目级锁定变量的当前值 + 可选项。
+
+    可选项（画风目录、改编模式）跟着一起给：这条接口的消费者就是门① 的
+    确认界面，它需要的是"现在是什么"和"能改成什么"两件事。分成两条接口
+    只会让界面多一次请求，且两次之间目录可能已经变了。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    project_id: uuid.UUID
+    style_key: str
+    era: str
+    region: str
+    ethnicity: str
+    era_evidence: str
+    adaptation_mode: str
+    origin: str
+    confirmed_at: datetime | None
+    anchors_confirmed_at: datetime | None
+    # 迁移补的、且从没被用户确认过。界面必须如实标注"历史项目，未经确认"——
+    # 不标的话用户会以为这些值是他自己选的（ADR-037 第 6 条）。
+    legacy_unconfirmed: bool
+
+    style_options: list[StyleOptionOut] = Field(default_factory=list)
+    adaptation_options: list[str] = Field(default_factory=list)
 
 
 class ProjectPage(BaseModel):

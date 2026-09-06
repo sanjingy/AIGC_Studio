@@ -30,6 +30,7 @@ from apps.api.modules.consistency.models import SceneProfile, ShotConditioning
 from apps.api.modules.project import service as project_service
 from apps.api.modules.task import service as task_service
 from apps.api.modules.task.models import Task
+from tests.conftest import advance_to_gate
 
 pytestmark = pytest.mark.integration
 
@@ -68,13 +69,13 @@ async def _approve_pending(client: AsyncClient, pid: str) -> None:
 
 
 async def _run_to_storyboard(client: AsyncClient) -> str:
-    """跑到第二道门：角色档案、场景档案、分镜表都已产出。"""
+    """跑到分镜门：角色档案、场景档案、分镜表都已产出。
+
+    途中的开拍前确认门、剧本门、空间锚点门由 `advance_to_gate` 一并通过；
+    这里不写死门的道数，加一道门不该让十来个出图用例一起变红。
+    """
     pid = await _project(client)
-    r = await client.post(f"{P}/{pid}/advance?to_gate=true", json={"user_input": NOVEL})
-    assert r.status_code == 200, r.text
-    await _approve_pending(client, pid)
-    r = await client.post(f"{P}/{pid}/advance?to_gate=true", json={"user_input": ""})
-    assert r.json()["gate_opened"] == "storyboard", r.text
+    await advance_to_gate(client, pid, "storyboard", user_input=NOVEL)
     return pid
 
 
@@ -105,7 +106,12 @@ async def test_characters_stage_lands_consistency_profiles(alice: AsyncClient) -
         characters = await consistency.list_characters(db, org_id=org_id, project_id=uuid.UUID(pid))
 
     assert style is not None, "角色阶段跑完了却没有风格档案"
-    assert style.positive_tokens, "风格档案必须带系统注入的风格词"
+    # 三套各注入各的（ADR-036 第 3 条），三套都必须有内容——
+    # 少一套就意味着那一类产物会拿到空风格词，画风漂移且无人察觉。
+    assert style.character_tokens, "风格档案必须带人物版风格词"
+    assert style.scene_tokens, "风格档案必须带场景版风格词"
+    assert style.video_tokens, "风格档案必须带视频版风格词"
+    assert style.style_key, "必须记下当初从目录里选的是哪一条画风"
     refs = {c.ref for c in characters}
     assert {"zhu_jue", "guan_zhang"} <= refs, f"角色档案没落库：{refs}"
 
@@ -129,7 +135,7 @@ async def test_rerun_does_not_overwrite_frozen_profiles(alice: AsyncClient) -> N
     async with session_scope() as db:
         style = await consistency.get_style(db, org_id=org_id, project_id=project_id)
         assert style is not None
-        style.positive_tokens = sentinel
+        style.character_tokens = sentinel
         await consistency.lock_style(db, style)
 
         characters = await consistency.list_characters(db, org_id=org_id, project_id=project_id)
@@ -155,7 +161,7 @@ async def test_rerun_does_not_overwrite_frozen_profiles(alice: AsyncClient) -> N
 
     assert style is not None
     assert style.id == style_id, "不能因为重跑就新建一份风格档案"
-    assert style.positive_tokens == sentinel, "冻结的风格被覆盖了"
+    assert style.character_tokens == sentinel, "冻结的风格被覆盖了"
 
     zhu = next(c for c in characters if c.ref == "zhu_jue")
     assert zhu.id == char_id
@@ -185,14 +191,16 @@ async def test_portrait_task_carries_composed_prompt(alice: AsyncClient) -> None
         style = await consistency.get_style(db, org_id=org_id, project_id=uuid.UUID(pid))
         assert style is not None
         positive, negative, seed_base = (
-            style.positive_tokens,
+            style.character_tokens,
             style.negative_tokens,
             style.seed_base,
         )
+        scene_only = style.scene_tokens
 
     assert "主角" in payload["prompt"], "提示词里必须有角色的结构化外貌"
     assert "黑色短发，额前碎发" in payload["prompt"]
-    assert positive in payload["prompt"], "风格词必须由系统注入"
+    assert positive in payload["prompt"], "人物版风格词必须由系统注入"
+    assert scene_only not in payload["prompt"], "基准立绘不该带场景版风格词"
     assert "纯色背景" in payload["prompt"], "基准立绘必须是中性构图"
     assert payload["negative_prompt"] == negative
     assert payload["seed"] == seed_base
@@ -303,17 +311,19 @@ async def test_scene_reference_task_carries_spatial_anchors(alice: AsyncClient) 
         style = await consistency.get_style(db, org_id=org_id, project_id=uuid.UUID(pid))
         assert style is not None
         positive, negative, seed_base = (
-            style.positive_tokens,
+            style.scene_tokens,
             style.negative_tokens,
             style.seed_base,
         )
+        character_only = style.character_tokens
 
     # 锚点：这两样不进提示词，场景出图就只是"看着像"而没有一致性
     assert "铁门外的路面" in payload["prompt"], "摄影主轴的站位没进提示词"
     assert "朝向建筑正面" in payload["prompt"]
     assert "铁门在画面正前方" in payload["prompt"], "固定参照物没进提示词"
     assert "摄影主轴" in payload["prompt"], "主轴必须是构图指令，不只是描述"
-    assert positive in payload["prompt"], "风格词必须由系统注入"
+    assert positive in payload["prompt"], "场景版风格词必须由系统注入"
+    assert character_only not in payload["prompt"], "场景参考图不该带人物质感词"
     assert payload["negative_prompt"] == negative
     assert payload["seed"] == seed_base
     assert payload["subject_kind"] == "scene"
@@ -358,7 +368,8 @@ async def test_shot_task_composes_from_storyboard_and_records_conditioning(
     async with session_scope() as db:
         style = await consistency.get_style(db, org_id=org_id, project_id=uuid.UUID(pid))
         assert style is not None
-        assert style.positive_tokens in payload["prompt"]
+        # 这一镜有角色出场，注入的应是人物版而不是场景版
+        assert style.character_tokens in payload["prompt"]
         # 项目级基准 seed + 镜号偏移：同一镜重跑得到同一张图
         assert payload["seed"] == style.seed_base + 1
 

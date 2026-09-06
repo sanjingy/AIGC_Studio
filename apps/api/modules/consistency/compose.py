@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 from apps.api.modules.consistency.models import CharacterProfile, SceneProfile, StyleProfile
 
@@ -41,6 +42,40 @@ class Composed:
     character_ids: list[str]
     # 这一镜用了哪个场景档案。没有场景信息时为 None——见 compose_shot。
     scene_id: str | None = None
+
+
+# 三套描述词的用途（ADR-036 第 3 条）。**不得混用。**
+#
+#   character  人物质感。角色立绘、以及画面里有人的镜头图
+#   scene      **空**场景。场景概念图、以及没有任何角色出场的空镜
+#   video      帧率与运动质感。只给视频提示词用（M2），画静态图时是噪声
+#
+# "画面里有没有人"是一条能从数据判出来的客观判据，不需要再让谁去选：
+# `compose_shot` 拿到的 `characters` 非空就是有人。判错的代价不对称——
+# 给空镜带上人物质感词只是浪费几个 token，给场景参考图带上人物质感词
+# 会让模型往空场景里画人，而那张图是同一场景后续所有镜头的空间基准。
+StyleSurface = Literal["character", "scene", "video"]
+
+_SURFACE_FIELD: dict[str, str] = {
+    "character": "character_tokens",
+    "scene": "scene_tokens",
+    "video": "video_tokens",
+}
+
+
+def style_tokens_for(style: StyleProfile, surface: StyleSurface) -> str:
+    """这一类产物该注入哪一套风格词，拼成一段。
+
+    渲染方式与线宽两项三套共用：它们描述的是"这部片子怎么画"，与画的是人
+    还是空房间无关，拆开只会让同一个项目的三类产物看起来不像一套。
+
+    **色调分级不在这里**，它由调用方决定加不加：镜头图要（成片的色调统一
+    靠它），基准立绘和场景概念图不要（那两张是比对基准，带上戏剧化的色调
+    会污染基准，让相似度失去意义）。这条区分在这次改动之前就有，
+    拆三套没有改变它。
+    """
+    tokens = str(getattr(style, _SURFACE_FIELD[surface], "") or "")
+    return "，".join(b for b in (tokens, style.render_mode, style.line_weight) if b)
 
 
 def strip_style_words(content: str) -> str:
@@ -164,13 +199,9 @@ def compose_shot(
     if cleaned := strip_style_words(content):
         segments.append(cleaned)
 
-    style_bits = [
-        style.positive_tokens,
-        style.render_mode,
-        style.line_weight,
-        style.color_grading,
-    ]
-    segments.append("，".join(b for b in style_bits if b))
+    # 有人用人物版、空镜用场景版。色调分级只在镜头级追加——见 style_tokens_for。
+    style_text = style_tokens_for(style, "character" if characters else "scene")
+    segments.append("，".join(b for b in (style_text, style.color_grading) if b))
 
     return Composed(
         prompt="。".join(s for s in segments if s),
@@ -194,9 +225,7 @@ def reference_portrait_prompt(profile: CharacterProfile, style: StyleProfile) ->
         [
             describe_character(profile),
             "正面全身立绘，中性表情，中性光照，纯色背景，无道具，站姿自然",
-            "，".join(
-                b for b in (style.positive_tokens, style.render_mode, style.line_weight) if b
-            ),
+            style_tokens_for(style, "character"),
         ]
     )
 
@@ -218,8 +247,6 @@ def reference_scene_prompt(profile: SceneProfile, style: StyleProfile) -> str:
         [
             describe_scene(profile),
             "场景概念图，按上述摄影主轴取景，固定参照物位置严格保持，空间关系清晰完整",
-            "，".join(
-                b for b in (style.positive_tokens, style.render_mode, style.line_weight) if b
-            ),
+            style_tokens_for(style, "scene"),
         ]
     )

@@ -1,8 +1,13 @@
-"""编排链路：路线 → 情节目录 → 剧本 → 门 → 角色 → 场景 → 分镜 → 门。
+"""编排链路：路线 → 情节目录 →【门①】→ 剧本 →【门②】
+→ 角色 → 场景 →【门③】→ 分镜 →【门④】→ done。
 
 重点验证两件事：
 1. 状态完全由 `projects.current_state_json` 决定，不依赖内存（ADR-008）
-2. 审核门真的能挡住，且用户的决策能改变走向
+2. 四道门真的能挡住，且用户的决策能改变走向（ADR-037）
+
+四道门各自的开门 / 通过 / 打回 / 打回后重跑在文件末尾的「四道门」一节里
+逐道覆盖；这一节前面的用例只把门当成路上的关卡，用 `advance_to_gate`
+穿过去，不写死道数。
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.modules.agent import orchestrator
 from apps.api.modules.agent.models import AgentRun, AgentStep
+from tests.conftest import advance_to_gate
 
 pytestmark = pytest.mark.integration
 
@@ -44,24 +50,26 @@ async def _pending(client: AsyncClient, pid: str) -> dict | None:
 
 
 async def test_runs_until_first_gate(alice: AsyncClient) -> None:
-    """一路跑到第一个门就必须停下。"""
+    """一路跑到第一个门就必须停下。
+
+    ADR-037 之后第一道门是**开拍前确认**（门①），不再是剧本门：
+    画风、时代背景与改编模式必须在剧本写出来之前定下来，
+    否则改编模式一改就要把整份剧本重写一遍。
+    """
     pid = await _project(alice)
     result = await _advance(alice, pid, NOVEL)
 
     assert result["blocked"] is True
-    assert result["gate_opened"] == "setup"
-    assert result["stage"] == "await_setup"
+    assert result["gate_opened"] == "plan"
+    assert result["stage"] == "await_plan"
 
     pending = await _pending(alice, pid)
     assert pending is not None
-    assert pending["gate"] == "setup"
-    # 门的摘要要能让用户判断该不该通过
-    summary = pending["payload_json"]["summary"]
-    assert summary["episodes"] >= 1
-    assert summary["scenes"] >= 1
-    # 情节覆盖率：改编有没有漏掉原著情节，这是能核对的数字
-    assert summary["nodes_total"] >= 1
-    assert summary["nodes_covered"] >= 1
+    assert pending["gate"] == "plan"
+
+    # 剧本这时候还不该存在：门① 在 screenplay 之前
+    runs = (await alice.get(f"{P}/{pid}/agent-runs")).json()
+    assert not [r for r in runs if r["agent_id"] == "story.screenplay.v1"]
 
 
 async def test_gate_actually_blocks(alice: AsyncClient) -> None:
@@ -72,7 +80,7 @@ async def test_gate_actually_blocks(alice: AsyncClient) -> None:
     for _ in range(3):
         result = await _advance(alice, pid)
         assert result["blocked"] is True
-        assert result["stage"] == "await_setup"
+        assert result["stage"] == "await_plan"
 
 
 async def test_approve_advances_to_next_stage(alice: AsyncClient) -> None:
@@ -83,18 +91,18 @@ async def test_approve_advances_to_next_stage(alice: AsyncClient) -> None:
 
     r = await alice.post(f"{P}/{pid}/approvals/{pending['id']}", json={"decision": "approved"})
     assert r.status_code == 200
-    assert r.json()["stage"] == "characters"
+    assert r.json()["stage"] == "screenplay"
 
-    # 继续跑到第二个门：角色档案 → 场景档案 → 分镜表
+    # 继续跑：下一个停下来的地方是剧本门
     result = await _advance(alice, pid)
-    assert result["gate_opened"] == "storyboard"
-    assert result["stage"] == "await_storyboard"
+    assert result["gate_opened"] == "setup"
+    assert result["stage"] == "await_setup"
 
 
 async def test_changes_requested_sends_it_back(alice: AsyncClient) -> None:
     """打回要退到产出这批内容的阶段重做，而不是原地卡住。"""
     pid = await _project(alice)
-    await _advance(alice, pid, NOVEL)
+    await advance_to_gate(alice, pid, "setup", user_input=NOVEL)
     pending = await _pending(alice, pid)
     assert pending
 
@@ -119,15 +127,28 @@ async def test_same_approval_cannot_be_resolved_twice(alice: AsyncClient) -> Non
 
 
 async def test_full_run_to_completion(alice: AsyncClient) -> None:
-    """走完两道门到 done。"""
+    """走完全部四道门到 done。
+
+    循环上界写 8 而不是 4：这条用例要验的是"通过所有门之后能走到 done"，
+    写死门的道数会让加一道门时这里静默地少通一道，然后在末尾那句
+    `stage == "done"` 上报一个跟原因无关的错。
+    """
     pid = await _project(alice)
     await _advance(alice, pid, NOVEL)
 
-    for _ in range(2):
+    gates_passed: list[str] = []
+    for _ in range(8):
         pending = await _pending(alice, pid)
-        assert pending is not None
+        if pending is None:
+            break
+        gates_passed.append(pending["gate"])
         await alice.post(f"{P}/{pid}/approvals/{pending['id']}", json={"decision": "approved"})
         await _advance(alice, pid)
+
+    assert gates_passed == ["plan", "setup", "anchors", "storyboard"], gates_passed
+
+    project = (await alice.get(f"{P}/{pid}/state")).json()
+    assert project["stage"] == "done"
 
     state = (await alice.get(f"{P}/{pid}")).json()
     assert state["status"] in ("draft", "producing", "review", "completed")
@@ -220,12 +241,7 @@ async def test_downstream_stages_get_the_full_screenplay(
     猜出来的名字和剧本对不上，一致性引擎后面全是错的。
     """
     pid = await _project(alice)
-    await _advance(alice, pid, SOURCE)
-
-    pending = await _pending(alice, pid)
-    assert pending
-    await alice.post(f"{P}/{pid}/approvals/{pending['id']}", json={"decision": "approved"})
-    await _advance(alice, pid)
+    await advance_to_gate(alice, pid, "storyboard", user_input=SOURCE)
 
     chars = await _sent_to_agent(db, pid, "visual.character.v1")
     assert "△" in chars, "没带上剧本正文的动作行"
@@ -237,9 +253,12 @@ async def test_downstream_stages_get_the_full_screenplay(
 
 
 async def test_screenplay_gets_the_plot_index(alice: AsyncClient, db: AsyncSession) -> None:
-    """剧本阶段要拿到情节目录，才能逐节点覆盖。"""
+    """剧本阶段要拿到情节目录，才能逐节点覆盖。
+
+    剧本在门① 之后跑，所以要先通过门① 才有 `story.screenplay.v1` 这一条 run。
+    """
     pid = await _project(alice)
-    await _advance(alice, pid, SOURCE)
+    await advance_to_gate(alice, pid, "setup", user_input=SOURCE)
 
     sent = await _sent_to_agent(db, pid, "story.screenplay.v1")
     assert "情节目录：" in sent
@@ -315,7 +334,7 @@ async def test_stage_is_derived_purely_from_db(alice: AsyncClient, db: AsyncSess
         org_id=uuid.UUID((await alice.get("/api/v1/auth/me")).json()["org_id"]),
         project_id=uuid.UUID(pid),
     )
-    assert orchestrator.current_stage(project.current_state_json) == "await_setup"
+    assert orchestrator.current_stage(project.current_state_json) == "await_plan"
 
     # 手工把状态改回剧本阶段
     project.current_state_json = {**project.current_state_json, "stage": "screenplay"}
@@ -374,8 +393,7 @@ async def test_agent_runs_record_the_resolved_prompt(alice: AsyncClient, db: Asy
 async def test_agent_output_is_schema_validated(alice: AsyncClient) -> None:
     """输出必须匹配声明的 schema。"""
     pid = await _project(alice)
-    result = await _advance(alice, pid, NOVEL)
-    del result
+    await advance_to_gate(alice, pid, "setup", user_input=NOVEL)
 
     runs = (await alice.get(f"{P}/{pid}/agent-runs")).json()
     script = next(r for r in runs if r["agent_id"] == "story.screenplay.v1")

@@ -14,6 +14,8 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.conftest import advance_to_gate
+
 pytestmark = pytest.mark.integration
 
 P = "/api/v1/projects"
@@ -26,17 +28,15 @@ async def _project(client: AsyncClient) -> str:
 
 
 async def _with_story(client: AsyncClient) -> str:
+    """跑到剧本门。开拍前确认门（门①）在它之前，由 `advance_to_gate` 顺手通过。"""
     pid = await _project(client)
-    await client.post(f"{P}/{pid}/advance?to_gate=true", json={"user_input": NOVEL})
+    await advance_to_gate(client, pid, "setup", user_input=NOVEL)
     return pid
 
 
 async def _approve_all(client: AsyncClient, pid: str) -> None:
-    rows = (await client.get(f"{P}/{pid}/approvals")).json()
-    pending = next((r for r in rows if r["status"] == "pending"), None)
-    if pending:
-        await client.post(f"{P}/{pid}/approvals/{pending['id']}", json={"decision": "approved"})
-        await client.post(f"{P}/{pid}/advance?to_gate=true", json={"user_input": ""})
+    """一路通过剩下的门，直到分镜门——五个生产阶段全部有产出。"""
+    await advance_to_gate(client, pid, "storyboard")
 
 
 # ------------------------------------------------------------------ 主链路

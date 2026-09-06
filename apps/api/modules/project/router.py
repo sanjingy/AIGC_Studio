@@ -8,14 +8,19 @@ from fastapi import APIRouter, Query, status
 from apps.api.core.errors import AppError
 from apps.api.modules.agent import service as agent_service
 from apps.api.modules.auth.deps import CurrentUser, DbSession
+from apps.api.modules.consistency import service as consistency_service
 from apps.api.modules.project import service
+from apps.api.modules.project.models import ADAPTATION_MODES
 from apps.api.modules.project.schemas import (
     ProjectCreateIn,
+    ProjectLockVariablesIn,
+    ProjectLockVariablesOut,
     ProjectModelPreferenceIn,
     ProjectOut,
     ProjectPage,
     ProjectStateOut,
     ProjectUpdateIn,
+    StyleOptionOut,
 )
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -100,6 +105,83 @@ async def get_project_state(
         stale_roles=agent_service.stale_roles_of(state),
         updated_at=row.updated_at,
     )
+
+
+async def _lock_out(
+    db: DbSession, project_id: uuid.UUID, lock: object | None
+) -> ProjectLockVariablesOut:
+    """把锁定变量拼成响应，并带上可选项。
+
+    `lock is None` = 这个项目还没走到门①，一行都没有。此时返回一份空值 +
+    完整可选项，而不是 404：界面要在门① 之前就能展示"可以选哪些画风"，
+    而"还没选过"本身是一个合法状态，不是资源不存在。
+    """
+    options = [
+        StyleOptionOut.model_validate(e) for e in await consistency_service.list_style_catalog(db)
+    ]
+    if lock is None:
+        return ProjectLockVariablesOut(
+            project_id=project_id,
+            style_key="",
+            era="",
+            region="",
+            ethnicity="",
+            era_evidence="",
+            adaptation_mode="adapt",
+            origin="detected",
+            confirmed_at=None,
+            anchors_confirmed_at=None,
+            legacy_unconfirmed=False,
+            style_options=options,
+            adaptation_options=list(ADAPTATION_MODES),
+        )
+    out = ProjectLockVariablesOut.model_validate(lock)
+    return out.model_copy(
+        update={"style_options": options, "adaptation_options": list(ADAPTATION_MODES)}
+    )
+
+
+@router.get("/{project_id}/lock-variables", response_model=ProjectLockVariablesOut)
+async def get_lock_variables(
+    project_id: uuid.UUID, user: CurrentUser, db: DbSession
+) -> ProjectLockVariablesOut:
+    """门① 锁定的项目级变量：画风、时代背景与人种、改编模式。
+
+    跨租户与不存在一律 404（由 `service.get_project` 保证），不返回 403。
+    """
+    await service.get_project(db, org_id=user.org_id, project_id=project_id)
+    lock = await service.get_lock_variables(db, org_id=user.org_id, project_id=project_id)
+    return await _lock_out(db, project_id, lock)
+
+
+@router.put("/{project_id}/lock-variables", response_model=ProjectLockVariablesOut)
+async def set_lock_variables(
+    project_id: uuid.UUID,
+    payload: ProjectLockVariablesIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> ProjectLockVariablesOut:
+    """改门① 的锁定变量。只改传了的字段，没传的保持不动。
+
+    **PUT 而不是 POST**：这是"这个项目的锁定变量就是它"，重复调用结果
+    相同，没有第二份被创建出来。POST 到同一路径会让人以为每调一次
+    就多一份设定。
+
+    确认过之后仍然允许改时代背景与改编模式——它们只影响还没跑的阶段。
+    画风是例外：一旦风格档案建出来就冻结了，改它要重出全部已生成的画面，
+    service 层会直接拒绝，而不是让一次无效操作看起来成功了。
+    """
+    lock = await service.set_lock_variables(
+        db,
+        org_id=user.org_id,
+        project_id=project_id,
+        style_key=payload.style_key,
+        era=payload.era,
+        region=payload.region,
+        ethnicity=payload.ethnicity,
+        adaptation_mode=payload.adaptation_mode,
+    )
+    return await _lock_out(db, project_id, lock)
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)

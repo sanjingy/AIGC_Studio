@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,9 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.core.errors import AppError
 from apps.api.modules.gateway import catalog
 from apps.api.modules.project import repository as repo
-from apps.api.modules.project.models import Project
+from apps.api.modules.project.models import ADAPTATION_MODES as ADAPTATION_MODES
+from apps.api.modules.project.models import Project, ProjectLockVariables
 
 MAX_PAGE_SIZE = 100
+
+# `ADAPTATION_MODES` 在本模块顶部 import 进来，因此 `project_service.ADAPTATION_MODES`
+# 是它的公开出口。编排器渲染门① 的可选项时从这里取——`project.models` 在 ruff 的
+# banned-api 名单上，跨模块只走 service 层。
 
 
 async def create_project(
@@ -193,3 +198,172 @@ async def update_current_state(
     row = await get_project(db, org_id=org_id, project_id=project_id)
     row.current_state_json = dict(state)
     return row
+
+
+# ---------------------------------------------------------------- 锁定变量
+#
+# 门① 一次锁定四件事（ADR-037 第 2 条），其中三件在 `project_lock_variables`
+# 上（第四件情节目录本来就是 `current_state_json["plot_index"]` 的产出）。
+#
+# 这几个函数是编排器与出图链路读画风、时代背景、改编模式的**唯一入口**。
+# 一致性引擎按 `style_key` 去 `style_catalog` 取三套描述词，编排器按
+# `era` / `ethnicity` / `adaptation_mode` 拼提示词变量。
+
+
+async def get_lock_variables(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID
+) -> ProjectLockVariables | None:
+    """读这个项目的锁定变量。没有就返回 None，**不代建**。
+
+    不代建是有意的：建一行意味着"这个项目已经有画风了"，而在门① 之前
+    它还没有。代建会让"从没问过用户"和"用户选了缺省画风"变成同一种状态。
+    """
+    return await repo.get_lock_variables(db, org_id=org_id, project_id=project_id)
+
+
+async def ensure_lock_variables(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    detected: dict[str, str] | None = None,
+    origin: str = "detected",
+) -> ProjectLockVariables:
+    """取锁定变量，没有就按系统判定的结果建一行。**不 commit。**
+
+    `detected` 是系统按原文证据得出的时代背景判定（来自情节目录产出），
+    用户在门① 可以改。只在**新建**时写进去：已经存在的行可能是用户
+    确认过的，重跑一次情节目录不该把他的选择冲掉。
+
+    `origin="migrated"` 供存量项目的运行时补齐用——迁移脚本已经补过一轮，
+    但在迁移之后、部署之前建的项目仍会漏网，那些项目第一次被读到时
+    在这里补上，并如实标成 migrated 而不是伪装成 detected。
+    """
+    existing = await repo.get_lock_variables(db, org_id=org_id, project_id=project_id)
+    if existing is not None:
+        return existing
+
+    fields = detected or {}
+    return await repo.create_lock_variables(
+        db,
+        org_id=org_id,
+        project_id=project_id,
+        origin=origin,
+        era=str(fields.get("era", "")),
+        region=str(fields.get("region", "")),
+        ethnicity=str(fields.get("ethnicity", "")),
+        era_evidence=str(fields.get("era_evidence", "")),
+    )
+
+
+async def set_lock_variables(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    style_key: str | None = None,
+    era: str | None = None,
+    region: str | None = None,
+    ethnicity: str | None = None,
+    adaptation_mode: str | None = None,
+) -> ProjectLockVariables:
+    """改锁定变量。只改传进来的那几项，None 表示"这次不动它"。
+
+    两条校验在这里定死：
+
+    1. **画风必须在目录里。** 存一个 `style_catalog` 里没有的 key，等于让
+       选择静默失效——`ensure_style` 解析不到就会报错，而那时用户已经
+       走到角色出图那一步了，错误出现的位置离原因很远。
+    2. **画风档案一旦建出来就不能再改 key。** `ensure_style` 是
+       "已存在就不覆盖"的，改了 key 也不会生效，界面却显示改成功了。
+       宁可在这里明确拒绝，也不要一次看起来成功的无效操作。
+       （真要换画风是"新建一个风格版本 + 已生成的镜头全部重出"，
+       那是 ADR-033 候选版本的范围，不在这条路径上。）
+    """
+    row = await get_project(db, org_id=org_id, project_id=project_id)
+    lock = await ensure_lock_variables(db, org_id=org_id, project_id=project_id)
+    del row
+
+    if style_key is not None:
+        key = style_key.strip()
+        # 延迟导入：consistency 那边也会反向调 project.service 读 style_key，
+        # 模块顶层互相 import 会撞循环导入。
+        from apps.api.modules.consistency import service as consistency
+
+        if key and await consistency.get_style_entry(db, key=key) is None:
+            raise AppError("provider.params.invalid", message=f"未知画风 {key}")
+        if key != lock.style_key:
+            frozen = await consistency.get_style(db, org_id=org_id, project_id=project_id)
+            if frozen is not None:
+                raise AppError(
+                    "common.conflict",
+                    message="这个项目的画风档案已经建立，改画风需要重出全部已生成的画面",
+                    detail={"style_key": frozen.style_key or lock.style_key},
+                )
+        lock.style_key = key
+
+    if era is not None:
+        lock.era = era.strip()
+    if region is not None:
+        lock.region = region.strip()
+    if ethnicity is not None:
+        lock.ethnicity = ethnicity.strip()
+
+    if adaptation_mode is not None:
+        mode = adaptation_mode.strip()
+        if mode not in ADAPTATION_MODES:
+            raise AppError(
+                "common.validation_failed",
+                message=f"未知的改编模式 {mode!r}",
+                detail={"allowed": list(ADAPTATION_MODES)},
+            )
+        lock.adaptation_mode = mode
+
+    await db.commit()
+    await db.refresh(lock)
+    return lock
+
+
+async def confirm_lock_variables(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    confirmed_by: uuid.UUID,
+) -> ProjectLockVariables:
+    """门① 通过：这四件事从此是用户确认过的。**不 commit**——
+
+    调用它的是 `orchestrator.resolve_gate`，那一步还要写阶段推进，
+    两件事必须在同一个事务里。分开提交会出现"门开着但变量已确认"
+    或者反过来的中间态，而这两种状态在界面上都解释不清。
+
+    幂等：重复确认只保留第一次的时间与人。审核本身已经有
+    "同一条 approval 不能处理两次"的 409，这里的幂等是为了别的入口。
+    """
+    lock = await ensure_lock_variables(db, org_id=org_id, project_id=project_id)
+    if lock.confirmed_at is None:
+        lock.confirmed_at = datetime.now(UTC)
+        lock.confirmed_by = confirmed_by
+        lock.origin = "confirmed"
+    return lock
+
+
+async def confirm_anchors(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID
+) -> ProjectLockVariables:
+    """门③ 通过：空间锚点卡从此是用户一次性确认过的。**不 commit**，理由同上。
+
+    与门① 分开记时间戳：两道门确认的是完全不同的东西，
+    合成一个字段就分不清"画风确认过、锚点还没有"这种正常中间态。
+
+    **走到这里还没有锁定变量行 = 这是个存量项目。** 新项目一定先过门①，
+    而门① 打开时 `_plan_gate_summary` 就把行建出来了。所以这里代建的行
+    只可能属于"ADR-037 上线时已经越过门① 位置"的那批项目——迁移应该已经
+    给它们补过一行，漏网的（迁移之后、部署之前建的）在这里补上，
+    `origin="migrated"` 如实标注**从来没有人看过一眼**，
+    而不是伪装成 detected 让界面显示得像系统判定过。
+    """
+    lock = await ensure_lock_variables(db, org_id=org_id, project_id=project_id, origin="migrated")
+    if lock.anchors_confirmed_at is None:
+        lock.anchors_confirmed_at = datetime.now(UTC)
+    return lock

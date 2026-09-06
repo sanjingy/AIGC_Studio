@@ -3,7 +3,7 @@
 > 状态：**部分实现**（L0 提示词锁定 + 出图链路已实现；L1 参考图条件化、质量评分、候选版本未实现）
 > 优先级：P0
 > 负责人：待定
-> 最近核对：2026-09-05（FR-CONS-011 无 Key 回退落地）
+> 最近核对：2026-09-06（ADR-036 第 3 条风格词拆三套 + ADR-037 受控词表与空间锚点）
 
 ## 1. 模块目标与边界
 
@@ -30,7 +30,11 @@
 
 | 能力 | 证据 |
 |---|---|
-| 风格档案：base_model、正/负风格词、色调、线条、渲染方式、项目级基准 seed | `models.StyleProfile`；`service.ensure_style` |
+| 风格档案：base_model、**三套**正风格词 + 负风格词、色调、线条、渲染方式、项目级基准 seed | `models.StyleProfile`；`service.ensure_style` |
+| 画风目录走数据不走代码常量：加一种画风、改一句描述词都不发版 | `style_catalog` 表（全局，不带 org_id，同 `model_pricing`）；`service.list_style_catalog` |
+| 三套描述词各注入各的，不得混用：人物版 / **空**场景版 / 视频版 | `compose.style_tokens_for`；`tests/unit/test_consistency_compose.py` |
+| 项目在门① 选的画风真的进风格档案（不是只存了个显示值） | `ensure_style(preset=None)` 读 `project_lock_variables.style_key`；`tests/integration/test_lock_variables.py` |
+| 角色体貌走受控词表（身高 / 体型 / 体态），拼成 `build` 落 `appearance_json` | `agents/schemas.py` 的三个 `Literal`；`service._appearance` |
 | 角色档案：结构化外貌 JSON、基准立绘列、版本号 | `models.CharacterProfile` |
 | 场景档案：结构化空间 JSON、基准参考图列、版本号 | `models.SceneProfile` |
 | 角色 / 场景档案从 Agent 产出自动同步 | `service.sync_from_characters_output` / `sync_from_scenes_output`，由 `orchestrator` 在对应阶段调用 |
@@ -181,7 +185,8 @@ Agent 角色 / 场景产出
 
 | 表 | 归属 |
 |---|---|
-| `style_profiles` | 本模块。项目级，版本化，`locked_at` 目前恒 NULL（见 §3.3） |
+| `style_catalog` | 本模块。**全局表，不带 org_id**——画风是平台内容不是租户数据。`is_active` 下架用，不删行（已锁定它的项目还要能读回描述词） |
+| `style_profiles` | 本模块。项目级，版本化，`locked_at` 目前恒 NULL（见 §3.3）。描述词从目录**拷贝**进来而不是外键引用：目录会改，而这张表是"已经锁定的那一版" |
 | `character_profiles` | 本模块。`ref` 是跨版本引用的稳定 id |
 | `scene_profiles` | 本模块。同上 |
 | `shot_conditioning` | 本模块。一镜一次生成一行，带 attempt |
@@ -194,6 +199,27 @@ pgvector 的用途是**角色 / 场景基准图的 embedding 与相似度检索*
 
 - Prompt Composer 是确定性服务，不让 Agent 临时重写项目风格词。风格词放在提示词**最后**：
   多数扩散模型对靠后的 token 权重更敏感，即便 Agent 的画面描述漏了风格词也压不过系统设定。
+- **风格词一套变三套**（ADR-036 第 3 条，2026-09-05）。三者服务的对象不同，
+  **不得混用**：
+
+  | 套 | 给谁 | 内容 | 混用的后果 |
+  |---|---|---|---|
+  | `character_tokens` | 角色立绘、有人出场的镜头图 | 皮肤、五官、服装材质 | — |
+  | `scene_tokens` | 场景概念图、空镜 | **空场景**，明写"无人物" | 用人物版画场景参考图，模型会把人画进背景；而那张图是这个场景后续所有镜头的空间基准，画进去的人会被当成空间的一部分带进每一镜 |
+  | `video_tokens` | 视频提示词（M2） | 帧率与运动质感 | 画静态图时纯粹是噪声 |
+
+  "这一镜有没有人"是能从数据判出来的客观判据（`compose_shot` 拿到的
+  `characters` 非空就是有人），不需要再让谁去选。渲染方式与线宽三套共用——
+  它们描述的是"这部片子怎么画"，与画的是人还是空房间无关。
+  色调分级仍然只在镜头级追加，基准立绘与场景概念图不带（它们是比对基准，
+  带上戏剧化的色调会污染基准，让相似度失去意义），这条区分在拆三套之前就有。
+- **角色体貌收紧为受控词表**（ADR-037）。身高 / 体型 / 体态从自由文本改成
+  `Literal`，词表里刻意没有"匀称""普通""正常身材"——它们在扩散模型里等价于
+  没写，而同一个角色这次"身材匀称"下次"体型适中"，出来就是两个人。
+  这也是 `reference_embedding` 至今为空的根因之一：没有可比的结构化描述，
+  就没有可比的向量。词表写成 `Literal` 而不是入库，因为它是 Agent 的输出契约
+  （换一个词要同步改提示词、改 schema 样例、重跑 eval）；真正要热更新的
+  画风目录才走 `style_catalog` 表。
 - 场景是**可选**参数。分镜没写 `scene_ref`、写了但档案没有、项目还没跑到场景阶段时，
   优雅降级成"角色 → 画面 → 风格"。做成硬要求会让存量项目突然出不了图。
 - POST / PUT 语义与计费严格分开（见 §3.1）。
@@ -219,6 +245,8 @@ pgvector 的用途是**角色 / 场景基准图的 embedding 与相似度检索*
 | 无生成前模型选择 | ADR-031 第 4 条未落地 | P0 |
 | `score_shot` 无调用方 | 废片率永远测不出来，`image_retry_factor = 250` 一直是拍值，**不可用于对外报价** | P1 |
 | `lock_style` 无调用方 | 风格可以在出图中途被改掉，已生成镜头静默不一致 | P1 |
+| 换画风只有"拒绝"没有"重出" | 风格档案建出来之后 `PUT /lock-variables` 改 `style_key` 返 409。这是诚实的（改了也不会生效），但用户真想换画风时没有路径——那要走"新建风格版本 + 已生成的镜头全部重出"，属 ADR-033 候选版本的范围 | P1 |
+| `video_tokens` 目前无消费方 | 三套里视频版这一套写进了库也进了接口，但视频链路是 M2，现在没人读它 | P2 |
 | `consistency_tier` 恒为 `"L1"` 且从未被读 | 让人误以为分层策略已经实现 | P1 |
 | 景别 / 角度 / 运镜不进提示词 | 分镜表上这三列对成图零影响；字段级编辑上线后变成用户可见的问题（改了没反应） | **P0**（FR-CONS-012） |
 | 图像链路无 Mock 回退 | 没有 Provider Key 的环境（测试机、新同事本机、CI）出图必失败，`CLAUDE.md` 里"没有 Key 也能跑通全链路"这句对图像不成立 | P1 |
@@ -251,3 +279,11 @@ pgvector 的用途是**角色 / 场景基准图的 embedding 与相似度检索*
 - 质量失败不会无限重试，也不会突破 `task_cost_cap`。
 - 跨租户访问角色 / 场景 / 出图记录一律 404。
 - Agent 产出里混入风格词时，`strip_style_words` 把它剥掉（已有单测，回归保留）。
+- 三套风格词各注入各的：角色立绘只带人物版、场景概念图只带场景版、
+  有人出场的镜头带人物版（`tests/integration/test_image_generation.py`
+  正反两面都断言：该出现的出现，不该出现的**不出现**）。
+- 门① 选定的画风就是 `ensure_style` 建出来的那一份；画风档案冻结之后
+  改 `style_key` 返 409 而不是假装成功（`tests/integration/test_lock_variables.py`）。
+- 迁移 `e4b7c9d21f38` 把存量 `positive_tokens` **同时**拷进三列——那正是它
+  今天的行为（一套词全场通用），所以已冻结项目的产出一个字都不会变；
+  降级时从 `character_tokens` 拷回去（三套里它最接近旧语义）。

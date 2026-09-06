@@ -37,7 +37,11 @@ def _style(**over: object) -> StyleProfile:
         "org_id": uuid.uuid4(),
         "project_id": uuid.uuid4(),
         "base_model": "wan2.2-t2i-flash",
-        "positive_tokens": "日式动画风格，赛璐璐上色",
+        # 三套描述词各注入各的（ADR-036 第 3 条）。故意写成三段互不包含的词，
+        # 断言"用错了哪一套"时才能分辨得出来——三套写成一样等于没测。
+        "character_tokens": "日式动画风格，赛璐璐上色",
+        "scene_tokens": "日式动画背景美术，空场景无人物",
+        "video_tokens": "日式动画风格，24fps 电影帧率",
         "negative_tokens": "真人照片，畸变，水印",
         "color_grading": "低饱和，冷调",
         "line_weight": "中等线宽",
@@ -148,7 +152,7 @@ def test_style_is_appended_by_system() -> None:
     style = _style()
     out = compose_shot(content="站在集装箱前", style=style, characters=[_character()], shot_index=1)
     assert out.prompt.endswith(style.color_grading)
-    assert style.positive_tokens in out.prompt
+    assert style.character_tokens in out.prompt
     assert out.negative_prompt == style.negative_tokens
 
 
@@ -327,18 +331,25 @@ def test_reference_scene_prompt_anchors_space() -> None:
     assert "摄影主轴" in prompt
     assert "固定参照物" in prompt
     assert "铁门外的路面" in prompt
-    assert _style().positive_tokens in prompt, "风格词必须由系统注入"
+    assert _style().scene_tokens in prompt, "场景版风格词必须由系统注入"
 
 
-def test_reference_scene_prompt_does_not_forbid_people() -> None:
-    """克制不等于加约束。
+def test_reference_scene_prompt_uses_the_scene_token_set() -> None:
+    """场景基准图注入的是**场景版**风格词，不是人物版。
 
-    场景档案里可能本来就写着"门口站着门卫"，强加"无人物"会跟设计意图
-    打架，而基准图要的是空间对不对，不是画面里有没有人。
+    这条断言反转了它的前身（`test_reference_scene_prompt_does_not_forbid_people`）。
+    那一版的理由是"场景档案里可能本来就写着门口站着门卫，强加无人物会跟
+    设计意图打架"。**ADR-036 第 3 条推翻了它**：场景参考图要的就是空场景，
+    因为它是同一场景后续所有镜头的空间基准——基准图里画进一个人，
+    那个人就会被当成这个空间的一部分带进每一镜。
+
+    "画面里有没有人"改由镜头层决定：`compose_shot` 看这一镜有没有角色，
+    有人用人物版、空镜用场景版。基准图不承担这件事。
     """
     prompt = reference_scene_prompt(_scene(), _style())
-    for forbidden in ("无人物", "无人", "空无一人"):
-        assert forbidden not in prompt
+    style = _style()
+    assert style.scene_tokens in prompt
+    assert style.character_tokens not in prompt, "场景基准图不该带人物质感词"
 
 
 def test_camera_axis_label_is_not_duplicated() -> None:

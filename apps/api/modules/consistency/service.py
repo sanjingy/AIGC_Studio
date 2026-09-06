@@ -17,31 +17,68 @@ from apps.api.modules.consistency.models import (
     SceneProfile,
     ShotConditioning,
     ShotQualityScore,
+    StyleCatalogEntry,
     StyleProfile,
 )
 
 log = get_logger(__name__)
 
-# 内置风格预设。用户可选，选定后冻结。
-# 这些词由平台维护，不来自 Agent——见 compose.py 的说明。
-STYLE_PRESETS: dict[str, dict[str, str]] = {
-    "anime_suspense": {
-        "base_model": "wan2.2-t2i-flash",
-        "positive_tokens": "日式动画风格，赛璐璐上色，清晰线稿",
-        "negative_tokens": "真人照片，3D渲染，模糊，多余手指，畸变，水印，文字",
-        "color_grading": "低饱和，冷调，高对比",
-        "line_weight": "中等线宽",
-        "render_mode": "赛璐璐",
-    },
-    "ink_wash": {
-        "base_model": "wan2.2-t2i-flash",
-        "positive_tokens": "水墨风格，留白构图，淡彩",
-        "negative_tokens": "真人照片，霓虹色，过曝，水印，文字",
-        "color_grading": "低饱和，暖灰调",
-        "line_weight": "细线",
-        "render_mode": "水墨",
-    },
-}
+# 缺省画风。**只是"目录里没写 sort_order 时先用哪一条"**，不是一份代码里的
+# 画风定义——画风目录在 `style_catalog` 表里（见 `models.StyleCatalogEntry`），
+# 加一种画风、改一句描述词都不该发版。
+DEFAULT_STYLE_KEY = "anime_suspense"
+
+
+async def list_style_catalog(
+    db: AsyncSession, *, include_inactive: bool = False
+) -> list[StyleCatalogEntry]:
+    """可选画风目录，按展示顺序。
+
+    全局表，不带 org_id：画风是平台内容，不是租户数据。跨租户在这里
+    没有可泄露的东西——所有人看到的是同一份目录。
+    """
+    stmt = select(StyleCatalogEntry).where(StyleCatalogEntry.deleted_at.is_(None))
+    if not include_inactive:
+        stmt = stmt.where(StyleCatalogEntry.is_active.is_(True))
+    stmt = stmt.order_by(StyleCatalogEntry.sort_order, StyleCatalogEntry.key)
+    return list((await db.execute(stmt)).scalars())
+
+
+async def get_style_entry(db: AsyncSession, *, key: str) -> StyleCatalogEntry | None:
+    """按 key 取目录项。下架的也能取到——已经锁定它的项目还要能读回描述词。"""
+    return (
+        await db.execute(
+            select(StyleCatalogEntry).where(
+                StyleCatalogEntry.key == key, StyleCatalogEntry.deleted_at.is_(None)
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _resolve_entry(db: AsyncSession, key: str | None) -> StyleCatalogEntry:
+    """把一个画风 key 解析成目录项。
+
+    解析不到就报错，**不静默退回缺省画风**：用户在门① 选了一种画风，
+    结果全片按另一种画风出图，而界面上还显示着他选的那个——这种错
+    只有在成片出来之后才看得出来，那时所有图都要重出。
+
+    key 为空是另一回事：那是"还没选过"（存量项目、或门① 之前的调用），
+    此时用缺省画风是唯一能做的事，不是掩盖错误。
+    """
+    if key:
+        entry = await get_style_entry(db, key=key)
+        if entry is None:
+            raise AppError("provider.params.invalid", message=f"未知画风 {key}")
+        return entry
+
+    entries = await list_style_catalog(db)
+    if not entries:
+        raise AppError(
+            "common.internal",
+            message="画风目录为空，style_catalog 没有种子数据",
+        )
+    default = next((e for e in entries if e.key == DEFAULT_STYLE_KEY), None)
+    return default or entries[0]
 
 
 async def ensure_style(
@@ -49,13 +86,17 @@ async def ensure_style(
     *,
     org_id: uuid.UUID,
     project_id: uuid.UUID,
-    preset: str = "anime_suspense",
+    preset: str | None = None,
     seed_base: int = 100_000,
 ) -> StyleProfile:
-    """取项目的风格档案，没有就按预设创建。
+    """取项目的风格档案，没有就按目录里的画风创建。
 
     已存在就直接返回**不覆盖**——风格一旦有镜头产出即冻结，
     静默改掉会让前后镜头画风不一致且无从察觉。
+
+    `preset=None` 时读项目在门① 锁定的画风（`project_lock_variables.style_key`）。
+    这样四个调用点（角色阶段、场景阶段、三个出图端点）不用各自把 key 传一遍——
+    传参数的写法只要漏一处，那一处就会按缺省画风建档，而它建完就冻结了。
     """
     existing = (
         await db.execute(
@@ -68,11 +109,29 @@ async def ensure_style(
     if existing is not None:
         return existing
 
-    spec = STYLE_PRESETS.get(preset)
-    if spec is None:
-        raise AppError("provider.params.invalid", message=f"未知风格预设 {preset}")
+    key = preset
+    if key is None:
+        # 延迟导入：project.service 不依赖 consistency，这一侧单向依赖不成环。
+        from apps.api.modules.project import service as project_service
 
-    row = StyleProfile(org_id=org_id, project_id=project_id, seed_base=seed_base, **spec)
+        lock = await project_service.get_lock_variables(db, org_id=org_id, project_id=project_id)
+        key = lock.style_key if lock is not None else ""
+
+    entry = await _resolve_entry(db, key)
+    row = StyleProfile(
+        org_id=org_id,
+        project_id=project_id,
+        seed_base=seed_base,
+        style_key=entry.key,
+        base_model=entry.base_model,
+        character_tokens=entry.character_tokens,
+        scene_tokens=entry.scene_tokens,
+        video_tokens=entry.video_tokens,
+        negative_tokens=entry.negative_tokens,
+        color_grading=entry.color_grading,
+        line_weight=entry.line_weight,
+        render_mode=entry.render_mode,
+    )
     db.add(row)
     await db.flush()
     return row
@@ -331,11 +390,27 @@ async def upsert_characters(
     return out
 
 
+# 受控词表字段（`agents/schemas.py` 的 HEIGHT_BANDS / BODY_TYPES / POSTURES）。
+# 顺序固定："多高 → 什么体型 → 什么体态"，与 describe_character 里其余字段
+# 一样，顺序一变模型的注意力分布就变，出来的人就跟着变。
+_BAND_KEYS = ("height", "body_type", "posture")
+
+
 def _appearance(design: dict[str, Any]) -> dict[str, Any]:
     # 只取结构化外貌字段，丢掉其余——外貌必须是可拼装的字段，
     # 不是一段自由文本
     keys = ("age_range", "hair", "eyes", "face", "build", "outfit", "distinctive")
-    return {k: str(design.get(k, "")) for k in keys}
+    out: dict[str, Any] = {k: str(design.get(k, "")) for k in keys}
+
+    # 身高/体型/体态三个受控词表**优先于**自由文本的 build（ADR-037）。
+    # 两者都存：`build` 是 describe_character 一直在读的那一列，形状不变；
+    # 三个分列是给后续结构化比对用的——`reference_embedding` 至今为空的
+    # 根因之一就是没有可比的结构化描述，一段自由文本没法做维度对齐。
+    bands = {k: str(design.get(k, "")).strip() for k in _BAND_KEYS}
+    out.update(bands)
+    if composed := "，".join(v for v in (bands[k] for k in _BAND_KEYS) if v):
+        out["build"] = composed
+    return out
 
 
 async def record_conditioning(

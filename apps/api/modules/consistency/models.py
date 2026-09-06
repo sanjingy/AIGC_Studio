@@ -17,12 +17,55 @@ from sqlalchemy import DateTime, Index, Integer, Numeric, String, Text, Uuid
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from apps.api.core.models import OrgEntity
+from apps.api.core.models import BaseEntity, OrgEntity
 
 # 分层降级（17_ConsistencyEngine.md §2）。不存在单一银弹。
 CONSISTENCY_TIERS = ("L0", "L1", "L2", "L3")
 
 EMBEDDING_DIM = 1024  # DashScope multimodal-embedding-v1
+
+
+class StyleCatalogEntry(BaseEntity):
+    """可选画风目录。**全局表，不属于任何租户**——同 `model_pricing`。
+
+    为什么是表而不是代码里的一个 dict（原 `service.STYLE_PRESETS`）：
+    加一种画风、改一句描述词，写死在代码里就要改代码、过 CI、发版，
+    和"价格写成常量"是同一类问题（硬规则第 1 条）。画风目录是运营内容，
+    它会变，而且变的时候不该惊动工程。
+
+    三套描述词不是一套（ADR-036 第 3 条），因为它们服务的对象不同：
+
+    - `character_tokens` 要的是人物质感（皮肤、五官、服装材质）；
+    - `scene_tokens` 要的是**空场景**——同一句"电影级布光"喂给场景参考图，
+      模型很可能顺手把人画进背景，而场景基准图里出现人物就没法当基准；
+    - `video_tokens` 要的是帧率与运动质感，画静态图时它们纯粹是噪声。
+
+    **三者不得混用**，混用的后果在上面三行里各写了一遍。
+    """
+
+    __tablename__ = "style_catalog"
+
+    key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(60), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    base_model: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    character_tokens: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    scene_tokens: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    video_tokens: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    negative_tokens: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    color_grading: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    line_weight: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    render_mode: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+
+    # 目录的展示顺序。前端不该按 key 的字母序排画风。
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 下架一种画风用这一列，不要删行——已经锁定了它的项目还要能读回描述词。
+    is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+    __table_args__ = (Index("ix_style_catalog_active_order", "is_active", "sort_order"),)
 
 
 class StyleProfile(OrgEntity):
@@ -31,6 +74,10 @@ class StyleProfile(OrgEntity):
     风格漂移和角色漂移是**两个独立问题**，很多实现会混淆。
     这张表只管风格：一旦有镜头产出即冻结，改动必须新建版本
     并明确告知用户"已生成的镜头需要重新生成"。
+
+    描述词从 `style_catalog` 拷贝进来而不是外键引用：目录是运营内容，会改，
+    而这张表是**已经锁定的那一版**。引用过去就等于目录一改、全部历史项目
+    的画风跟着变，且没人会察觉。`style_key` 只用来回答"当初选的是哪一条"。
     """
 
     __tablename__ = "style_profiles"
@@ -38,10 +85,16 @@ class StyleProfile(OrgEntity):
     project_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
+    # 当初从目录里选的是哪一条。空串 = 存量项目，迁移时按缺省画风补齐。
+    style_key: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+
     base_model: Mapped[str] = mapped_column(String(64), nullable=False)
-    # 系统统一注入的风格词。**Agent 不许自己写风格词**——
-    # 那是画风漂移的头号来源（17_ConsistencyEngine.md §4）。
-    positive_tokens: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 系统统一注入的风格词。Agent 收到的是**完整描述词本身**并被要求原样照抄
+    # （ADR-036 第 2 条：从"不许写"改成"必须照抄"，防的是同一件事）。
+    # 三套各注入各的，不得混用——理由见 StyleCatalogEntry。
+    character_tokens: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    scene_tokens: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    video_tokens: Mapped[str] = mapped_column(Text, nullable=False, default="")
     negative_tokens: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
     color_grading: Mapped[str] = mapped_column(String(120), nullable=False, default="")

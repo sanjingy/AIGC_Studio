@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.modules.project.models import Project
+from apps.api.modules.project.models import Project, ProjectLockVariables
 
 
 def _scoped(org_id: uuid.UUID) -> Select[tuple[Project]]:
@@ -75,3 +75,49 @@ async def count(db: AsyncSession, *, org_id: uuid.UUID) -> int:
 
 async def soft_delete(db: AsyncSession, project: Project) -> None:
     project.deleted_at = datetime.now(UTC)
+
+
+# ---------------------------------------------------------------- 锁定变量
+#
+# 同样每个函数都带 org_id。锁定变量里有画风、时代背景和改编模式，
+# 跨租户读到别人的，等于把别人项目的创作设定拼进自己的提示词。
+
+
+async def get_lock_variables(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID
+) -> ProjectLockVariables | None:
+    stmt = select(ProjectLockVariables).where(
+        ProjectLockVariables.org_id == org_id,
+        ProjectLockVariables.project_id == project_id,
+        ProjectLockVariables.deleted_at.is_(None),
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def create_lock_variables(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    origin: str,
+    style_key: str = "",
+    era: str = "",
+    region: str = "",
+    ethnicity: str = "",
+    era_evidence: str = "",
+    adaptation_mode: str = "adapt",
+) -> ProjectLockVariables:
+    row = ProjectLockVariables(
+        org_id=org_id,
+        project_id=project_id,
+        origin=origin,
+        style_key=style_key,
+        era=era,
+        region=region,
+        ethnicity=ethnicity,
+        era_evidence=era_evidence,
+        adaptation_mode=adaptation_mode,
+    )
+    db.add(row)
+    await db.flush()
+    return row

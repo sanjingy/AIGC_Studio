@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.schemas import REF_PATTERN
 from apps.api.modules.agent import llm
+from tests.conftest import advance_to_gate, approve_gate
 
 pytestmark = pytest.mark.integration
 
@@ -69,18 +70,16 @@ async def test_chinese_ref_does_not_break_the_character_stage(
     org_id = uuid.UUID((await alice.get("/api/v1/auth/me")).json()["org_id"])
     pid = str((await alice.post(P, json={"title": "中文人名"})).json()["id"])
 
-    r = await alice.post(f"{P}/{pid}/advance", json={"user_input": SOURCE})
-    assert r.status_code == 200, r.text
-    approvals = (await alice.get(f"{P}/{pid}/approvals")).json()
-    pending = next(a for a in approvals if a["status"] == "pending")
-    assert (
-        await alice.post(f"{P}/{pid}/approvals/{pending['id']}", json={"decision": "approved"})
-    ).json()["stage"] == "characters"
+    # 一路跑到剧本门并通过它，下一步就是角色阶段。门的道数交给
+    # `advance_to_gate`，这条用例要测的是中文 ref，不是门有几道。
+    await advance_to_gate(alice, pid, "setup", user_input=SOURCE)
+    await approve_gate(alice, pid, "setup")
 
     # 这一步以前是 500："服务暂时不可用"，项目从此卡死
     r = await alice.post(f"{P}/{pid}/advance", json={"user_input": ""})
     assert r.status_code == 200, r.text
-    assert r.json()["stage"] == "await_storyboard"
+    # 这一次 advance 默认跑到门口：角色 → 场景 → 停在空间锚点门（门③）
+    assert r.json()["stage"] == "await_anchors"
 
     await db.commit()
     project = await project_service.get_project(db, org_id=org_id, project_id=uuid.UUID(pid))

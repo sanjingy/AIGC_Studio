@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -115,3 +116,71 @@ async def bob() -> AsyncIterator[AsyncClient]:
     ac = await new_client("Bob")
     yield ac
     await ac.aclose()
+
+
+# ---------------------------------------------------------------- 编排门助手
+#
+# 门的**数量和顺序会变**（2026-09-05 由 2 道变 4 道，ADR-037），而"跑到某道
+# 门"是十来个用例的共同前置。每个文件各写一份"推进 → 通过 → 再推进"就等于
+# 把门的数量硬编码进十来处，加一道门要改十来个文件——上一次就是这样。
+#
+# 这里只写"一直推进并通过遇到的每一道门，直到停在指定的那道门上"，
+# 它对门的数量不敏感。
+
+PROJECTS = "/api/v1/projects"
+
+
+async def pending_approval(client: AsyncClient, project_id: str) -> dict[str, Any] | None:
+    rows = (await client.get(f"{PROJECTS}/{project_id}/approvals")).json()
+    return next((dict(r) for r in rows if r["status"] == "pending"), None)
+
+
+async def advance_to_gate(
+    client: AsyncClient,
+    project_id: str,
+    gate: str,
+    *,
+    user_input: str = "",
+    max_gates: int = 6,
+) -> dict[str, Any]:
+    """一路推进，通过途中每一道门，停在 `gate` 上（不通过它）。
+
+    返回停下来的那一次 advance 响应。走不到目标门就断言失败——静默返回
+    会让后面的用例在一个完全不同的阶段上做断言，失败信息指向错误的地方。
+    """
+    body = dict(
+        (
+            await client.post(
+                f"{PROJECTS}/{project_id}/advance?to_gate=true",
+                json={"user_input": user_input},
+            )
+        ).json()
+    )
+    for _ in range(max_gates):
+        if body.get("gate_opened") == gate:
+            return body
+        current = await pending_approval(client, project_id)
+        assert current is not None, f"没走到 {gate} 门就停住了：{body}"
+        r = await client.post(
+            f"{PROJECTS}/{project_id}/approvals/{current['id']}", json={"decision": "approved"}
+        )
+        assert r.status_code == 200, r.text
+        body = dict(
+            (
+                await client.post(
+                    f"{PROJECTS}/{project_id}/advance?to_gate=true", json={"user_input": ""}
+                )
+            ).json()
+        )
+    raise AssertionError(f"连过 {max_gates} 道门都没停在 {gate} 上")
+
+
+async def approve_gate(client: AsyncClient, project_id: str, gate: str) -> None:
+    """通过当前挂着的那道门，并断言它就是期望的那一道。"""
+    current = await pending_approval(client, project_id)
+    assert current is not None, f"{gate} 门没开"
+    assert current["gate"] == gate, f"当前挂着的是 {current['gate']}，不是 {gate}"
+    r = await client.post(
+        f"{PROJECTS}/{project_id}/approvals/{current['id']}", json={"decision": "approved"}
+    )
+    assert r.status_code == 200, r.text

@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
+import typing
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -250,6 +251,90 @@ def router_prompt_covers_all_routes(cases: list[RouterCase] | None = None) -> li
     return sorted(r for r in needed if r not in prompt)
 
 
+# ------------------------------------------------------- 提示词契约（ADR-037）
+#
+# 有些要求**只活在提示词里**：受控词表里的词、"不得默认套用本国"那条禁令、
+# 改编模式占位符。它们不体现在 output_schema 上，所以 schema 样例一条都拦不住
+# ——有人把词表从提示词里删掉，模型开始自由发挥体型描述，测试全绿。
+#
+# 这一节把这类要求写成**可代码验证的契约**，与 `router_prompt_covers_all_routes`
+# 同一个思路：从权威来源推出"提示词里必须出现什么"，再去真实的 spec 里找。
+# 受控词表的权威来源是 `agents/schemas.py` 的 Literal，不是这里手抄一份——
+# 手抄的清单加一个词时不会自己变长。
+
+
+def _vocabulary(literal: Any) -> list[str]:
+    """把一个 Literal 类型摊平成它的取值列表。"""
+    return [str(v) for v in typing.get_args(literal)]
+
+
+def _placeholder_terms(*names: str) -> list[str]:
+    """提示词模板里的变量占位符，写成 `{name}` 的形式。
+
+    断言占位符而不是断言渲染后的值：spec 是模板，值要到运行时才有。
+    占位符被删掉 = 那个变量再也进不了提示词，而这正是最容易发生的退化
+    （有人整理提示词时顺手删掉一行"时代背景：{era}"）。
+    """
+    return [f"{{{name}}}" for name in names]
+
+
+def prompt_contracts() -> dict[str, list[str]]:
+    """每个 Agent 的提示词里必须原样出现的串。
+
+    只列**删掉就会静默降级**的东西，不列文风。判据要么来自 schema
+    （受控词表、字段名），要么来自 ADR 的明文禁令。
+    """
+    return {
+        # 时代背景判定：字段名 + "中国不是兜底默认"这条禁令（ADR-037 第 2 条）
+        "story.plot_index.v1": [
+            "era",
+            "region",
+            "ethnicity",
+            "era_evidence",
+            "不是兜底默认",
+            "判不出来就三项都留空",
+        ],
+        # 改编模式是整条流水线上唯一一个用户必须做的分支选择，
+        # 它必须以占位符的形式进提示词，否则用户选了洗稿仍然得到改编
+        "story.screenplay.v1": [
+            *_placeholder_terms("adaptation_instruction", "era", "default_ethnicity"),
+            "不要默认套用中国现代",
+        ],
+        # 受控词表：schema 里有几个词，提示词里就得有几个词
+        "visual.character.v1": [
+            *_vocabulary(schemas.HEIGHT_BANDS),
+            *_vocabulary(schemas.BODY_TYPES),
+            *_vocabulary(schemas.POSTURES),
+            *_placeholder_terms("era", "default_ethnicity"),
+            "nationality",
+            "不得默认套用中国现代人",
+        ],
+        # 空间锚点卡的固定层：这两个字段在 schema 上一直存在、一直没人填，
+        # 提示词不点名要求填，它们就会继续空着（ADR-037 第 3 条）
+        "visual.scene.v1": [
+            "camera_axis",
+            "fixed_references",
+            *_placeholder_terms("era"),
+            "完全一致",
+        ],
+    }
+
+
+def prompt_contract_gaps(contracts: dict[str, list[str]] | None = None) -> dict[str, list[str]]:
+    """返回 {agent_id: 提示词里缺失的串}。全部满足时返回空字典。"""
+    contracts = contracts if contracts is not None else prompt_contracts()
+    gaps: dict[str, list[str]] = {}
+    for agent_id, required in contracts.items():
+        spec = registry.get(agent_id)
+        if spec is None:
+            gaps[agent_id] = ["Agent 没加载成功"]
+            continue
+        missing = [term for term in required if term not in spec.prompt]
+        if missing:
+            gaps[agent_id] = missing
+    return gaps
+
+
 # --------------------------------------------------------------- Schema 打分
 
 
@@ -301,6 +386,12 @@ SCHEMA_SAMPLES: dict[str, dict[str, Any]] = {
         "nodes": [{"index": 1, "summary": "初到新单位报到"}],
         "scene_count": 3,
         "dialogue_chars": 240,
+        # 时代背景判定（ADR-037 门① 的四项之一）。样例特意**不写"现代中国"**：
+        # 判定结果不得默认套用本国，样例是提示词作者最先照抄的东西。
+        "era": "现代",
+        "region": "日本",
+        "ethnicity": "东亚面孔",
+        "era_evidence": "警视厅、资料馆等称谓与地名",
     },
     "Screenplay": {
         "title": "资料馆的第一天",
@@ -332,8 +423,16 @@ SCHEMA_SAMPLES: dict[str, dict[str, Any]] = {
                 "hair": "黑色短发",
                 "eyes": "深褐色",
                 "face": "轮廓分明",
-                "build": "结实精干",
+                # `build` 留空：身高/体型/体态改由下面三个受控词表给，
+                # 由 consistency._appearance 拼进 build。样例照着新写法来，
+                # 免得作者照抄样例又写回自由文本。
+                "build": "",
                 "outfit": "深灰西装",
+                "height": "中等身高",
+                "body_type": "精瘦结实",
+                "posture": "紧绷戒备",
+                "nationality": "日本",
+                "ethnicity": "东亚面孔",
             }
         ]
     },
@@ -493,6 +592,9 @@ def run_all() -> dict[str, Any]:
             "mispredictions": router.mispredictions,
             "prompt_missing_routes": missing_routes,
         },
+        # 提示词契约（ADR-037）：受控词表、禁令、占位符有没有从提示词里掉出去。
+        # 记进这份 JSON 是为了让"哪一天开始漏的"能从 git 历史查出来。
+        "prompt_contracts": {"gaps": prompt_contract_gaps()},
         "schema": {
             "agents_with_schema": schema.agents_with_schema,
             "passed": schema.passed,

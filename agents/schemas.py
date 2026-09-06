@@ -57,6 +57,55 @@ BEING_KINDS = Literal["人类", "动物", "怪物", "神兽", "异形", "机械�
 BEAT_KINDS = Literal["action", "dialogue", "vo", "sfx"]
 
 
+# ---------------------------------------------------------- 角色体貌受控词表
+#
+# 身高 / 体型 / 体态从自由文本收紧为有限词表（ADR-037 落地的第 5 项）。
+#
+# **为什么是 Literal 而不是一张可热更新的表**：这三组词是 Agent 的**输出契约**，
+# 由 pydantic 在产出落库之前强制。换掉其中一个词就等于换掉 `CharacterSheets`
+# 的 schema——要同步改提示词、改 `SCHEMA_SAMPLES`、重跑 eval，还要考虑既有
+# 产出还能不能通过校验。它和"价格 / 汇率 / 废片率"那类**运营时要热更新的
+# 数字**不是一类东西，和同一个文件里的 `STORYBOARD_SHOT_SIZES` / `BEING_KINDS`
+# / `CAMPS` 才是一类。真正需要热更新的画风目录走 `style_catalog` 表
+# （见 `apps/api/modules/consistency/models.py`），那个才是数据。
+#
+# 词表本身只有一条设计原则：**每个词都要能让出图模型画出不同的东西。**
+# 因此刻意排除"匀称""普通""正常身材"——它们在扩散模型里等价于没写，
+# 而同一个角色两次生成一次"身材匀称"一次"体型适中"，出来就是两个人。
+# 这也是 `reference_embedding` 至今为空的根因之一：没有可比的结构化描述，
+# 就没有可比的向量。
+
+HEIGHT_BANDS = Literal["娇小", "偏矮", "中等身高", "偏高", "高挑", "魁梧高大"]
+
+BODY_TYPES = Literal[
+    "瘦削嶙峋",
+    "纤细单薄",
+    "精瘦结实",
+    "健硕壮实",
+    "宽肩厚背",
+    "圆润丰腴",
+    "肥硕臃肿",
+]
+
+POSTURES = Literal[
+    "挺拔端正",
+    "含胸驼背",
+    "松弛慵懒",
+    "紧绷戒备",
+    "佝偻蜷缩",
+    "轻盈灵动",
+    "沉稳压场",
+]
+
+# 兜底值只服务于**存量产出的再校验**：字段级编辑（`PATCH .../outputs/characters`）
+# 会拿现行 schema 去校验库里早就存下的角色档案，那些档案没有这三个字段。
+# 没有默认值 = 所有存量项目的角色档案立刻变成不可编辑。
+# 新产出不该依赖它们——提示词要求显式选，选不出来的要写进 `inferred`。
+DEFAULT_HEIGHT: HEIGHT_BANDS = "中等身高"
+DEFAULT_BODY_TYPE: BODY_TYPES = "精瘦结实"
+DEFAULT_POSTURE: POSTURES = "挺拔端正"
+
+
 class _Strict(BaseModel):
     # 多余字段直接报错。模型幻想出一个字段时要立刻发现，
     # 而不是静默丢掉然后在下游表现为"数据莫名其妙缺了"。
@@ -192,6 +241,23 @@ class PlotIndex(_Strict):
     scene_count: int = Field(ge=1, le=500)
     dialogue_chars: int = Field(ge=0, le=500_000, description="台词总字数，供估算用")
 
+    # —— 时代背景判定（ADR-037 门① 的四项之一）——
+    #
+    # 放在情节目录而不是场景档案：门① 在 `screenplay` **之前**，那时场景档案
+    # 还不存在，而人种一旦判错，角色、服装、建筑、街景会一路错到分镜。
+    # 这里给的是**系统按原文证据得出的判定**，用户在门① 可以改；
+    # `era_evidence` 是它的依据，没有依据的判定等于猜。
+    #
+    # 默认全空，不是空串兜底成"现代中国"——**不得默认套用本国**是这条
+    # 设计的全部要点。判不出来就留空，让用户在门① 显式决定。
+    # 有默认值只是为了让存量产出仍能通过字段级编辑的再校验。
+    era: str = Field(default="", max_length=40, description="时代背景，如 民国 / 现代 / 近未来")
+    region: str = Field(default="", max_length=40, description="国别或地区，从原文内证据判定")
+    ethnicity: str = Field(default="", max_length=60, description="主要人种，由时代与国别推出")
+    era_evidence: str = Field(
+        default="", max_length=200, description="判定依据的原文线索，没有线索就留空"
+    )
+
 
 class Beat(_Strict):
     """剧本的一个节拍。
@@ -251,6 +317,9 @@ class CharacterSheet(_Strict):
 
     外貌前 7 个字段的**名字和顺序**与 consistency.compose.describe_character
     对齐，改名或调序会让同一个角色每次拼出不同的描述串，脸就跟着变。
+    唯一的例外是 `build`：它现在由 `height` / `body_type` / `posture` 三个
+    受控词表拼出来（`_appearance()` 负责），字段名和位置都没变，
+    变的只是"值从哪来"——从模型的自由发挥变成从有限词表里选。
     """
 
     ref: str = Field(pattern=r"^[a-z][a-z0-9_]{1,30}$")
@@ -271,12 +340,29 @@ class CharacterSheet(_Strict):
     hair: str = Field(max_length=80)
     eyes: str = Field(max_length=60)
     face: str = Field(max_length=100)
-    build: str = Field(max_length=60)
+    # **不要再往这里写自由文本。** 身高/体型/体态已经收紧成下面三个受控词表，
+    # `_appearance()` 会用它们拼出 `build` 存进 appearance_json。这一列保留
+    # 只有一个理由：存量角色档案里有它，删掉会让所有老项目的角色产出无法
+    # 通过字段级编辑的再校验（`extra="forbid"`）。新产出留空即可。
+    build: str = Field(default="", max_length=60)
     outfit: str = Field(max_length=160)
     distinctive: str = Field(default="", max_length=120)
 
+    # —— 受控词表：身高 / 体型 / 体态（ADR-037）——
+    # 自由文本的体型描述是"同一个角色两次生成不是同一个人"的直接来源，
+    # 也是 reference_embedding 至今为空的根因之一。默认值只为存量产出
+    # 的再校验兜底，提示词要求显式选。
+    height: HEIGHT_BANDS = DEFAULT_HEIGHT
+    body_type: BODY_TYPES = DEFAULT_BODY_TYPE
+    posture: POSTURES = DEFAULT_POSTURE
+
     # —— 补充字段：存进 appearance_json，暂不进 describe_character ——
     # 加进去会改变已冻结角色的描述串，要等一次显式的风格重冻结
+    #
+    # `nationality` / `ethnicity` 由门① 锁定的时代背景派发下来（ADR-037 第 2 条）。
+    # **不得默认套用本国**：判错会让人种、服装、发型与场景建筑、街景、室内
+    # 陈设全部错位，且错误一路传导到分镜，返工成本是"全部重出"。
+    nationality: str = Field(default="", max_length=40)
     ethnicity: str = Field(default="", max_length=40)
     skin: str = Field(default="", max_length=60)
     shoes: str = Field(default="", max_length=80)
@@ -412,8 +498,15 @@ class StoryboardNode(_Strict):
 class StoryboardShot(_Strict):
     """一个镜号。
 
-    **不含时长和批次**：时长来自 TTS 的真实音频长度，批次由 15 秒规则切分，
-    两者都是确定性计算。让模型填这两个数只会得到看起来合理但对不上的数字。
+    **不含时长**：时长来自 TTS 的真实音频长度，是一次确定性计算。
+    让模型填它只会得到一个看起来合理但对不上的数字。
+
+    **也不含批次/段号**：ADR-034 把镜内切段从"已决定"降级为**待定**，
+    按 N=1 实现（`shot_segments` / `segment_videos` 两张表不建）。
+    这里曾经写着"批次由 15 秒规则切分"，那条规则出自 ADR-032 第 3 条，
+    已被 ADR-034 作废——视频时长是**离散档位集合**而不是"单段最大时长"，
+    平均切段几乎必然切出集合外的非法值。等到出现一个既是主力、单段上限
+    又确实短于常见镜长的模型时再重新评估。
     """
 
     index: int = Field(ge=1)

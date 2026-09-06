@@ -10,6 +10,8 @@ from __future__ import annotations
 import pytest
 from httpx import AsyncClient
 
+from tests.conftest import advance_to_gate
+
 pytestmark = pytest.mark.integration
 
 P = "/api/v1/projects"
@@ -29,14 +31,13 @@ async def _pending(client: AsyncClient, pid: str) -> dict | None:
 
 
 async def _produce_all(client: AsyncClient, pid: str) -> None:
-    """通过剧本门，一路跑到分镜门——五个生产阶段全部有产出。
+    """通过途中每一道门，一路跑到分镜门——五个生产阶段全部有产出。
 
     停在分镜门上（不通过它），后面的用例还要用它来测"打回重做"。
+    门的道数由 `advance_to_gate` 自己走完，这里不写死几道
+    （ADR-037 之后是四道，还会再变）。
     """
-    gate = await _pending(client, pid)
-    assert gate is not None, "剧本门应该已经开了"
-    await client.post(f"{P}/{pid}/approvals/{gate['id']}", json={"decision": "approved"})
-    await client.post(f"{P}/{pid}/advance?to_gate=true", json={"user_input": ""})
+    await advance_to_gate(client, pid, "storyboard")
 
 
 async def _stale(client: AsyncClient, pid: str) -> list[str]:

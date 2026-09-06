@@ -23,6 +23,7 @@ from apps.api.modules.billing.models import CreditAccount, CreditTransaction
 from apps.api.modules.consistency import service as consistency
 from apps.api.modules.task import service as task_service
 from apps.api.modules.task.models import Task
+from tests.conftest import advance_to_gate
 
 pytestmark = pytest.mark.integration
 
@@ -54,18 +55,13 @@ async def _org(client: AsyncClient) -> uuid.UUID:
 
 
 async def _run_to_storyboard(client: AsyncClient) -> str:
-    """跑到第二道门：角色档案、场景档案都已产出。"""
+    """跑到分镜门：角色档案、场景档案都已产出。
+
+    途中每一道门由 `advance_to_gate` 通过，这里不写死门的道数——
+    ADR-037 把门从 2 道加到 4 道时，写死道数的助手全部一起变红。
+    """
     pid = str((await client.post(P, json={"title": "base-image"})).json()["id"])
-    r = await client.post(f"{P}/{pid}/advance?to_gate=true", json={"user_input": NOVEL})
-    assert r.status_code == 200, r.text
-
-    rows = (await client.get(f"{P}/{pid}/approvals")).json()
-    pending = next(x for x in rows if x["status"] == "pending")
-    r = await client.post(f"{P}/{pid}/approvals/{pending['id']}", json={"decision": "approved"})
-    assert r.status_code == 200, r.text
-
-    r = await client.post(f"{P}/{pid}/advance?to_gate=true", json={"user_input": ""})
-    assert r.json()["gate_opened"] == "storyboard", r.text
+    await advance_to_gate(client, pid, "storyboard", user_input=NOVEL)
     return pid
 
 

@@ -6,24 +6,34 @@
 """
 
 from apps.api.modules.project.service import (
+    confirm_anchors,
+    confirm_lock_variables,
     create_project,
     delete_project,
+    ensure_lock_variables,
+    get_lock_variables,
     get_model_preference,
     get_project,
     list_projects,
     project_exists,
+    set_lock_variables,
     set_model_preference,
     update_current_state,
     update_project,
 )
 
 __all__ = [
+    "confirm_anchors",
+    "confirm_lock_variables",
     "create_project",
     "delete_project",
+    "ensure_lock_variables",
+    "get_lock_variables",
     "get_model_preference",
     "get_project",
     "list_projects",
     "project_exists",
+    "set_lock_variables",
     "set_model_preference",
     "update_current_state",
     "update_project",
