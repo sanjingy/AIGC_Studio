@@ -27,7 +27,14 @@ from apps.api.modules.billing.router import router as billing_router
 from apps.api.modules.consistency.router import router as images_router
 from apps.api.modules.content.router import router as content_router
 from apps.api.modules.gateway.router import router as model_catalog_router
+from apps.api.modules.local_runtime.router import router as local_runtime_router
 from apps.api.modules.project.router import router as project_router
+
+# 直接从 <module>.router 导入，不走包的 __init__：`prompting/__init__.py`
+# 一旦导出 router，就会把 auth.deps 拉进包的初始化链，任何 service 层的
+# 跨模块调用都会撞循环导入。
+from apps.api.modules.prompting.router import records_router as prompting_records_router
+from apps.api.modules.prompting.router import router as prompting_router
 from apps.api.modules.realtime.router import router as realtime_router
 from apps.api.modules.skill.router import router as skill_router
 from apps.api.modules.task.router import router as task_router
@@ -150,6 +157,13 @@ app.include_router(images_router, prefix=API_PREFIX)
 app.include_router(content_router, prefix=API_PREFIX)
 app.include_router(skill_router, prefix=API_PREFIX)
 app.include_router(model_catalog_router, prefix=API_PREFIX)
+# 成品提示词与生成记录（ADR-036）。GET 一律零推理，POST 才会真的调模型。
+app.include_router(prompting_router, prefix=API_PREFIX)
+app.include_router(prompting_records_router, prefix=API_PREFIX)
+# 本地 CLI 试点。端点常挂，能力由配置决定：关着时 poll/result 返 404、
+# status 如实回 enabled=false。挂不挂路由不该由环境变量决定——那会让
+# "接口 404" 同时意味着「没开」和「部署错了」，排查时分不清。
+app.include_router(local_runtime_router, prefix=API_PREFIX)
 
 
 # ---------------------------------------------------------------- 健康检查

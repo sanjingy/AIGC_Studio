@@ -1,18 +1,23 @@
-"""无 Key 时的出图回退（FR-CONS-011）。
+"""测试环境的出图替身（FR-CONS-011）。
 
-文本链路早就有这一层（`agent/llm.py::get_provider`），图像链路一直没有：
-`gateway.service._candidates` 发现 `image_generation` 没有任何注册路由，
-直接抛 `provider.unavailable`。表现是没配 DashScope Key 时出图 100% 失败，
-而 `CLAUDE.md` 承诺的是"没有 Key 也能跑通全链路"。
+它原本的名字是"无 Key 时的出图回退"，判据是"平台配了 Key 没有"。
+ABC_AUDIT 判定那个判据是错的：`ENV=local` 的部署、或者任何忘了配 Key 的
+环境，用户点"生成"拿回的是一张写着 MOCK IMAGE 的占位图，任务
+`succeeded`，Credits 照扣，**界面上没有一个地方说过这是假的**。
 
-选择规则与 `llm.get_provider` 逐条对齐，理由也一样：
+所以那条回退**整个撤掉了**，只剩 `ENV=test` 这一个入口：
 
 1. `ENV=test` 一律用 Mock。**这条不能靠 conftest 去设**——测试环境有 Key 时
    漏设一次就是每跑一遍测试都在真花钱（这个仓库栽过一次）。安全默认必须
    写在生产代码里。它排在 BYOK 之前：某个 org 存了自己的 DashScope Key，
    测试里跑到出图一样会打真上游。
-2. 有 Key 走真实 Gateway。平台 Key 和 org 自己的 Key 都算。
-3. 都没有才用 Mock。
+2. 其余一律走真实 Gateway。平台 Key、org 自己的 BYOK Key 都算。
+3. 一把 Key 都没有时**如实报错**（`provider.unavailable`，中文文案），
+   不建资产、不扣 Credits。用户知道发生了什么，而不是拿到一张假图。
+
+代价是 `CLAUDE.md` 承诺的"没有 Key 也能跑通全链路"只在 `ENV=test` 成立。
+这是有意的：多一个"非 test 也能出占位图"的入口，就多一条假内容漏给用户
+的路。
 
 **Mock 不进 `catalog.SPECS`**。那份目录是 `/freeflow/models` 页面渲染的
 数据源，把 Mock 放进去等于让用户在下拉框里看见、甚至钉住一个假模型。
@@ -36,7 +41,6 @@ from adapters.providers.base import ImageRequest, ImageResult, KeySource, signal
 from apps.api.core.config import get_settings
 from apps.api.core.logging import get_logger
 from apps.api.modules.asset import storage
-from apps.api.modules.gateway import catalog
 
 log = get_logger(__name__)
 
@@ -65,16 +69,18 @@ def forced(capability: str) -> bool:
 
 
 def fallback(capability: str) -> bool:
-    """规则 3：这个能力一把 Key 都没有时兜底。
+    """**永远 False。**保留这个谓词只是为了让撤销这件事在代码里看得见。
 
-    问的是"平台配了 Key 没有"，用目录里那家的 Key 去问，不写死
-    DashScope——哪家提供出图是 `catalog` 说了算，在这里再抄一遍
-    迟早对不上。org 自己的 Key 由调用方在这之前判掉（规则 2）。
+    它原本是"这个能力一把 Key 都没有时兜底"。ABC_AUDIT 把它判成必修项：
+    部署出去但没配 Key 的环境里，用户点"生成"拿回的是一张写着 MOCK IMAGE
+    的占位图，任务 `succeeded`，Credits 照扣，而界面上**没有任何地方说过
+    这张图是假的**。他会拿着它去对画风、去排片。
+
+    现在缺 Key 就是 `provider.unavailable`，如实报错。要一张假图只有一条
+    路：`ENV=test`（见 `forced`）。
     """
-    if capability != CAPABILITY:
-        return False
-    spec = catalog.spec_for_capability(capability)
-    return spec is None or not catalog.platform_key(spec.provider_id)
+    del capability
+    return False
 
 
 # ---------------------------------------------------------------- 占位图

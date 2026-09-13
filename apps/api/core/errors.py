@@ -180,6 +180,55 @@ ERRORS: dict[str, ErrorSpec] = {
         400,
         "这份素材不能作为基准图，请选择一张已上传完成的图片",
     ),
+    # --- 成品提示词（ADR-036）---
+    #
+    # 这一组全部是 **在花钱之前** 抛的：提示词准备失败就不建出图任务，
+    # 不预扣，也绝不退回旧的确定性拼接去"修好"它——那正是 ADR-036 要
+    # 废掉的东西，靠它兜底等于这条链路从来没接上过。
+    "prompt.style.unlocked": ErrorSpec(
+        # 项目还没锁定画风，或者锁定的那一条画风描述词是空的。没有风格词
+        # 就没有"必须原样保留"的东西可校验，出的图也不属于任何一部片子。
+        "prompt.style.unlocked",
+        409,
+        "还没有锁定画风，先在开拍前确认里选一种再出图",
+    ),
+    "prompt.context.incomplete": ErrorSpec(
+        # 关键前置数据缺失：角色没有国籍人种、场景没有摄影主轴、镜头引用了
+        # 不存在的角色或场景。**不猜**——猜错会让人种、服装、空间连同后面
+        # 每一张图一起错，而那时的返工成本是"全部重出"（ADR-037）。
+        "prompt.context.incomplete",
+        409,
+        "生成提示词需要的前置信息还不完整，请先补齐再试",
+    ),
+    "prompt.style_tokens.missing": ErrorSpec(
+        # Agent 把系统给的风格词改写、精简或漏掉了（ADR-036 第 2、4 条）。
+        # 判为输出不合格，不静默放行——放行一次，这一张图就和全片不是同一
+        # 个画风，而画风漂移是废片的头号来源。
+        "prompt.style_tokens.missing",
+        422,
+        "生成的提示词没有完整保留锁定画风，已拦下，请重新生成",
+    ),
+    "prompt.output.invalid": ErrorSpec(
+        # 结构上过了 schema，但违反了模板的硬性要求：四视图少一格、
+        # 五要素缺一项、视频提示词丢了最后那行强制声明。
+        "prompt.output.invalid",
+        422,
+        "生成的提示词不符合模板要求，已拦下，请重新生成",
+    ),
+    "prompt.run.stale": ErrorSpec(
+        # 指定的提示词是按一份**已经变了**的上下文准备的（改了景别、换了
+        # 角色档案、动了场景锚点）。用它出图等于拿旧设定画新剧本。
+        "prompt.run.stale",
+        409,
+        "这份提示词依据的内容已经改过了，请重新准备后再出图",
+    ),
+    "prompt.run.mismatch": ErrorSpec(
+        # 指定的提示词不是这个对象的（别的角色、别的镜号、别的类型）。
+        # 跨项目的那种在取运行记录时就已经 404 了，到不了这里。
+        "prompt.run.mismatch",
+        400,
+        "这份提示词不属于当前对象，请重新准备",
+    ),
     # --- 资产 ---
     "asset.upload.checksum_mismatch": ErrorSpec(
         "asset.upload.checksum_mismatch", 400, "文件上传不完整，请重试"
@@ -191,6 +240,103 @@ ERRORS: dict[str, ErrorSpec] = {
         "asset.quota.exceeded",
         413,
         "资产库容量已满，请先清理不用的素材",
+    ),
+    # --- 本机运行时（试点）---
+    #
+    # 这一组单独登记而不是复用 `provider.*`，只有一个理由，但它是决定性的：
+    # `apiFetch` 只把 `user_message` 显示给用户，而这条链路的每一种失败，
+    # **能修的人都是用户自己**（在他自己的电脑上启动连接器、登录 Codex、
+    # 等订阅额度恢复）。复用"正在切换备用通道"这类文案，用户永远不知道
+    # 该去点哪里。
+    #
+    # 全部 `failover=False`：本机来源被选中之后不许退回付费 API——
+    # 用户以为自己在用订阅额度，悄悄替他调一次付费接口是拿他的钱补窟窿。
+    # 全部 `RELEASE`：**失败**时这条路径没有产生任何平台侧上游成本，
+    # 预扣原样退回。成功时照原价结算，与 API 出图同价——本机这条**额外**
+    # 消耗的是用户自己的订阅额度，那笔账不在平台 Credits 体系里。
+    # 两句话缺一句都会被读成"本机免费"，见 15_LOCAL_RUNTIME.md「计费口径」。
+    "local_runtime.not_configured": ErrorSpec(
+        "local_runtime.not_configured",
+        409,
+        "这个项目还没有开启「本机生成」，请改用平台 API 生成",
+        failover=False,
+    ),
+    "local_runtime.offline": ErrorSpec(
+        "local_runtime.offline",
+        409,
+        "没有检测到你电脑上的本地连接器，请先启动它再选择「本机生成」",
+        failover=False,
+    ),
+    "local_runtime.capability_unsupported": ErrorSpec(
+        "local_runtime.capability_unsupported",
+        409,
+        "你电脑上的本地连接器不支持这种生成（当前只支持 Codex 出图）",
+        failover=False,
+    ),
+    "local_runtime.busy": ErrorSpec(
+        "local_runtime.busy",
+        429,
+        "本机同时只能跑一个生成，等上一个跑完再试",
+        retryable=True,
+        failover=False,
+        retry_after_ms=5000,
+    ),
+    "local_runtime.timeout": ErrorSpec(
+        "local_runtime.timeout",
+        504,
+        "本机生成超时了，你电脑上的 Codex 没有在时限内返回",
+        retryable=True,
+        failover=False,
+    ),
+    "local_runtime.auth_required": ErrorSpec(
+        # 覆盖两类：没登录/登录过期，以及**登录了但不是订阅通道**
+        # （API Key 登录、或 config.toml 把内置 provider 换成了自定义端点）。
+        # 连接器只回一个有界错误码，具体是哪一类印在它自己的窗口里——
+        # 那句话里有用户的配置细节，不回传服务端。
+        "local_runtime.auth_required",
+        409,
+        "你电脑上的 Codex 不是订阅登录状态（没登录、登录过期，或配置指向了按量付费端点），"
+        "请在终端里跑 codex login，并在本地连接器窗口看具体原因",
+        failover=False,
+    ),
+    "local_runtime.usage_limit": ErrorSpec(
+        # 这条计的是**用户订阅账号的额度**，不是平台 Credits，
+        # 也不是上游 API 的限流。文案必须说清楚是哪一个额度用完了。
+        #
+        # 括号里原来写的是"这条路径不消耗平台 Credits"。那句话在"失败时"
+        # 这个狭义上没错（失败走 RELEASE），但用户读到的是**这条路径整体**
+        # 免费——而成功时它按 `image.generate` 的原价结算，`pricing._shape`
+        # 里 `image_source` 一个字都不参与定价。口径要和界面上那三处一致。
+        "local_runtime.usage_limit",
+        429,
+        "你的 Codex 订阅额度已用完，等额度恢复后再试（本次失败不扣平台 Credits）",
+        retryable=True,
+        failover=False,
+    ),
+    "local_runtime.no_image": ErrorSpec(
+        # 协议层没有"生成一张图"这个方法：出图是模型在一轮对话里自己
+        # 决定调用内置 image_gen 工具的产物，它完全可以改成回一段文字。
+        # 对模型这不是错误，对用户就是"点了没出图"，所以单独成一类。
+        "local_runtime.no_image",
+        502,
+        "本机 Codex 这一轮没有画出图片，可以再试一次",
+        retryable=True,
+        failover=False,
+    ),
+    "local_runtime.failed": ErrorSpec(
+        "local_runtime.failed",
+        502,
+        "本机生成失败了，可以在本地连接器的窗口里看具体原因",
+        retryable=True,
+        failover=False,
+    ),
+    "local_runtime.result_invalid": ErrorSpec(
+        # 回传的不是一张认得出的图片。这条不可重试：同一个连接器再跑
+        # 一次多半还是同样的产物，让用户重试只是白等。
+        "local_runtime.result_invalid",
+        502,
+        "本机回传的结果不是一张有效图片，已丢弃",
+        failover=False,
     ),
     # --- Skill ---
     "skill.spec.too_large": ErrorSpec(

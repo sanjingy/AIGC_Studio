@@ -75,12 +75,15 @@ async def list_page(
     status: str | None,
     limit: int,
     cursor: datetime | None,
+    task_type: str | None = None,
 ) -> list[Task]:
     stmt = _scoped(org_id)
     if project_id is not None:
         stmt = stmt.where(Task.project_id == project_id)
     if status:
         stmt = stmt.where(Task.status == status)
+    if task_type:
+        stmt = stmt.where(Task.type == task_type)
     if cursor:
         stmt = stmt.where(Task.created_at < cursor)
     return list((await db.execute(stmt.order_by(Task.created_at.desc()).limit(limit))).scalars())

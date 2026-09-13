@@ -63,7 +63,7 @@ function utilityNavigationOf(base: string, runningTasks: number): NavItem[] {
   return [
     {
       id: "tasks",
-      label: "生成队列",
+      label: "生成记录",
       href: `${base}/tasks`,
       icon: QueueIcon,
       // 0 不显示徽标：一个写着 0 的红点只是噪音

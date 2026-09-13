@@ -13,14 +13,19 @@ from agents import schemas as agent_schemas
 from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
 from apps.api.modules.consistency import compose, metrics
+
+# 这三个 ORM 类是本模块**对外契约的一部分**：`prompting` 要按它们标注类型，
+# 而跨模块只能调对方 service（CLAUDE.md 硬规则），不能去摸 `consistency.models`。
+# `X as X` 是 PEP 484 的显式再导出写法——写成普通 import，mypy 的
+# no_implicit_reexport 会判定它没被导出，跨模块标注就用不了。
+from apps.api.modules.consistency.models import CharacterProfile as CharacterProfile
+from apps.api.modules.consistency.models import SceneProfile as SceneProfile
 from apps.api.modules.consistency.models import (
-    CharacterProfile,
-    SceneProfile,
     ShotConditioning,
     ShotQualityScore,
     StyleCatalogEntry,
-    StyleProfile,
 )
+from apps.api.modules.consistency.models import StyleProfile as StyleProfile
 
 log = get_logger(__name__)
 

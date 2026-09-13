@@ -13,11 +13,16 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Header, Path, status
+from fastapi import APIRouter, Body, Header, Path, status
 
 from apps.api.modules.auth.deps import CurrentUser, DbSession
 from apps.api.modules.consistency import render
-from apps.api.modules.consistency.schemas import BaseImageIn, BaseImageOut, RenderOut
+from apps.api.modules.consistency.schemas import (
+    BaseImageIn,
+    BaseImageOut,
+    RenderIn,
+    RenderOut,
+)
 from apps.api.modules.task.schemas import TaskOut
 
 router = APIRouter(prefix="/projects/{project_id}/images", tags=["images"])
@@ -34,17 +39,26 @@ async def generate_character_portrait(
     project_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
+    payload: RenderIn | None = Body(None),
     ref: str = Path(min_length=1, max_length=32),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> TaskOut:
-    """给角色出基准立绘。真实出图调用，会扣 Credits。"""
+    """给角色出基准立绘。真实出图调用，会扣 Credits。
+
+    `source="local"` 时改由用户自己电脑上的 Codex 画（试点）。**选了本机
+    就只走本机**：不可用会在这里就被拦下来（不建任务、不预扣），
+    跑失败也不会悄悄改调付费 API。
+    """
     task = await render.request_character_portrait(
         db,
         org_id=user.org_id,
         project_id=project_id,
         created_by=user.id,
         ref=ref,
+        source=(payload.source if payload else render.IMAGE_SOURCE_API),
         idempotency_key=idempotency_key,
+        prompt_run_id=(payload.prompt_run_id if payload else None),
+        instruction=(payload.instruction if payload else ""),
     )
     return TaskOut.model_validate(task)
 
@@ -54,6 +68,7 @@ async def generate_scene_reference(
     project_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
+    payload: RenderIn | None = Body(None),
     ref: str = Path(min_length=1, max_length=32),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> TaskOut:
@@ -64,7 +79,10 @@ async def generate_scene_reference(
         project_id=project_id,
         created_by=user.id,
         ref=ref,
+        source=(payload.source if payload else render.IMAGE_SOURCE_API),
         idempotency_key=idempotency_key,
+        prompt_run_id=(payload.prompt_run_id if payload else None),
+        instruction=(payload.instruction if payload else ""),
     )
     return TaskOut.model_validate(task)
 
@@ -118,6 +136,7 @@ async def generate_shot_image(
     project_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
+    payload: RenderIn | None = Body(None),
     shot_index: int = Path(ge=1),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> TaskOut:
@@ -128,6 +147,9 @@ async def generate_shot_image(
         project_id=project_id,
         created_by=user.id,
         shot_index=shot_index,
+        source=(payload.source if payload else render.IMAGE_SOURCE_API),
         idempotency_key=idempotency_key,
+        prompt_run_id=(payload.prompt_run_id if payload else None),
+        instruction=(payload.instruction if payload else ""),
     )
     return TaskOut.model_validate(task)

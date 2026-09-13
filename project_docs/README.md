@@ -16,7 +16,9 @@
 | [04_MODULE_ROADMAP.md](./04_MODULE_ROADMAP.md) | 模块依赖、优先级和版本路线 |
 | [05_DEV_PROCESS.md](./05_DEV_PROCESS.md) | 文档先行、Lead/Worker、验收返工、CI 地板 |
 | [modules/](./modules/) | 每个业务模块的独立需求与实施计划 |
-| `../aigc_studio_docs/15_ArchitectureDecisions.md` | ADR-001 ~ 033，全部有效 |
+| [A/B/C 整改计划](./plans/2026-09-11_abc_workbench_and_prompt_alignment.md) | 9 月 13 日接续：每个小步骤的页面/后台边界、日志调查、提示词接入验收 |
+| [本机运行时](./modules/15_LOCAL_RUNTIME.md) | 文本与图片试点、接口契约、已验证范围和未完成的真实生成验收 |
+| `../aigc_studio_docs/15_ArchitectureDecisions.md` | ADR-001 ~ 038；后续决定覆盖被替代条款 |
 
 ## 2. 模块计划
 
@@ -54,4 +56,3 @@
   > aigc_studio_docs 历史设计文档
   > reviews 与研究报告
 ```
-

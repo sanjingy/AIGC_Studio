@@ -10,6 +10,18 @@
 
 ## 1. 模块目标与边界
 
+### 2026-09-13 接续整改（实施验收中）
+
+本轮不增加全局确认门。开拍准备、剧本、场景锚点与光照、分镜四门继续承担内容
+确认；A/B/C 小步骤的页面安排以 [整改计划](../plans/2026-09-11_abc_workbench_and_prompt_alignment.md)
+为准。角色/场景详情与镜头详情提供提示词查看、显式准备、复制；出图引用已选运行 ID，
+不在主页面展示系统变量。视频提示词入口只产词，不冒充视频执行能力。
+
+现有 `/tasks` 路由扩展为「生成记录」，默认看创作与图片记录，切换后仍可管理
+队列。详情呈现当次存档、模型、图片、过期/不完整/占位标识；技术信息默认折叠。
+页面打开与刷新不得发起推理；镜头未保存时不得准备提示词或出图。浏览器验收覆盖
+桌面/窄屏、空态、失败、历史记录、指定运行 ID 与跨对象隔离，结果单独记账。
+
 把生产链路组织成用户能理解、能操作、能验收的界面。工作台**只呈现和触发**真实业务
 状态，不自己维护项目、任务、资产或账务的真相。
 
@@ -64,8 +76,11 @@ BGM、转场、剪映导出都在"明确不做（M2 内）"里。任何在界面
 | 任务页读 `tasks` | 已实现 | `lib/freeflow/use-tasks.ts` 读 `GET /tasks` + SSE 增量；重试 / 取消按钮由后端状态决定显隐；`MOCK_TASKS` 已删 |
 | 推进生产（`advance`）入口 | 已实现 | 概览 / 故事 / 角色 / 场景页的「开始生产 / 推进到下一道门」，经 `lib/freeflow/use-project-state.ts`；原证据： `lib/api.ts:239` 的 `projects.advance()` 在 `app/freeflow` 与 `components/freeflow` 下**零引用** |
 | 返工（`revise`）入口 | 已实现 | 故事 / 角色 / 场景 / 分镜页各自的返工框，`target_role` 按页固定；返工对话读 `GET /projects/{id}/conversation` |
-| 审批门 | 已实现 | 概览 / 故事 / 分镜页内「确认通过 / 打回重做」，`POST .../approvals/{id}`；`rejected` 故意不给按钮（无恢复路径） |
-| **分镜**字段编辑写回后端 | 已实现 | `storyboard/shot-detail.tsx`（版式与控件）+ `shot-editor.tsx`（草稿/脏字段/保存）+ `lib/freeflow/use-content-edit.ts`，走 `PATCH /projects/{id}/outputs/storyboard`。九个字段可改（场景 / 出场人物 / 景别 / 角度 / 运镜 / 画面内容 / 说话人 / 台词 / 音效），镜号与节点号只读；一次保存 = 一个可撤销批次；用响应里的 `output` 就地更新，不 refetch |
+| 审批门（**四道**，ADR-037） | 已实现 | 一份实现 `production-actions.tsx::GateActions`，四道门共用同一套按钮与措辞。落点：门① `plan` 与门② `setup` 在故事页、门③ `anchors` 在世界美术页、门④ `storyboard` 在镜头工作台；概览页与右栏也能过门（同一个动作）。`rejected` 故意不给按钮（无恢复路径） |
+| 门① 开拍前确认：情节目录 / 时代背景人种 / 画风 / 改编模式 | 已实现 | `project/plan-gate.tsx`。四项一屏、一次提交，写序是**先 `PUT /lock-variables` 再过门**；画风只展示名称与人话描述，三套 `*_tokens` 不上界面（内部变量）。没选画风时「确认通过」禁用并说明原因 |
+| 门③ 空间锚点与光照确认 | 已实现 | `project/anchors-gate.tsx`。**一次性展示全部、一次确认**（ADR-037 禁止逐个确认），两块分开呈现：锚点固定层只覆盖出卡场景（`summary.cards`），光照覆盖**全部**场景（含走内联描述的）。`incomplete_refs` 独立预警；判据来源如实标注为剧本推出的下界 |
+| 项目级锁定变量的常驻入口 | 已实现 | 项目设置页 `LockVariablesCard`，读写 `GET|PUT /projects/{id}/lock-variables`。门① 只开一次，之后要看/改画风与时代背景只能在这里；`legacy_unconfirmed` 的「历史项目，未经确认」也只有这里能显示——迁移项目已越过门① 的位置 |
+| **分镜**字段编辑写回后端 | 已实现 | `storyboard/shot-detail.tsx`（版式与控件）+ `shot-editor.tsx`（草稿/脏字段/保存）+ `lib/freeflow/use-content-edit.ts`，走 `PATCH /projects/{id}/outputs/storyboard`。九个字段可改（场景 / 出场人物 / 景别 / 角度 / 运镜 / **光照** / 画面内容 / 说话人 / 台词 / 音效），镜号与节点号只读；一次保存 = 一个可撤销批次；用响应里的 `output` 就地更新，不 refetch |
 | 字段级改动历史 + 批次撤销 | 已实现 | `storyboard/revision-history.tsx` 抽屉，读 `GET /revisions?role=storyboard`、撤销走 `POST /revisions/{batch}/undo`；已撤过的批按 `undone_by_batch_id` 提前禁用。**不进主导航**（理由见 §6.4） |
 | 故事 / 角色 / 场景字段编辑写回后端 | 未实现 | 后端同一条 PATCH 端点只是 role 不同，前端只做了分镜（本轮范围）。这三页仍然是只读展示 + 自然语言返工 |
 | 每镜模型选择、候选版本、逐镜 MP4 下载 | 未实现 | 原来不发请求的「生成视频 / 重新生成 / 换模型」假按钮已删；模型选择卡在 `GET /model-options`，视频是 M2 |
@@ -90,6 +105,64 @@ BGM、转场、剪映导出都在"明确不做（M2 内）"里。任何在界面
 | `(app)/tasks` | 已实现但要删 | 读真实 `tasks` + SSE，但带 `mock.echo` / `mock.fail` 调试按钮 |
 | `(app)/assets` | 已实现但要删 | — |
 | `(app)/settings/keys` | 已实现但要删 | **模型目录页有一条链接指向它**（`model-catalog-page.tsx:390`），删它会留死链，见 §5.4 |
+
+---
+
+### 3.3 四道门的前端契约（ADR-037，2026-09-07 接线）
+
+后端阶段图有**十一个阶段、四道门**：
+
+```
+routing → plot_index →【① await_plan】→ screenplay →【② await_setup】
+        → characters → scenes →【③ await_anchors】→ storyboard →【④ await_storyboard】→ done
+```
+
+前端只有五段阶段条，两者的归并**全站只有一份**：`lib/freeflow/stage-map.ts`。
+
+| 后端阶段 | 阶段条那一段 | 为什么 |
+|---|---|---|
+| `routing` / `plot_index` / `await_plan` | 故事 | 门① 确认的是情节目录，属于故事阶段的收尾 |
+| `screenplay` / `await_setup` | 剧本 | — |
+| `characters` / `scenes` / `await_anchors` | 角色与世界 | 门③ 确认的是场景的空间关系与光照，属于这一段的收尾 |
+| `storyboard` / `await_storyboard` | 镜头 | — |
+| `done` | 生成 | — |
+
+三条不可违反的约定：
+
+1. **凡是按门分叉的地方一律用 `Record<GateName, ...>`，不写三元式。**
+   ADR-037 之前 `stage-map.ts` 与 `project-overview.tsx` 各有一个
+   `gate === "setup" ? A : B`，两道门时碰巧对，加到四道门时 `plan` 与
+   `anchors` 全落进了 `B` 分支——阶段条把两段一起锁死、「去处理」把用户送到
+   跟他要确认的东西无关的页面。用表的话，下次加门 TypeScript 直接报缺键。
+2. **门开在能看到要审内容的那一页**，不做模态框。门① 要核对几十条情节目录，
+   门③ 要一次看完全部锚点卡，弹窗盖住正文等于让用户凭记忆确认。
+3. **写序：先落库、再过门。** 门① 的四项里有三项写 `PUT /lock-variables`，
+   必须在 `approve` 之前成功（`GateActions.beforeApprove`）；反过来的话门已经过了、
+   画风还没存，编排器会拿着空 `style_key` 一路跑到角色出图。两步之间失败可以重来
+   ——变量已经在库里，回到这一页看到的是填过的值，不是空表单。
+
+### 3.4 场景数据的结构化形状（提交 `2b5a84f`）
+
+场景档案上两处从扁平变成结构化，读法统一在 `lib/freeflow/scene-shape.ts`，
+显示统一在 `components/project/named-entries.tsx`：
+
+| 字段 | 旧 | 新 |
+|---|---|---|
+| `fixed_references` | `string[]` | `[{name, description, origin}]` |
+| 光照 | `lighting: string` | `lighting_states: [{name, description, origin}]` + `default_lighting: string` |
+
+- 照旧写法渲染出来分别是 `[object Object]` 和 `undefined`。
+- **前端仍要做一次读侧归一化**：后端 `coerce_*` 只在校验边界上跑，而
+  `useProjectState` 在 `current_state_json` 缺块时会退回 `agent_runs.output_json`
+  ——那是历史运行原样存下来的扁平形状。这是形状兼容，不是第二套校验。
+- `origin === "migrated"` 的名称是迁移时从描述里截前 12 个字截出来的，界面上
+  标「自动截取」。不标的话用户会以为那半句话是谁手打的名字。
+- **没有「新增光照状态」按钮**：字段级 PATCH 只替换已存在的路径，不新建键也不
+  追加数组元素（ADR-029 既有约束），加一条只能重跑场景阶段。
+- 分镜多一列**光照**（`shots[].lighting_ref`）：下拉选项来自**该镜 `scene_ref`
+  对应场景**的 `lighting_states`，不是全部场景的并集；留空 = 跟随该场景的
+  `default_lighting`（合法且常见）；值不在该场景选项里时**保留原值并显式提示**
+  「出图会回落到默认」——后端只记一条 warning，界面不说就没人知道。
 
 ---
 
@@ -314,9 +387,9 @@ components/freeflow/home-quick-start.tsx:55     新建项目后的落地页   �
 
 ### 6.2 审批门跳回旧页
 
-`components/freeflow/project/project-overview.tsx:482` 是 freeflow 侧
-**唯一**指向 `/projects/{id}` 的链接，文案写着"审核会推进真实生产阶段，
-因此只在主线审核入口处理"。剧本门和分镜门都卡在这里。
+**已解决**（旧壳已删）。2026-09-07 起这一节的实际内容变成"四道门的落点"，
+见 §3.3：门① / 门② 在故事页，门③ 在世界美术页，门④ 在镜头工作台，
+概览页与右栏是同一个动作的另一个落点。
 
 ### 6.3 缺返工（`revise`）入口
 

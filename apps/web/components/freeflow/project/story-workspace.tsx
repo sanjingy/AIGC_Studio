@@ -8,6 +8,7 @@ import { ScreenplayView, screenplayMeta } from "@/components/project/screenplay-
 import type { ProjectState } from "@/lib/freeflow/use-project-state";
 import { cn } from "@/lib/utils";
 
+import { PlanGate } from "./plan-gate";
 import { AdvanceAction, GateActions } from "./production-actions";
 import { RevisePanel } from "./revise-panel";
 
@@ -20,7 +21,14 @@ type EpisodeRef = { index: number; title: string };
  * 再加一条就是第三列，1440 宽下正文会被压到读不了。分集改成正文顶部的
  * 一排 chip，它本来也只是个筛选器。
  */
-export function StoryWorkspace({ state }: { state: ProjectState }) {
+export function StoryWorkspace({
+  projectId,
+  state,
+}: {
+  /** 路由参数里的 id，不从 `state.project` 上取——加载中它还是 null。 */
+  projectId: string;
+  state: ProjectState;
+}) {
   const plotIndex = state.output.plot_index;
   const screenplay = state.output.screenplay;
   const [episodeIndex, setEpisodeIndex] = useState<number | null>(null);
@@ -41,8 +49,8 @@ export function StoryWorkspace({ state }: { state: ProjectState }) {
             <span className="rf-empty-icon"><StoryIcon aria-hidden className="size-7" /></span>
             <h2 className="mt-3 text-sm font-semibold text-fg">还没有故事产出</h2>
             <p className="mt-1 text-sm leading-6 text-fg-subtle">
-              给一段小说原文或一句创意，然后推进生产：编排器会依次跑路线判断、情节目录、剧本，
-              停在「确认剧本」这道门上。
+              给一段小说原文或一句创意，然后推进生产：编排器会依次跑路线判断、情节目录，
+              停在「开拍前确认」这道门上——在那里定画风、时代背景与改编模式，然后才跑剧本。
             </p>
           </div>
           <AdvanceAction state={state} />
@@ -61,13 +69,22 @@ export function StoryWorkspace({ state }: { state: ProjectState }) {
           </p>
         </div>
 
-        {/* 剧本门开在这里，和概览页、右栏是同一个动作——要批的东西就在下面 */}
+        {/* 两道门都开在这里，和概览页、右栏是同一个动作——要批的东西就在下面。
+            同一时刻只可能开一道（后端一次只建一条 pending approval），
+            两个组件各自判断自己那道门开没开，不会同时出现。 */}
+        {state.pendingGate === "plan" && <PlanGate projectId={projectId} state={state} />}
         <GateActions state={state} gate="setup" />
 
         {!state.pendingGate && <AdvanceAction state={state} />}
 
           {plotIndex && (
-            <section className="overflow-hidden rounded-xl border border-border bg-surface">
+            /* id 是门① 那句「全部 N 条就在下面」的落点。锚点而不是回调：
+               门在这个组件里、目录也在这个组件里，但两者中间隔着几个兄弟节点，
+               而滚动定位本来就是浏览器的事。 */
+            <section
+              id="plot-index"
+              className="scroll-mt-4 overflow-hidden rounded-xl border border-border bg-surface"
+            >
               <div className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-3">
                 <h3 className="text-sm font-semibold text-fg">情节目录</h3>
                 <span className="tnum text-xs text-fg-subtle">{plotIndexMeta(plotIndex)}</span>

@@ -12,7 +12,8 @@ import { useTasks } from "@/lib/freeflow/use-tasks";
 
 /**
  * 项目设置。只剩后端真的有的东西：改名（`PATCH /projects/{id}`）、
- * 只读的路线与记录状态、模型偏好、删除项目（软删）。
+ * 只读的路线与记录状态、**门① 的锁定变量**（ADR-037）、模型偏好、
+ * 删除项目（软删）。
  */
 export default function FreeflowSettingsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -42,7 +43,7 @@ export default function FreeflowSettingsPage({ params }: { params: Promise<{ id:
       )}
       {!state.error && state.loading && <p className="p-6 text-sm text-fg-subtle">加载中…</p>}
       {!state.error && !state.loading && (
-        <ProjectSettings project={state.project} onDelete={handleDelete} />
+        <ProjectSettings projectId={id} project={state.project} onDelete={handleDelete} />
       )}
     </ProjectWorkbench>
   );

@@ -7,10 +7,12 @@ import {
   assets,
   projects,
   tasks,
+  type ImageSource,
   type Render,
   type RenderSource,
   type TaskStatus,
 } from "@/lib/api";
+import { preparedPromptRunId } from "@/lib/freeflow/prepared-prompts";
 import { useProjectEvents } from "@/lib/useProjectEvents";
 
 /**
@@ -41,6 +43,8 @@ export type RenderView = {
   errorCode: string | null;
   assetId: string | null;
   source: RenderSource;
+  /** 这张图是谁画的：平台 API 还是用户自己电脑上的 Codex。没人画时为 null。 */
+  imageSource: ImageSource | null;
   /**
    * 这一版图是什么时候产生的。
    *
@@ -120,6 +124,7 @@ export function useRenders(projectId: string | null) {
         errorCode: t?.error_code ?? r.error_code,
         assetId: r.asset_id,
         source: r.source,
+        imageSource: r.image_source,
         createdAt: r.created_at,
       });
     }
@@ -136,8 +141,16 @@ export function useRenders(projectId: string | null) {
     });
   }, []);
 
+  /**
+   * `fallback` 是**这条路径**在拿不到后端错误时该说的话。
+   *
+   * 四个调用点里只有 `generate` / `retry` 真的在出图；`assign` 和
+   * `assignFromFile` 是钉基准图和上传。以前它们共用"出图请求失败"这一句，
+   * 于是本地上传连不上对象存储时，用户看到的是"出图请求失败"——错在
+   * 另一件事上，人只会去重点生成按钮。
+   */
   const run = useCallback(
-    async (key: string, fn: () => Promise<unknown>) => {
+    async (key: string, fn: () => Promise<unknown>, fallback = "出图请求失败") => {
       setPending((p) => new Set(p).add(key));
       setError(null);
       setKeyError(key, null);
@@ -145,7 +158,7 @@ export function useRenders(projectId: string | null) {
         await fn();
         await reload();
       } catch (e) {
-        const message = e instanceof ApiRequestError ? e.error.user_message : "出图请求失败";
+        const message = e instanceof ApiRequestError ? e.error.user_message : fallback;
         setError(message);
         setKeyError(key, message);
       } finally {
@@ -159,22 +172,50 @@ export function useRenders(projectId: string | null) {
     [reload, setKeyError],
   );
 
-  /** 一个 subject 对应哪个出图接口。三处都要用，抽出来免得漏一处。 */
+  /**
+   * 一个 subject 对应哪个出图接口。三处都要用，抽出来免得漏一处。
+   *
+   * `prompt_run_id` 在**发请求的这一刻**去取，不从 React 状态读：用户在
+   * 面板里点完「准备提示词」、面板还开着就去点出图，中间没有一次重渲染
+   * 也必须带上刚准备好的那一份。取不到（没准备过、或已过期被丢掉）就不带，
+   * 后端自己准备一份——老按钮的行为逐字不变。
+   *
+   * 分镜出图取的是 `shot_image`，不是 `shot_video`：视频提示词只能查看和
+   * 复制，把它送去出图等于拿一段运镜描述去画静帧。
+   */
   const post = useCallback(
-    (id: string, subject: RenderSubject) =>
-      subject.kind === "character"
-        ? projects.renderCharacter(id, subject.ref)
+    (id: string, subject: RenderSubject, source: ImageSource) => {
+      const promptRunId = preparedPromptRunId(
+        id,
+        subject.kind === "shot" ? "shot_image" : subject.kind,
+        subject.kind === "shot" ? String(subject.index) : subject.ref,
+      );
+      return subject.kind === "character"
+        ? projects.renderCharacter(id, subject.ref, source, promptRunId)
         : subject.kind === "scene"
-          ? projects.renderScene(id, subject.ref)
-          : projects.renderShot(id, subject.index),
+          ? projects.renderScene(id, subject.ref, source, promptRunId)
+          : projects.renderShot(id, subject.index, source, promptRunId);
+    },
     [],
   );
 
+  /**
+   * 出图。`source` 决定用平台的模型还是用户自己电脑上的 Codex。
+   *
+   * 来源在**这一次请求**里定下来，后端把它钉进任务；之后任务重试、
+   * 页面刷新、用户改选择，都不会改变这条任务实际用的是谁。
+   *
+   * **`source` 是必填的，没有缺省值。** 以前它默认 `"api"`，于是分镜那两个
+   * 调用点漏传编译照样是绿的：用户在角色卡上选了「本机」、界面上所有出图位
+   * 都显示成本机，他去分镜点生成，实际发出去的仍是 `{"source":"api"}`——
+   * 扣的是平台 Credits，而他以为在用自己的订阅额度，且没有任何提示。
+   * 改成必填之后，漏传一处 tsc 就会红，这比靠人去 grep 可靠。
+   */
   const generate = useCallback(
-    (subject: RenderSubject) => {
+    (subject: RenderSubject, source: ImageSource) => {
       if (!projectId) return;
       const key = subjectKey(subject);
-      void run(key, () => post(projectId, subject));
+      void run(key, () => post(projectId, subject, source));
     },
     [projectId, run, post],
   );
@@ -185,16 +226,18 @@ export function useRenders(projectId: string | null) {
    * **串行**发，不用 Promise.all：每一次出图都要在 ledger 上预扣一笔，
    * 并发打过去等于让同一行余额上挤十几个 `SELECT FOR UPDATE`，
    * 上游那边也会同时收到十几个请求。逐个来慢不了几秒。
+   *
+   * `source` 同样必填，理由见 `generate`——批量那一次正是花钱最多的一次。
    */
   const generateMany = useCallback(
-    async (subjects: RenderSubject[]) => {
+    async (subjects: RenderSubject[], source: ImageSource) => {
       if (!projectId) return;
       for (const subject of subjects) {
         const key = subjectKey(subject);
         setPending((p) => new Set(p).add(key));
         try {
           setKeyError(key, null);
-          await post(projectId, subject);
+          await post(projectId, subject, source);
         } catch (e) {
           const message = e instanceof ApiRequestError ? e.error.user_message : "出图请求失败";
           setError(message);
@@ -227,10 +270,13 @@ export function useRenders(projectId: string | null) {
     (subject: RenderSubject, assetId: string) => {
       if (!projectId || subject.kind === "shot") return;
       const key = subjectKey(subject);
-      void run(key, () =>
-        subject.kind === "character"
-          ? projects.setCharacterPortrait(projectId, subject.ref, assetId)
-          : projects.setSceneReference(projectId, subject.ref, assetId),
+      void run(
+        key,
+        () =>
+          subject.kind === "character"
+            ? projects.setCharacterPortrait(projectId, subject.ref, assetId)
+            : projects.setSceneReference(projectId, subject.ref, assetId),
+        "设为基准图失败",
       );
     },
     [projectId, run],
@@ -250,12 +296,16 @@ export function useRenders(projectId: string | null) {
     (subject: RenderSubject, file: File) => {
       if (!projectId || subject.kind === "shot") return;
       const key = subjectKey(subject);
-      void run(key, async () => {
-        const assetId = await assets.upload(file, projectId);
-        return subject.kind === "character"
-          ? projects.setCharacterPortrait(projectId, subject.ref, assetId)
-          : projects.setSceneReference(projectId, subject.ref, assetId);
-      });
+      void run(
+        key,
+        async () => {
+          const assetId = await assets.upload(file, projectId);
+          return subject.kind === "character"
+            ? projects.setCharacterPortrait(projectId, subject.ref, assetId)
+            : projects.setSceneReference(projectId, subject.ref, assetId);
+        },
+        "上传失败",
+      );
     },
     [projectId, run],
   );
@@ -270,6 +320,8 @@ export function useRenders(projectId: string | null) {
   );
 
   return {
+    /** 当前项目 id。出图位要靠它判断"本机来源"在不在白名单里。 */
+    projectId,
     renderOf: (subject: RenderSubject) => byKey.get(subjectKey(subject)) ?? null,
     isPending: (subject: RenderSubject) => pending.has(subjectKey(subject)),
     /** 这个出图位自己的错误。抽屉里看不到中栏那条横幅，见 `errors` 的说明。 */

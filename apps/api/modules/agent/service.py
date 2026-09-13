@@ -282,3 +282,135 @@ def mark_role_edited(state: dict[str, Any], role: str) -> list[str]:
     orchestrator.mark_stale(state, stale)
     orchestrator.mark_fresh(state, role)
     return stale
+
+
+# ---------------------------------------------------------------- 成品提示词
+#
+# ADR-036 把"最终提示词由谁写"从确定性代码改成了 Agent。那条链路住在
+# `prompting` 模块里，但它产出的每一次运行仍然落在 `agent_runs` /
+# `agent_steps`——那是本模块的表，所以入口留在这里，`prompting` 不去碰
+# 本模块的 repository（CLAUDE.md：跨模块只调对方 service）。
+
+
+async def run_for_project(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    agent_id: str,
+    user_input: str,
+    variables: dict[str, Any] | None = None,
+    input_extra: dict[str, Any] | None = None,
+) -> runner.RunResult:
+    """跑一个挂在项目上的 Agent，过程落进 agent_runs / agent_steps。
+
+    与 `advance` 的区别是它不碰阶段图：成品提示词不是流水线上的一个阶段，
+    它是用户在某个对象上的一次即时动作，跑完不推进任何东西。
+    """
+    return await runner.run_agent(
+        db,
+        org_id=org_id,
+        project_id=project_id,
+        spec=get_spec(agent_id),
+        user_input=user_input,
+        variables=variables or {},
+        input_extra=input_extra,
+    )
+
+
+async def fail_run(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    run_id: uuid.UUID,
+    error_code: str,
+    error_detail: str,
+) -> None:
+    """把一次已经落库的成功运行改判为失败。
+
+    存在的理由：schema 校验通过不等于产出合格。成品提示词还要过一道
+    **风格词是否被原样保留**的校验（ADR-036 第 4 条），而那道校验需要
+    项目的锁定画风，`runner` 那一层拿不到。判不合格时这条运行必须留在库里
+    并标成 failed——删掉它，用户就只看到"生成失败"而查不到模型到底写了什么。
+    """
+    run = await repo.get_run(db, org_id=org_id, run_id=run_id)
+    if run is None:
+        raise AppError("common.not_found", message=f"agent run {run_id}")
+    run.status = "failed"
+    run.error_code = error_code
+    run.error_detail = runner.bounded(error_detail)[0]
+    await db.commit()
+
+
+#: 四个成品提示词 Agent 的 role。`agent_runs.role` 不可空，而这条路径
+#: 没有跑过 spec，拿不到它自己声明的 role——四个都是 visual，写死不会错。
+_ROLE_OF_PROMPT_KIND = "visual"
+
+
+async def record_failed_prompt_run(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    agent_id: str,
+    kind: str,
+    subject_key: str,
+    error_code: str,
+    error_detail: str,
+    input_extra: dict[str, Any] | None = None,
+) -> AgentRun:
+    """落一条**没有发生过推理**的失败运行。
+
+    用在"还没轮到模型就已经失败"的那些情况：前置内容不全、项目没锁画风、
+    用户点名的那份提示词已经过期。在这之前它们只会抛一个 HTTP 错误，
+    **生成记录里一条都看不到**——用户看到界面报红，去日志页却什么都没有，
+    没法回答"我刚才到底点了什么、为什么不行"。
+
+    为什么不建执行状态：这里写的是 `agent_runs`（推理过程），不是
+    `tasks`（执行状态）。ADR-008 要求执行状态只认 `tasks.status`，
+    而这次失败根本没有产生任务——也不该产生，它在建任务之前就停了。
+
+    `model_id` 留空、不写任何 `agent_steps`：没有调用过模型，编一个模型名
+    或者一条尝试记录，就是在记录一件没发生的事。`text_complete` 照写，
+    这样 `records._history_incomplete` 不会把它误判成"被截断的历史记录"。
+    """
+    run = await repo.create_run(
+        db,
+        org_id=org_id,
+        project_id=project_id,
+        agent_id=agent_id,
+        role=_ROLE_OF_PROMPT_KIND,
+        input_json={
+            "prompt_kind": kind,
+            "subject_key": subject_key,
+            "text_complete": True,
+            **(input_extra or {}),
+        },
+    )
+    run.status = "failed"
+    run.error_code = error_code
+    run.error_detail = runner.bounded(error_detail)[0]
+    await db.commit()
+    return run
+
+
+async def list_prompt_runs(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    kind: str,
+    subject_key: str,
+    limit: int = 10,
+    succeeded_only: bool = True,
+) -> list[AgentRun]:
+    """某个对象已经准备过的提示词运行，新的在前。"""
+    return await repo.list_prompt_runs(
+        db,
+        org_id=org_id,
+        project_id=project_id,
+        kind=kind,
+        subject_key=subject_key,
+        limit=min(limit, MAX_RUNS),
+        succeeded_only=succeeded_only,
+    )

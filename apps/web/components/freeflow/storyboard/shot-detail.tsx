@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { Camera, MapPin, MessageSquare, Plus, UserRound, X } from "lucide-react";
+import { AlertTriangle, Camera, MapPin, MessageSquare, Plus, UserRound, X } from "lucide-react";
 
 import { StaleIcon } from "@/components/icons/studio-icons";
 import { cn } from "@/lib/utils";
@@ -23,13 +23,14 @@ import { ShotImage } from "./shot-image";
  * 建议列表和字数提示都只是提示，不是第二套校验。
  */
 
-/** 可编辑的九个字段。`index` / `node_index` 不在内，理由见下面 `SpecItem`。 */
+/** 可编辑的十个字段。`index` / `node_index` 不在内，理由见下面 `SpecItem`。 */
 export type ShotFieldKey =
   | "scene_ref"
   | "character_refs"
   | "shot_size"
   | "angle"
   | "camera_move"
+  | "lighting_ref"
   | "content"
   | "speaker_ref"
   | "dialogue"
@@ -41,6 +42,8 @@ export type ShotDraft = {
   shot_size: string;
   angle: string;
   camera_move: string;
+  /** 引用该场景已声明的光照状态名。留空 = 用该场景的 `default_lighting`。 */
+  lighting_ref: string;
   content: string;
   speaker_ref: string;
   dialogue: string;
@@ -60,6 +63,7 @@ export const SHOT_FIELD_LABEL: Record<string, string> = {
   shot_size: "景别",
   angle: "角度",
   camera_move: "运镜",
+  lighting_ref: "光照",
   content: "画面内容",
   speaker_ref: "说话人",
   dialogue: "台词",
@@ -95,6 +99,7 @@ const SHOT_SIZE_SUGGESTIONS = [
 const LIMIT: Partial<Record<ShotFieldKey, number>> = {
   angle: 40,
   camera_move: 40,
+  lighting_ref: 20,
   content: 300,
   speaker_ref: 32,
   dialogue: 200,
@@ -107,6 +112,16 @@ export type ShotOptions = {
   /** 场景档案里的 ref → 名称。分镜跑在场景档案之前时可能是空的。 */
   scenes: Option[];
   characters: Option[];
+  /**
+   * **每个场景各自的**光照状态，按 scene_ref 索引。
+   *
+   * 不是全部场景的并集：光照是「这个地点在剧本里出现过的几种光」，
+   * 渡口的晨雾放到审讯室的下拉里就是一个选了必然出错的选项。后端
+   * `StoryboardShot.lighting_ref` 的约束也是"该场景已声明的状态之一"。
+   */
+  lighting: Record<string, Option[]>;
+  /** 每个场景没写 `lighting_ref` 时用哪一个。按 scene_ref 索引。 */
+  defaultLighting: Record<string, string>;
 };
 
 const labelClass = "text-[10px] text-fg-subtle";
@@ -324,6 +339,82 @@ function RefListField({
   );
 }
 
+/**
+ * 这一镜用该场景的哪一种光。
+ *
+ * **下拉而不是自由输入**，与景别（`datalist` 建议值）相反，因为两者的
+ * 白名单来源不同：景别的合法值是后端代码里的 `Literal`，前端复制一份必然
+ * 落后；光照的合法值是**这个项目自己的场景档案数据**，页面上本来就有全份，
+ * 选一个档案里没有的名字后端只会记一条 warning 然后回落到默认——那正是
+ * 用户在界面上看不见的那种错。
+ *
+ * 三种情况都要能表达：
+ *
+ *   留空          跟随该场景的默认光照，是**合法且常见**的值，不是"没填"
+ *   选了一个      必须是该场景声明过的
+ *   选了个不存在的 上一版档案里有、场景重跑之后没了。**保留原值并显式提示**，
+ *                 静默清空会让用户以为自己没改过
+ */
+function LightingField({
+  value,
+  options,
+  defaultName,
+  hasScene,
+  dirty,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  /** 该场景声明过的光照状态。`ref` 是名字本身——后端按名字解析。 */
+  options: Option[];
+  defaultName: string;
+  /** 这一镜的 scene_ref 在场景档案里找得到。分镜可能跑在场景档案之前。 */
+  hasScene: boolean;
+  dirty: boolean;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const id = React.useId();
+  const known = options.some((o) => o.ref === value);
+  const orphan = value !== "" && !known;
+
+  return (
+    <div className="min-w-0">
+      <FieldLabel htmlFor={id} label="光照" dirty={dirty} />
+      <select
+        id={id}
+        value={value}
+        disabled={disabled || (!hasScene && !orphan)}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(inputClass, "mt-1")}
+      >
+        <option value="">
+          {defaultName ? `跟随场景默认（${defaultName}）` : "跟随场景默认"}
+        </option>
+        {options.map((o) => (
+          <option key={o.ref} value={o.ref}>
+            {o.name ? `${o.ref} · ${o.name}` : o.ref}
+          </option>
+        ))}
+        {orphan && <option value={value}>{value}（该场景已无此状态）</option>}
+      </select>
+
+      {orphan && (
+        <p className="mt-1 flex items-start gap-1.5 text-[11px] leading-5 text-rf-warning">
+          <AlertTriangle aria-hidden className="mt-0.5 size-3 shrink-0" />
+          这一镜引用的光照状态「{value}」不在该场景的声明里，出图会回落到默认光照。
+          后端只记一条 warning，不在界面上说就没人知道。
+        </p>
+      )}
+      {!hasScene && !orphan && (
+        <p className="mt-1 text-[11px] leading-5 text-fg-subtle">
+          这一镜的场景还没有档案，光照选项要等场景阶段跑完才有。
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** 只读的一格。序号和节点号在这里，不给编辑——理由见 `ShotDetail` 的说明。 */
 function SpecItem({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
@@ -472,6 +563,15 @@ export function ShotDetail(props: {
               dirty={dirty.has("camera_move")}
               disabled={disabled}
               onChange={(v) => onChange("camera_move", v)}
+            />
+            <LightingField
+              value={draft.lighting_ref}
+              options={options.lighting[draft.scene_ref] ?? []}
+              defaultName={options.defaultLighting[draft.scene_ref] ?? ""}
+              hasScene={Boolean(options.lighting[draft.scene_ref])}
+              dirty={dirty.has("lighting_ref")}
+              disabled={disabled}
+              onChange={(v) => onChange("lighting_ref", v)}
             />
           </div>
 

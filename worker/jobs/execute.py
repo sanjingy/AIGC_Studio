@@ -80,7 +80,10 @@ async def _dispatch(
         org_id = payload.get("__org_id")
         if not org_id:
             raise AppError("provider.params.invalid", message="缺少 org 上下文")
-        return await generate_image(payload, org_id=uuid.UUID(str(org_id)))
+        # task_id 传下去只为一件事：出图跑到一半时能读 `tasks.status`
+        # 判断用户有没有取消（本机出图是分钟级的，且烧的是用户自己的
+        # 订阅额度）。执行状态仍然只有 tasks 一份，这里是读不是写。
+        return await generate_image(payload, org_id=uuid.UUID(str(org_id)), task_id=task_id)
     raise AppError("provider.params.invalid", message=f"no handler for {task_type}")
 
 

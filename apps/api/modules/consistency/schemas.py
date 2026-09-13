@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RenderOut(BaseModel):
@@ -36,6 +36,40 @@ class RenderOut(BaseModel):
     # "assigned"  = 用户指定的一张既有资产，一分钱没花。
     # 界面上两者长得一样，计费语义相反，所以必须透出来。
     source: str
+    # "api" = 平台 Provider 画的；"local" = 用户自己电脑上的 Codex 画的。
+    # 用户钉上去的那种没人画，为 null。两条生成路径的代价承担者不同
+    # （平台上游成本 vs 用户自己的订阅额度），界面必须能分辨。
+    image_source: str | None = None
+
+
+class RenderIn(BaseModel):
+    """出图请求体。**没有提示词。**
+
+    提示词由提示词 Agent 合成、由系统注入风格词并校验是否被原样保留
+    （ADR-036 / 17_ConsistencyEngine §4），前端传不了也不该传。
+
+    请求体整体可省略：老前端不带 body 时按 `api` + 自动准备提示词走，
+    行为与接入前逐字相同（只是词换成了新 Agent 产出的）。
+    """
+
+    # 字符串而不是枚举：来源会随本机能力增加，前端按值分派，
+    # 加一种不该要求两边同时发版。合法值在 `render.IMAGE_SOURCES` 里校验，
+    # 不合法给 422。
+    source: str = "api"
+
+    #: 用哪一次准备好的提示词出图。
+    #:
+    #: 界面上用户能先 `POST /prompts/{kind}/{subject_key}` 看一眼词、改一改
+    #: 创作要求，再点生成——那时点名的就是他刚看过的那一份，而不是后端
+    #: 重新准备的另一份。不给就自动准备/复用（见 `prompting.resolve_for_render`）。
+    #:
+    #: 指定的那一份必须属于本项目、本对象、跑成功过、且依据的内容没变过，
+    #: 四条缺一不可，否则拒绝出图（`prompt.run.mismatch` / `prompt.run.stale`）。
+    prompt_run_id: uuid.UUID | None = None
+
+    #: 这次还想要什么，比如"让他侧身一点"。**只有创作要求，没有风格词。**
+    #: 它进摘要，所以换一句话就是另一份提示词，不会串用上一次的。
+    instruction: str = Field(default="", max_length=2000)
 
 
 class BaseImageIn(BaseModel):

@@ -83,6 +83,28 @@ class Completion:
 AttemptSink = Callable[[AttemptRecord], Awaitable[None]]
 
 
+# 单条文本的存储上限。
+#
+# 在这之前，用户输入被截到 4000 字、原始输出截到 8000 字、错误截到 2000 字，
+# **而且不留任何痕迹**。于是"这次到底喂了什么进去"在生成记录里只能看到前
+# 一半，排查时无从判断后半段是模型没写还是我们没存。
+#
+# 现在的规则：**全文存，超限显式标注**（`2026-09-11` 计划 §6）。上限放到
+# 20 万字符是为了守住"单条记录不能无限大"这条工程约束——一份 600 镜的分镜
+# 表 JSON 也就几十万字节，正常产出碰不到它；真碰到时 `text_complete` 会写
+# False，界面据此显示「记录不完整」，而不是让用户以为看到的就是全部。
+MAX_TEXT_CHARS = 200_000
+
+
+def bounded(text: str | None) -> tuple[str | None, bool]:
+    """返回 (要落库的文本, 是否完整)。**截断必须有人知道。**"""
+    if text is None:
+        return None, True
+    if len(text) <= MAX_TEXT_CHARS:
+        return text, True
+    return text[:MAX_TEXT_CHARS], False
+
+
 def _extract_json(raw: str) -> dict[str, Any]:
     cleaned = _FENCE.sub("", raw).strip()
     # 模型偶尔会在 JSON 前后加一句解释。取第一个 { 到最后一个 }。
@@ -176,13 +198,16 @@ async def complete_structured(
     ) -> None:
         if on_attempt is None:
             return
+        # 不在这里截断：截断的决定权连同"截了没有"这个事实一起交给落库那一层
+        # （`run_agent._persist` 用 `bounded`），否则记录里看到的半截文本没有
+        # 任何东西能说明它是半截的。
         await on_attempt(
             AttemptRecord(
                 index=index,
                 kind=kind,
                 system_prompt=system,
-                raw_output=raw[:8000] if raw else None,
-                error=error[:2000] if error else None,
+                raw_output=raw or None,
+                error=error or None,
                 duration_ms=int((time.perf_counter() - started) * 1000),
             )
         )
@@ -246,6 +271,7 @@ async def run_agent(
     user_input: str,
     variables: dict[str, Any] | None = None,
     system_suffix: str = "",
+    input_extra: dict[str, Any] | None = None,
 ) -> RunResult:
     """跑一个 Agent，并把整个过程落进 agent_runs / agent_steps。
 
@@ -254,14 +280,26 @@ async def run_agent(
     但干的是"改一份已有产出"而不是"从素材创作"。
     不给它一条新的角色指令，模型会按原来的角色理解输入，
     实测表现是把用户消息里那份已经合规的 JSON 原样吐回来。
+
+    `input_extra` 原样并进 `input_json`，给调用方钉一点自己的检索维度用
+    （成品提示词那条路径钉的是 `prompt_kind` / `subject_key` / `basis_digest`，
+    生成记录按它们回查）。它不参与任何执行逻辑，也不许覆盖上面三个固定键。
     """
+    stored_input, input_complete = bounded(user_input)
     run = await repo.create_run(
         db,
         org_id=org_id,
         project_id=project_id,
         agent_id=spec.id,
         role=spec.role,
-        input_json={"user_input": user_input[:4000], "variables": variables or {}},
+        input_json={
+            **(input_extra or {}),
+            "user_input": stored_input,
+            "variables": variables or {},
+            # 这条记录的文本是不是全的。**存量记录没有这个键**，读的一方
+            # 据此如实标注"历史记录不完整"，而不是假装它是全的。
+            "text_complete": input_complete,
+        },
     )
     await db.commit()
 
@@ -272,6 +310,8 @@ async def run_agent(
         # 「为什么这一步崩了」全靠它们才查得清。
         nonlocal attempts
         attempts = record.index + 1
+        raw_output, _raw_complete = bounded(record.raw_output)
+        error, _error_complete = bounded(record.error)
         await repo.add_step(
             db,
             org_id=org_id,
@@ -280,9 +320,9 @@ async def run_agent(
             kind=record.kind,
             # resolved_prompt 只在第一步存全文，重试步骤 prompt 相同，
             # 存多份没有信息量只有存储成本
-            resolved_prompt=record.system_prompt if record.index == 0 else None,
-            raw_output=record.raw_output,
-            error=record.error,
+            resolved_prompt=bounded(record.system_prompt)[0] if record.index == 0 else None,
+            raw_output=raw_output,
+            error=error,
             duration_ms=record.duration_ms,
         )
         await db.commit()
@@ -308,7 +348,7 @@ async def run_agent(
             run,
             status="failed",
             error_code=exc.code,
-            error_detail=exc.message[:2000],
+            error_detail=bounded(exc.message)[0],
             attempts=attempts,
         )
         await db.commit()

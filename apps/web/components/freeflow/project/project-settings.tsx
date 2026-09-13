@@ -9,11 +9,23 @@ import {
   modelCatalog,
   projects,
   type CapabilityModels,
+  type LockVariables,
+  type LockVariablesPatch,
   type Project,
 } from "@/lib/api";
+import { useLockVariables } from "@/lib/freeflow/use-lock-variables";
 import { cn } from "@/lib/utils";
 
 import { ConfirmDialog } from "./feedback";
+import { LegacyNotice } from "./plan-gate";
+
+/** 锁定变量里能在这一页改的五项。情节目录是产出，不在这张表上。 */
+type LockField = "era" | "region" | "ethnicity" | "style_key" | "adaptation_mode";
+
+const LOCK_FIELDS: LockField[] = ["era", "region", "ethnicity", "style_key", "adaptation_mode"];
+
+/** 与门① 上的说法保持一致：两处不同的叫法比没有叫法更糟。 */
+const ADAPTATION_LABEL: Record<string, string> = { adapt: "改编", rewrite: "洗稿" };
 
 /**
  * 06 项目设置（需求文档「屏幕 07 分区表」）。
@@ -25,6 +37,8 @@ import { ConfirmDialog } from "./feedback";
  *
  * - 项目名称：可改，走 `PATCH /projects/{id}`
  * - 项目类型：只读展示真值（route_type），由 Router Agent 判定，用户选不了
+ * - 锁定变量：门① 定的画风 / 时代背景 / 改编模式，走
+ *   `GET|PUT /projects/{id}/lock-variables`（ADR-037）
  * - 删除项目：`DELETE /projects/{id}`（软删，见 `lib/api.ts` 的 `projects.remove`）
  *
  * **「默认模型」这次从示例值变成真的**（ADR-024 接线）。它原本和分辨率、
@@ -57,9 +71,12 @@ import { ConfirmDialog } from "./feedback";
 const FOLLOW_DEFAULT = "";
 
 export function ProjectSettings({
+  projectId,
   project,
   onDelete,
 }: {
+  /** 路由参数里的 id。不从 `project` 上取——它是异步来的，加载中还是 null。 */
+  projectId: string;
   project: Project | null;
   /** 真的会删——由页面层传下来，这里只管确认交互和错误展示。 */
   onDelete: () => Promise<void>;
@@ -92,6 +109,8 @@ export function ProjectSettings({
       <h1 className="text-sm font-semibold text-fg">项目设置</h1>
 
       <RenameCard project={project} />
+
+      <LockVariablesCard projectId={projectId} />
 
       <div className="grid gap-3 rounded-lg border border-border bg-surface p-4 sm:grid-cols-2">
         <ReadOnlyField
@@ -226,6 +245,206 @@ function RenameCard({ project }: { project: Project | null }) {
         </p>
       )}
     </div>
+  );
+}
+
+
+// ---------------------------------------------------------------- 锁定变量（ADR-037）
+
+/**
+ * 门① 定下来的三件事，在这一页可以随时看、也能改。
+ *
+ * **为什么设置页也要有它**，而不是只放在门① 上：门① 只在项目走到那个位置时
+ * 打开一次。之后用户想知道「这个项目锁的到底是哪个画风」，或者要改时代背景
+ * （它只影响还没跑的阶段，改了是有效的），就再也没有入口了。更要紧的是
+ * `legacy_unconfirmed` 那句「历史项目，未经确认」——迁移补出来的项目**已经
+ * 越过门① 的位置**，那道门再也不会为它们打开，不在这里显示就等于永远不显示。
+ *
+ * 画风是例外：一旦风格档案建出来就冻结了，后端会 409 拒绝。这里**不预先禁用**
+ * 那个选择框——前端读不到「风格档案建了没有」（`consistency_style_profiles`
+ * 没有读接口），猜一个禁用条件出来，猜错时挡住的是合法操作。让它发出去，
+ * 把后端那句「改画风需要重出全部已生成的画面」原样显示给用户。
+ */
+function LockVariablesCard({ projectId }: { projectId: string }) {
+  const lock = useLockVariables(projectId);
+  const [edits, setEdits] = useState<Partial<Record<LockField, string>>>({});
+
+  const saved = lock.data;
+  const valueOf = (field: LockField) => edits[field] ?? saved?.[field] ?? "";
+  const set = (field: LockField, value: string) =>
+    setEdits((prev) => ({ ...prev, [field]: value }));
+
+  const patch: LockVariablesPatch = {};
+  for (const field of LOCK_FIELDS) {
+    const next = edits[field];
+    if (next !== undefined && next !== (saved?.[field] ?? "")) patch[field] = next;
+  }
+  const dirty = Object.keys(patch).length > 0;
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className="text-sm font-medium text-fg">锁定变量</h2>
+          <p className="mt-0.5 text-xs leading-5 text-fg-subtle">
+            「开拍前确认」那道门定下的三件事。改动只影响还没跑的阶段，已经生成的内容不会变。
+          </p>
+        </div>
+        <OriginBadge lock={saved} />
+      </div>
+
+      {lock.loading && <div className="rf-skeleton h-24 rounded-md" />}
+
+      {lock.error && (
+        <p role="alert" className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
+          {lock.error}
+        </p>
+      )}
+
+      {saved?.legacy_unconfirmed && <LegacyNotice />}
+
+      {saved && !lock.loading && (
+        <>
+          <div className="grid gap-2.5 sm:grid-cols-3">
+            <TextRow
+              label="时代背景"
+              value={valueOf("era")}
+              disabled={lock.saving}
+              onChange={(v) => set("era", v)}
+            />
+            <TextRow
+              label="国别 / 地区"
+              value={valueOf("region")}
+              disabled={lock.saving}
+              onChange={(v) => set("region", v)}
+            />
+            <TextRow
+              label="人种"
+              value={valueOf("ethnicity")}
+              disabled={lock.saving}
+              onChange={(v) => set("ethnicity", v)}
+            />
+          </div>
+          {saved.era_evidence && (
+            <p className="text-xs leading-5 text-fg-subtle">
+              判定依据（原文证据）：{saved.era_evidence}
+            </p>
+          )}
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-fg">画风</span>
+            <select
+              value={valueOf("style_key")}
+              disabled={lock.saving}
+              onChange={(e) => set("style_key", e.target.value)}
+              className="h-8 rounded-md border border-border-strong bg-bg px-2 text-sm text-fg"
+            >
+              <option value="">未选（按目录缺省）</option>
+              {saved.style_options.map((option) => (
+                <option key={option.key} value={option.key}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs leading-5 text-fg-subtle">
+              第一张图生成之后画风就冻结了；那之后再改要重出全部已生成的画面，后端会拒绝。
+            </span>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-fg">改编模式</span>
+            <select
+              value={valueOf("adaptation_mode")}
+              disabled={lock.saving}
+              onChange={(e) => set("adaptation_mode", e.target.value)}
+              className="h-8 rounded-md border border-border-strong bg-bg px-2 text-sm text-fg"
+            >
+              {saved.adaptation_options.map((mode) => (
+                <option key={mode} value={mode}>
+                  {ADAPTATION_LABEL[mode] ?? mode}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs leading-5 text-fg-subtle">
+              只影响还没跑的剧本阶段。已经生成的剧本不会因为改这里而重写。
+            </span>
+          </label>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!dirty || lock.saving}
+              onClick={() =>
+                void lock.save(patch).then((ok) => {
+                  if (ok) setEdits({});
+                })
+              }
+            >
+              {lock.saving && <Loader2 aria-hidden className="size-3.5 animate-spin" />}
+              保存锁定变量
+            </Button>
+            <span className="text-xs text-fg-subtle">
+              {saved.confirmed_at
+                ? `门① 确认于 ${new Date(saved.confirmed_at).toLocaleString("zh-CN")}`
+                : "门① 还没有确认过"}
+              {saved.anchors_confirmed_at
+                ? ` · 门③ 确认于 ${new Date(saved.anchors_confirmed_at).toLocaleString("zh-CN")}`
+                : ""}
+            </span>
+          </div>
+
+          {lock.saveError && (
+            <p
+              role="alert"
+              className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs leading-5 text-danger"
+            >
+              {lock.saveError}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 这三项是怎么来的。`migrated` 那条另有一整段提示，见 `LegacyNotice`。 */
+function OriginBadge({ lock }: { lock: LockVariables | null }) {
+  if (!lock) return null;
+  const copy: Record<string, { label: string; tone: string }> = {
+    detected: { label: "系统判定", tone: "bg-surface-2 text-fg-muted" },
+    confirmed: { label: "你确认过", tone: "bg-success-soft text-success" },
+    migrated: { label: "迁移补的", tone: "bg-rf-agent-soft text-rf-agent" },
+  };
+  const row = copy[lock.origin] ?? copy.detected!;
+  return (
+    <span className={cn("shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold", row.tone)}>
+      {row.label}
+    </span>
+  );
+}
+
+function TextRow({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex min-w-0 flex-col gap-1">
+      <span className="text-xs font-medium text-fg">{label}</span>
+      <input
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 rounded-md border border-border-strong bg-bg px-2.5 text-sm text-fg"
+      />
+    </label>
   );
 }
 

@@ -15,6 +15,17 @@ export interface ShotCardData {
   title: string;
   framing: string;
   camera: string;
+  /**
+   * 这一镜用哪种光。**已经解析成显示用的名字**：留空的镜头显示该场景的
+   * 默认状态，而不是一片空白——"跟随默认"和"没有光照"在卡片上看起来
+   * 一样的话，用户没法一眼扫出哪几镜的光不对。
+   */
+  lighting?: string;
+  /**
+   * 这一镜引用的光照状态在该场景里已经不存在了。出图会回落到默认光照，
+   * 而后端只记一条 warning——不在卡片上标出来，用户永远不会知道。
+   */
+  lightingUnknown?: boolean;
   durationLabel?: string;
   status: "ready" | "draft" | "rendering" | "failed";
   imageUrl?: string;
@@ -92,6 +103,22 @@ export function ShotCard(props: { shot: ShotCardData; selected: boolean; onSelec
             <p className="mt-1 truncate text-xs text-fg-muted">
               {shot.framing} · {shot.camera}
             </p>
+            {shot.lighting && (
+              <p
+                title={
+                  shot.lightingUnknown
+                    ? "这一镜引用的光照状态不在该场景的声明里，出图会回落到默认"
+                    : undefined
+                }
+                className={cn(
+                  "mt-0.5 truncate text-[11px]",
+                  shot.lightingUnknown ? "text-rf-warning" : "text-fg-subtle",
+                )}
+              >
+                光照：{shot.lighting}
+                {shot.lightingUnknown && "（该场景已无此状态）"}
+              </p>
+            )}
           </div>
         </div>
         <ShotStatus status={shot.status} />

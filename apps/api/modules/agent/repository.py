@@ -282,3 +282,43 @@ async def list_runs_by_ids(
         AgentRun.id.in_(list(run_ids)),
     )
     return list((await db.execute(stmt)).scalars())
+
+
+# ------------------------------------------------------------ 成品提示词运行
+#
+# 成品提示词（ADR-036）也是一次 Agent 运行，所以它存在 `agent_runs` /
+# `agent_steps` 里，**不另建一张表**：那会变成第二份执行状态，而这个仓库
+# 已经有一条硬规则说执行状态只认 `tasks.status`（ADR-008）。检索维度钉在
+# `input_json` 的两个键上：
+#
+#     prompt_kind   character / scene / shot_image / shot_video
+#     subject_key   角色或场景的 ref，镜头则是镜号的十进制字符串
+
+
+async def list_prompt_runs(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    kind: str,
+    subject_key: str,
+    limit: int,
+    succeeded_only: bool = True,
+) -> list[AgentRun]:
+    """某个项目里某个对象的提示词运行，新的在前。"""
+    conditions = [
+        AgentRun.org_id == org_id,
+        AgentRun.project_id == project_id,
+        AgentRun.deleted_at.is_(None),
+        AgentRun.input_json["prompt_kind"].astext == kind,
+        AgentRun.input_json["subject_key"].astext == subject_key,
+    ]
+    if succeeded_only:
+        conditions.append(AgentRun.status == "succeeded")
+    stmt = (
+        select(AgentRun)
+        .where(*conditions)
+        .order_by(AgentRun.created_at.desc())
+        .limit(limit)
+    )
+    return list((await db.execute(stmt)).scalars())

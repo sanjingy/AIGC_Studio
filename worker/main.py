@@ -76,5 +76,11 @@ class WorkerSettings:
     )
     # 4 核机器，先给 8。真实并发上限由 Provider 限流决定，不由这里决定。
     max_jobs = 8
-    job_timeout = 900  # 视频任务可能跑很久，S6 会按任务类型分队列细化
+    # 视频任务可能跑很久，S6 会按任务类型分队列细化。
+    #
+    # **从配置读，不写死。** 本机出图是在一个 job 里等用户电脑上的 Codex
+    # 画完（分钟级），两个数必须能互相校验：`Settings._check_local_cli` 会
+    # 拒绝"出图上限 + 收尾预留 > 这个数"的配置，因为那种配置下 Arq 会先把
+    # job 杀掉——用户看到失败，而他那台电脑还在画，订阅额度照烧。
+    job_timeout = settings.worker_job_timeout_seconds
     keep_result = 3600

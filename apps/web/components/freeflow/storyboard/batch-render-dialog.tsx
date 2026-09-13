@@ -2,11 +2,12 @@
 "use client";
 
 import * as React from "react";
-import { Coins, Loader2 } from "lucide-react";
+import { Coins, Laptop, Loader2 } from "lucide-react";
 
 import { RenderImageIcon } from "@/components/icons/studio-icons";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogCloseButton } from "@/components/ui/dialog";
+import type { ImageSource } from "@/lib/api";
 
 /** 估算行：有区间显示区间，只有单值显示单值，都没有就不渲染这一行。 */
 function EstimateRow({
@@ -44,16 +45,33 @@ function EstimateRow({
  *
  * 提交中把弹窗钉住（`dismissible={false}`）：`onConfirm` 是一串真实的
  * 建任务请求，此时关掉界面，用户看不到它到底提交了几条。
+ *
+ * **来源与代价必须写在这里。** 这是整个产品里一次点击花钱最多的地方
+ * （26 镜 × 一次出图），而"这批图是谁画的、花的是谁的钱"在别处都看不到。
  */
 export function BatchRenderDialog(props: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   shotCount: number;
+  /** 这一批走平台 API 还是用户自己电脑上的连接器。 */
+  imageSource: ImageSource;
+  /** 连接器自报的 provider 名（`codex`）。拿不到时按 Codex 说。 */
+  runnerLabel?: string | null;
   estimateCredits?: number;
   estimateRange?: { low: number; high: number };
   onConfirm: () => Promise<void>;
 }) {
-  const { open, onOpenChange, shotCount, estimateCredits, estimateRange, onConfirm } = props;
+  const {
+    open,
+    onOpenChange,
+    shotCount,
+    imageSource,
+    runnerLabel,
+    estimateCredits,
+    estimateRange,
+    onConfirm,
+  } = props;
+  const isLocal = imageSource === "local";
   const [submitting, setSubmitting] = React.useState(false);
   const [submitFailed, setSubmitFailed] = React.useState(false);
   const titleId = React.useId();
@@ -128,8 +146,26 @@ export function BatchRenderDialog(props: {
             <dt className="text-fg-muted">镜头数</dt>
             <dd className="tnum font-semibold text-fg">{shotCount}</dd>
           </div>
+          <div className="flex items-center justify-between gap-4 py-3 text-xs">
+            <dt className="flex items-center gap-1.5 text-fg-muted">
+              {isLocal && <Laptop aria-hidden className="size-3.5" />}
+              出图来源
+            </dt>
+            <dd className="font-semibold text-fg">
+              {isLocal ? `本机 ${runnerLabel ?? "Codex"}（试点）` : "平台模型"}
+            </dd>
+          </div>
           <EstimateRow credits={estimateCredits} range={estimateRange} />
         </dl>
+
+        {/* 口径与 `image-source-picker.tsx`、`local_runtime.usage_limit` 必须一致：
+            本机这条**额外**消耗用户自己的订阅额度，平台 Credits 仍按同价计费。
+            写成"本机免费"会让这一屏成为整个产品里最贵的一次误解。 */}
+        <p className="text-xs leading-5 text-fg-muted">
+          {isLocal
+            ? `这 ${shotCount} 张由你电脑上的 ${runnerLabel ?? "Codex"} 逐张生成，消耗你自己的订阅额度；平台 Credits 仍按与平台模型同价逐张计费（失败的那张不扣）。`
+            : `这 ${shotCount} 张由平台模型逐张生成，逐张扣 Credits（失败的那张不扣）。`}
+        </p>
 
         {submitFailed && (
           <p role="alert" className="text-xs text-danger">

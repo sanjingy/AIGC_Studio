@@ -1,11 +1,18 @@
 "use client";
 
+import type * as React from "react";
 import { useState } from "react";
 import { AlertTriangle, Check, Loader2, Play, Undo2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { GateName } from "@/lib/api";
-import { GATE_LABEL, type ProjectState } from "@/lib/freeflow/use-project-state";
+import { GatePendingIcon } from "@/components/icons/studio-icons";
+import {
+  GATE_LABEL,
+  GATE_REDO_ROLE,
+  ROLE_LABEL,
+  type ProjectState,
+} from "@/lib/freeflow/use-project-state";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,15 +29,41 @@ function busyIcon(on: boolean) {
   return on ? <Loader2 aria-hidden className="size-3.5 animate-spin" /> : null;
 }
 
-/** 门的审批。只在这道门真的开着时出现——没有 pending 审核就什么都不画。 */
+/**
+ * 门的审批。只在这道门真的开着时出现——没有 pending 审核就什么都不画。
+ *
+ * 四道门共用这一份（ADR-037）。门的**正文**由调用方通过 `children` 注入：
+ * 剧本门和分镜门的正文就是页面上那份产出本身，不用注入；门① 和门③ 要
+ * 用户在这一屏里做决定（选画风、核对锚点），正文是它们自己的表单。
+ * 按钮、措辞、报错位置四道门必须一模一样——「确认通过」和「打回重做」
+ * 在用户眼里是同一个动作，各写一份必然分叉出第三种说法。
+ */
 export function GateActions({
   state,
   gate,
   className,
+  children,
+  beforeApprove,
+  approveBlockedReason,
 }: {
   state: ProjectState;
   gate: GateName;
   className?: string;
+  /** 这道门的正文。不传就只有说明和两颗按钮。 */
+  children?: React.ReactNode;
+  /**
+   * 过门**之前**必须先成功的一步，返回 `false` 就不过门。
+   *
+   * 门① 用它先写锁定变量：顺序必须是"先存变量、再过门"，反过来的话
+   * 门已经过了、画风还没存，编排器会拿着空 `style_key` 往下跑。
+   * 两步之间失败也能重来——变量已经落库，用户回到这一页看到的是他填过的值。
+   *
+   * 打回重做走同一条：那三项是项目级的，退回重跑情节目录之后仍然有效，
+   * 不存的话用户下次回到门① 面对的又是一张空表单。
+   */
+  beforeApprove?: () => Promise<boolean>;
+  /** 有值 = 还不能确认通过，这句话就是原因。打回重做不受影响。 */
+  approveBlockedReason?: string | null;
 }) {
   const [comment, setComment] = useState("");
   const open = state.pendingGate === gate;
@@ -38,16 +71,29 @@ export function GateActions({
 
   const working = state.busy === "approve" || state.busy === "reject";
 
+  const act = async (decide: (comment?: string) => Promise<boolean>) => {
+    if (beforeApprove && !(await beforeApprove())) return;
+    // 失败时把意见留在框里：清掉的话用户得凭记忆重打一遍。
+    if (await decide(comment.trim() || undefined)) setComment("");
+  };
+
   return (
     <section
       aria-label={`${GATE_LABEL[gate]}`}
       className={cn("rounded-xl border border-primary/25 bg-primary-soft p-3.5", className)}
     >
-      <h3 className="text-sm font-semibold text-primary">{GATE_LABEL[gate]}</h3>
+      <h3 className="flex items-center gap-2 text-sm font-semibold text-primary">
+        <GatePendingIcon aria-hidden className="size-4 shrink-0" />
+        {GATE_LABEL[gate]}
+      </h3>
       <p className="mt-1 text-xs leading-5 text-fg-muted">
         确认后编排器进入下一阶段，并在你下一次「推进生产」时真实调用模型、扣 Credits。
-        打回重做会退回产出这批内容的阶段，需要你先用自然语言说明要改什么。
+        打回重做会退回产出这批内容的阶段（{ROLE_LABEL[GATE_REDO_ROLE[gate]]}），
+        需要你先用自然语言说明要改什么。
       </p>
+
+      {children}
+
       <label className="mt-2.5 flex flex-col gap-1">
         <span className="text-xs font-medium text-fg">意见（可选，会记进审核记录）</span>
         <textarea
@@ -59,24 +105,24 @@ export function GateActions({
           className="resize-none rounded-md border border-border-strong bg-surface px-2 py-1.5 text-sm leading-5 text-fg"
         />
       </label>
-      <div className="mt-2.5 flex flex-wrap gap-2">
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <Button
           size="sm"
           variant="primary"
-          disabled={working}
-          onClick={() => void state.approve(comment.trim() || undefined).then(() => setComment(""))}
+          disabled={working || Boolean(approveBlockedReason)}
+          title={approveBlockedReason ?? "确认通过，编排器进入下一阶段"}
+          onClick={() => void act(state.approve)}
         >
           {busyIcon(state.busy === "approve") ?? <Check aria-hidden className="size-3.5" />}
           确认通过
         </Button>
-        <Button
-          size="sm"
-          disabled={working}
-          onClick={() => void state.reject(comment.trim() || undefined).then(() => setComment(""))}
-        >
+        <Button size="sm" disabled={working} onClick={() => void act(state.reject)}>
           {busyIcon(state.busy === "reject") ?? <Undo2 aria-hidden className="size-3.5" />}
           打回重做
         </Button>
+        {approveBlockedReason && (
+          <span className="text-xs text-rf-warning">{approveBlockedReason}</span>
+        )}
       </div>
       {state.actionError && (
         <p role="alert" className="mt-2 rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">

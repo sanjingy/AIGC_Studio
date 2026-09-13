@@ -54,24 +54,45 @@ export const ROLE_ORDER: ReviseTarget[] = [
 export const STAGE_LABEL: Record<Stage, string> = {
   routing: "路线判断",
   plot_index: "情节目录",
+  await_plan: "等待开拍前确认",
   screenplay: "剧本改编",
   await_setup: "等待确认剧本",
   characters: "角色档案",
   scenes: "场景档案",
+  await_anchors: "等待确认空间锚点",
   storyboard: "分镜表",
   await_storyboard: "等待确认分镜",
   done: "已走完文本链路",
 };
 
+/** 四道门，按生产顺序。凡是要"逐道门看一遍"的地方都用它，别各写一个数组。 */
+export const GATE_ORDER: GateName[] = ["plan", "setup", "anchors", "storyboard"];
+
 /** 门对应的阶段，以及门开在哪一份产出上。 */
 export const GATE_STAGE: Record<GateName, Stage> = {
+  plan: "await_plan",
   setup: "await_setup",
+  anchors: "await_anchors",
   storyboard: "await_storyboard",
 };
 
 export const GATE_LABEL: Record<GateName, string> = {
+  plan: "开拍前确认",
   setup: "确认剧本",
+  anchors: "确认空间锚点与光照",
   storyboard: "确认分镜",
+};
+
+/**
+ * 打回重做退回哪个阶段。抄自后端 `orchestrator._REDO_FROM`——
+ * 界面上要说清"打回之后会重跑什么"，不然用户不知道自己按下去的是
+ * "重写这一段"还是"整条链路从头再来"。
+ */
+export const GATE_REDO_ROLE: Record<GateName, ReviseTarget> = {
+  plan: "plot_index",
+  setup: "screenplay",
+  anchors: "scenes",
+  storyboard: "storyboard",
 };
 
 export type OutputSet = Record<ReviseTarget, any>;
@@ -87,6 +108,20 @@ function latestApproval(approvals: Approval[], gate: GateName): Approval | null 
 }
 
 /**
+ * 某道门通过之后停在哪个阶段。**只在倒推兜底里用**（`deriveStage`），
+ * 主路径是后端直接给的 `stage`。
+ *
+ * 每一项都要再看产出：门通过只说明"可以往下跑了"，跑没跑、跑到哪，
+ * 得看下游产出在不在。
+ */
+const AFTER_GATE: Record<GateName, (output: OutputSet) => Stage> = {
+  plan: (o) => (o.screenplay ? "await_setup" : "screenplay"),
+  setup: (o) => (o.scenes ? "await_anchors" : o.characters ? "scenes" : "characters"),
+  anchors: (o) => (o.storyboard ? "await_storyboard" : "storyboard"),
+  storyboard: () => "done",
+};
+
+/**
  * 从"已有哪些产出 + 审核记录"倒推阶段。
  *
  * **这是兜底，不是主路径。** 主路径是 `GET /projects/{id}/state` 直接给的
@@ -97,29 +132,22 @@ function latestApproval(approvals: Approval[], gate: GateName): Approval | null 
  * 生产阶段重做的情形。
  */
 export function deriveStage(output: OutputSet, approvals: Approval[], runs: AgentRun[]): Stage {
-  const storyboardGate = latestApproval(approvals, "storyboard");
-  const setupGate = latestApproval(approvals, "setup");
-
-  if (storyboardGate) {
-    if (storyboardGate.status === "pending") return "await_storyboard";
-    if (storyboardGate.status === "approved") return "done";
-    // rejected 是"停在这里不动"，changes_requested 是"退回分镜重做"
-    return storyboardGate.status === "rejected" ? "await_storyboard" : "storyboard";
+  // 门是按生产顺序依次打开的，所以**从最后一道门往回找**：第一道有审核记录的
+  // 门就是走得最远的那一道，它的状态决定当前阶段。
+  for (const gate of [...GATE_ORDER].reverse()) {
+    const latest = latestApproval(approvals, gate);
+    if (!latest) continue;
+    // rejected 是"停在这里不动"，changes_requested 是"退回产出这批内容的阶段重做"
+    if (latest.status === "pending" || latest.status === "rejected") return GATE_STAGE[gate];
+    if (latest.status === "changes_requested") return GATE_REDO_ROLE[gate];
+    return AFTER_GATE[gate](output);
   }
 
-  if (setupGate?.status === "pending") return "await_setup";
-  if (setupGate?.status === "changes_requested") return "screenplay";
-  if (setupGate?.status === "rejected") return "await_setup";
-
-  if (setupGate?.status === "approved") {
-    if (output.storyboard) return "await_storyboard";
-    if (output.scenes) return "storyboard";
-    if (output.characters) return "scenes";
-    return "characters";
-  }
-
+  // 一道门都没开过：走得最远的那份产出说明下一道门是哪一道。
+  if (output.storyboard) return "await_storyboard";
+  if (output.scenes) return "await_anchors";
   if (output.screenplay) return "await_setup";
-  if (output.plot_index) return "screenplay";
+  if (output.plot_index) return "await_plan";
   return runs.length > 0 ? "plot_index" : "routing";
 }
 

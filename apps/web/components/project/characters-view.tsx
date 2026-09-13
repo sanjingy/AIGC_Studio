@@ -54,7 +54,10 @@ export function CharactersView({ data, renders }: { data: any; renders?: Renders
               renders={renders}
               label="生成基准立绘"
               alt={`${c.name} 的基准立绘`}
-              className="w-24"
+              caption="全身基准立绘 · 中性光"
+              // 128 而不是 96：次级动作那一格里「查看提示词」「用已有图」
+              // 在 96 宽下会各折成两行，一列按钮读起来像四行碎字。
+              className="w-32"
             />
           )}
         </div>

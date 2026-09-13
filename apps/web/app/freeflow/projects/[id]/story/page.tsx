@@ -14,7 +14,10 @@ import { useTasks } from "@/lib/freeflow/use-tasks";
 
 /**
  * 故事与剧本。情节目录 + 剧本在同一页（计划 §2 的「分场剧本与故事大纲合并」），
- * 外加「确认剧本」这道门与自然语言返工。
+ * 外加**两道门**（ADR-037 的「开拍前确认」与「确认剧本」）与自然语言返工。
+ *
+ * 两道门都在这一页，是因为它们要审的东西都在这一页：门① 核对情节目录的
+ * 覆盖范围，门② 核对剧本。
  *
  * 门在这里和右栏都能过——同一个动作、同一份实现（`production-actions.tsx`），
  * 只是落点不同。
@@ -41,7 +44,7 @@ export default function FreeflowStoryPage({ params }: { params: Promise<{ id: st
         </p>
       )}
       {!state.error && state.loading && <p className="p-6 text-sm text-fg-subtle">加载中…</p>}
-      {!state.error && !state.loading && <StoryWorkspace state={state} />}
+      {!state.error && !state.loading && <StoryWorkspace projectId={id} state={state} />}
     </ProjectWorkbench>
   );
 }

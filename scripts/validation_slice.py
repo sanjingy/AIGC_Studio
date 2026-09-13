@@ -87,8 +87,13 @@ async def run(*, shots: int, dry_run: bool) -> dict[str, Any]:
         )
         style_id, profile = style.id, profiles[0]
         ref_prompt = compose.reference_portrait_prompt(profile, style)
+        # 三套风格词各记各的（ADR-036 第 3 条）。这份切片跑的是角色立绘与
+        # 镜头图，注入的是人物版；场景版与视频版一并记下来，是为了让报告能
+        # 回答"当时的画风档案长什么样"，而不只是"当时用了哪一句"。
         style_snapshot = {
-            "positive": style.positive_tokens,
+            "character": style.character_tokens,
+            "scene": style.scene_tokens,
+            "video": style.video_tokens,
             "negative": style.negative_tokens,
             "render_mode": style.render_mode,
             "seed_base": style.seed_base,

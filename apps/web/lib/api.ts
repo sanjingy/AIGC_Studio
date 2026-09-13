@@ -314,9 +314,55 @@ export type Render = {
    * 界面上两者占同一个位置、长得一样，但计费语义相反，所以要分开显示。
    */
   source: RenderSource;
+  /**
+   * 这张图是**谁**画的。
+   *
+   * `api`   = 平台的 Provider（万相等），代价是平台上游成本 → 用户的 Credits；
+   * `local` = 用户自己电脑上的 Codex，代价是他自己的订阅额度；
+   * `null`  = 没人画（用户自己钉上去的那张）。
+   *
+   * 两条生成路径的代价承担者不同，界面必须能分辨——否则用户没法回答
+   * "这张图花了谁的钱"。
+   */
+  image_source: ImageSource | null;
 };
 
 export type RenderSource = "generated" | "assigned";
+
+/** 出图用哪条来源。默认 `api`；`local` 是本机 Codex 试点。 */
+export type ImageSource = "api" | "local";
+
+/**
+ * 三个出图入口共用的请求体。
+ *
+ * `prompt_run_id` **没有就不写这个键**，而不是写成 `null`：后端把"字段缺席"
+ * 当成"你自己准备一份"，把显式的值当成"必须用这一份，不合格就拒绝"。
+ * 两种语义不同，`undefined` 经 `JSON.stringify` 会被丢掉，靠这个行为容易
+ * 在某次改写里被无声改掉，所以这里明写一次。
+ */
+function renderBody(source: ImageSource, promptRunId?: string | null) {
+  return promptRunId ? { source, prompt_run_id: promptRunId } : { source };
+}
+
+/**
+ * 本机运行时（试点）的状态。**能力是连接器自报的实况**，不是产品愿景：
+ * `capabilities.image` 为 true 才代表现在真的能用本机出图。
+ */
+export type LocalRuntimeStatus = {
+  enabled: boolean;
+  text_provider: "codex" | "claude" | null;
+  image_provider: "codex" | "claude" | null;
+  /** 配置里属于本 org 的项目。当前项目不在里面就没有本机来源可选。 */
+  project_ids: string[];
+  capabilities: { text: boolean; image: boolean; video: boolean; audio: boolean };
+  runner_connected: boolean;
+  image_runner_connected: boolean;
+  image_runner_version: string | null;
+  image_available: boolean;
+  /** 不可用时**一定**有值，直接说给用户听，不要自己编一句。 */
+  image_unavailable_reason: string | null;
+  pilot: boolean;
+};
 
 /** 把一张已有资产钉成基准图之后的回执。刻意不是 Task——这里没有任务在跑。 */
 export type BaseImage = {
@@ -356,16 +402,29 @@ export type Task = {
 export type Stage =
   | "routing"
   | "plot_index"
+  | "await_plan"
   | "screenplay"
   | "await_setup"
   | "characters"
   | "scenes"
+  | "await_anchors"
   | "storyboard"
   | "await_storyboard"
   | "done";
 
-/** 两道阻塞门（后端 `orchestrator._GATE_OF`）。 */
-export type GateName = "setup" | "storyboard";
+/**
+ * 四道阻塞门（后端 `orchestrator._GATE_OF`，ADR-037）。
+ *
+ * 顺序即生产顺序：`plan`（开拍前确认）→ `setup`（确认剧本）→
+ * `anchors`（确认空间锚点与光照）→ `storyboard`（确认分镜）。
+ *
+ * **加门只加值，不要在别处写"是不是第一道门"这种二选一判断**——
+ * 上一轮 `stage-map.ts` 里那个 `gate === "setup" ? ... : ...` 的三元式
+ * 就是这么错的：两道门时它碰巧对，加到四道门时另外两道全落进了
+ * 最后一个分支。凡是按门分叉的地方一律用表（`Record<GateName, ...>`），
+ * 少一个键 TypeScript 会直接报错。
+ */
+export type GateName = "plan" | "setup" | "anchors" | "storyboard";
 
 /** 审核决议。后端三个都收，界面只用前两个，理由见 use-project-state.ts。 */
 export type ApprovalDecision = "approved" | "changes_requested" | "rejected";
@@ -387,6 +446,141 @@ export type ProjectStateSnapshot = {
   current_state_json: Record<string, any>;
   stale_roles: ReviseTarget[];
   updated_at: string;
+};
+
+// ------------------------------------------------- 项目级锁定变量（门①，ADR-037）
+
+/**
+ * 画风目录里的一条（后端 `StyleOptionOut`）。
+ *
+ * `character_tokens` / `scene_tokens` / `video_tokens` **不在这里**，
+ * 尽管后端把它们一并返回了：那三段是注入提示词的内部变量，摆到界面上
+ * 用户会当成可以改的输入，而它们只能整条目录一起换。用户判断"画成什么样"
+ * 靠 `name` 和 `description` 这句人话。
+ */
+export type StyleOption = {
+  key: string;
+  name: string;
+  description: string;
+};
+
+/**
+ * 锁定变量是怎么来的。**三个值必须在界面上分得开**：
+ *
+ *   detected   系统按原文证据判定的一版，等着用户在门① 确认或改
+ *   confirmed  用户在门① 亲自确认过
+ *   migrated   ADR-037 上线时迁移补的，**从来没有人看过一眼**
+ *
+ * 最后一种要如实标注「历史项目，未经确认」。不标的话用户会以为
+ * 那些值是他自己选的——而它们只是缺省值。
+ */
+export type LockOrigin = "detected" | "confirmed" | "migrated";
+
+/** 改编模式。后端 `ADAPTATION_MODES`，两个值。 */
+export type AdaptationMode = "adapt" | "rewrite";
+
+/**
+ * 门① 锁定的项目级变量 + 可选项（`GET /projects/{id}/lock-variables`）。
+ *
+ * 还没走到门① 的项目也能读：后端返回一份空值 + 完整可选项，而不是 404。
+ * "还没选过"是合法状态，不是资源不存在。
+ */
+export type LockVariables = {
+  project_id: string;
+  style_key: string;
+  era: string;
+  region: string;
+  ethnicity: string;
+  /** 时代判定的原文证据。判不出来时是空串。 */
+  era_evidence: string;
+  adaptation_mode: string;
+  origin: LockOrigin;
+  /** 门① 通过的时间。null = 还没确认过。 */
+  confirmed_at: string | null;
+  /** 门③ 通过的时间。与门① 分开记——两道门确认的不是同一件事。 */
+  anchors_confirmed_at: string | null;
+  /** `origin === "migrated" && confirmed_at === null`，后端算好的。 */
+  legacy_unconfirmed: boolean;
+  style_options: StyleOption[];
+  adaptation_options: string[];
+};
+
+/** 只传要改的那几项，漏传等于不改（后端 `ProjectLockVariablesIn`）。 */
+export type LockVariablesPatch = {
+  style_key?: string;
+  era?: string;
+  region?: string;
+  ethnicity?: string;
+  adaptation_mode?: string;
+};
+
+// ------------------------------------------------- 门的摘要（approval.payload_json.summary）
+
+/**
+ * 门① 的摘要。后端 `orchestrator._plan_gate_summary`。
+ *
+ * 每个字段都可能缺（存量 approval 是按旧结构存的），所以全部可选，
+ * 消费处一律按"可能没有"处理。
+ */
+export type PlanGateSummary = {
+  genre?: string;
+  logline?: string;
+  /** 情节目录**全量**。门① 要用户回答"有没有遗漏"，只给条数答不了。 */
+  nodes?: { index?: number; summary?: string }[];
+  nodes_total?: number;
+  era?: {
+    era?: string;
+    region?: string;
+    ethnicity?: string;
+    evidence?: string;
+    /** 判不出来。界面要如实说，不要显示一个像是想好了的答案。 */
+    undetermined?: boolean;
+  };
+  style?: { selected?: string; options?: (StyleOption & Record<string, unknown>)[] };
+  adaptation?: { selected?: string; options?: string[] };
+  legacy_unconfirmed?: boolean;
+};
+
+/** 场景档案里的一条具名条目：固定参照物与光照状态是同一个形状。 */
+export type NamedEntry = {
+  name: string;
+  description: string;
+  /** `migrated` = 迁移时从描述里自动截出来的名称，不是谁手打的。 */
+  origin: "authored" | "migrated";
+};
+
+/** 门③ 的一张锚点卡。后端 `anchors.AnchorCard.as_dict`。 */
+export type AnchorCard = {
+  ref: string;
+  name: string;
+  camera_axis?: Record<string, string>;
+  fixed_references?: NamedEntry[];
+  /** 为什么这个场景要出卡。人能读的短句，直接展示。 */
+  reasons?: string[];
+  signals?: {
+    beats?: number;
+    script_scenes?: number;
+    max_cast?: number;
+    action_beats?: number;
+  };
+  incomplete?: boolean;
+};
+
+/**
+ * 门③ 的摘要。后端 `anchors.gate_payload`。
+ *
+ * `criteria_source: "screenplay"` 是这道门上最要紧的一句话：判据的输入是
+ * **剧本**，算出来的是镜号数的**下界**，不是分镜实测值。界面不能把这些数字
+ * 说成"最终镜号数"，否则用户会以为分镜就那么多镜。
+ */
+export type AnchorsGateSummary = {
+  scenes_total?: number;
+  cards?: AnchorCard[];
+  /** 走内联描述、不出卡的场景，只给名字。 */
+  inline?: { ref: string; name: string }[];
+  /** 出了卡但锚点字段是空的。"确认了一张空卡"的唯一预警。 */
+  incomplete_refs?: string[];
+  criteria_source?: string;
 };
 
 export const projects = {
@@ -428,6 +622,31 @@ export const projects = {
       body: JSON.stringify({ user_input: userInput }),
     }),
 
+  /**
+   * 门① 的锁定变量与可选项。**没走到门① 也能读**——后端给空值 + 完整目录，
+   * 所以项目设置页可以一直展示"这个项目锁了什么"。
+   */
+  lockVariables: (id: string) => apiFetch<LockVariables>(`/projects/${id}/lock-variables`),
+
+  /**
+   * 改锁定变量。**PUT 而不是 POST**：这是"这个项目的锁定变量就是它"，
+   * 重复调用结果相同，没有第二份被创建出来。
+   *
+   * 只传这次要改的那几项，别把整份读出来再传回去——两个标签页同开会互相覆盖
+   * （与 `setModelPreference` 是同一条理由）。
+   *
+   * 一分钱不花：它只改后面阶段的输入，不建任务也不预扣。
+   *
+   * 两种失败要分开显示：画风不在目录里是 `provider.params.invalid`；
+   * 画风档案已经建出来了还要改 key 是 409 `common.conflict`，那是
+   * "改不了"而不是"填错了"——后者用户重填一次就好，前者他得重出全部画面。
+   */
+  setLockVariables: (id: string, patch: LockVariablesPatch) =>
+    apiFetch<LockVariables>(`/projects/${id}/lock-variables`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+
   approvals: (id: string) => apiFetch<Approval[]>(`/projects/${id}/approvals`),
 
   resolve: (id: string, approvalId: string, decision: ApprovalDecision, comment?: string) =>
@@ -441,8 +660,9 @@ export const projects = {
     projects.resolve(id, approvalId, "approved", comment),
 
   /**
-   * 打回重做：退回产出这批内容的那个阶段（后端 `_REDO_FROM`），
-   * 剧本门退回 `screenplay`，分镜门退回 `storyboard`。
+   * 打回重做：退回产出这批内容的那个阶段（后端 `_REDO_FROM`）。
+   * 四道门各退一步：`plan` 退回 `plot_index`、`setup` 退回 `screenplay`、
+   * `anchors` 退回 `scenes`、`storyboard` 退回 `storyboard`。
    *
    * 这是"驳回"在生产流程里的可用形态。后端还有一个 `rejected`
    * （项目就地停死，没有恢复路径），界面不给入口——见
@@ -468,24 +688,36 @@ export const projects = {
   /**
    * 给角色出基准立绘。真实出图调用，会扣 Credits，
    * 所以只能由明确的用户动作触发，不要放进任何自动重试里。
+   *
+   * `source="local"` 改用用户自己电脑上的 Codex 画（试点）。**选了本机就
+   * 只走本机**：不可用时后端在建任务之前就拒绝（不扣钱），跑失败也不会
+   * 悄悄改调付费 API。来源在建任务那一刻钉进任务里，之后不会变。
+   *
+   * `promptRunId` 是用户在提示词面板里**看过的那一份**（`prompt_run_id`）。
+   * 传了，后端就用那一份出图；不传，后端自己准备一份符合当前输入的。
+   * 两条都走新的提示词 Agent，区别只在于"用户看到的词"和"实际出图的词"
+   * 是不是同一份——所以它只该来自用户真的打开过的面板，不要凭空造一个。
+   * 过期或不属于这个对象的 run_id 后端会拒绝，前端不自己兜底改写。
    */
-  renderCharacter: (id: string, ref: string) =>
+  renderCharacter: (id: string, ref: string, source: ImageSource = "api", promptRunId?: string | null) =>
     apiFetch<Task>(`/projects/${id}/images/characters/${encodeURIComponent(ref)}`, {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify(renderBody(source, promptRunId)),
     }),
 
   /**
    * 给场景出基准参考图。同上，会扣 Credits。
    *
-   * 参考图的提示词里有摄影主轴和固定参照物，是同一场景后续所有镜头的
-   * 空间基准——和角色立绘一样，提示词全部由后端 `compose` 合成，
-   * 前端传不了也不该传。
+   * 参考图是 2×2 四视图概念图：提示词里有摄影主轴、固定参照物和四格机位，
+   * 是同一场景后续所有镜头的空间基准。提示词全部由后端的提示词 Agent 组织，
+   * 前端传不了也不该传，能传的只有"用哪一份已准备好的词"（`promptRunId`）。
    */
-  renderScene: (id: string, ref: string) =>
+  renderScene: (id: string, ref: string, source: ImageSource = "api", promptRunId?: string | null) =>
     apiFetch<Task>(`/projects/${id}/images/scenes/${encodeURIComponent(ref)}`, {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify(renderBody(source, promptRunId)),
     }),
 
   /**
@@ -509,11 +741,12 @@ export const projects = {
       body: JSON.stringify({ asset_id: assetId }),
     }),
 
-  /** 给一个镜号出图。同上，会扣 Credits。 */
-  renderShot: (id: string, shotIndex: number) =>
+  /** 给一个镜号出首帧图。同上，会扣 Credits。`source` / `promptRunId` 见 `renderCharacter`。 */
+  renderShot: (id: string, shotIndex: number, source: ImageSource = "api", promptRunId?: string | null) =>
     apiFetch<Task>(`/projects/${id}/images/shots/${shotIndex}`, {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify(renderBody(source, promptRunId)),
     }),
 
   /**
@@ -846,14 +1079,30 @@ export const assets = {
    */
   upload: async (file: File, projectId?: string): Promise<string> => {
     const ticket = await assets.createUploadUrl(file, projectId);
-    const put = await fetch(ticket.upload_url, {
-      method: "PUT",
-      body: file,
-      headers: { "Content-Type": file.type },
-    });
+    let put: Response;
+    try {
+      put = await fetch(ticket.upload_url, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type },
+      });
+    } catch {
+      // 这一段**不经过我们的 API**，所以 fetch 直接抛 TypeError：预签名地址
+      // 的那个 host 连不上（本地开发少一条端口转发是最常见的原因）、或者被
+      // CORS 掐掉。原样往上抛的话，调用方拿到的是一个没有 `error` 字段的
+      // 裸异常，只能显示自己的兜底文案——出图位上会写成"出图请求失败"，
+      // 而用户明明是在传文件。所以在这里就把它翻译成一条说得清的错误。
+      throw new ApiRequestError(0, {
+        code: "asset.upload.storage_unreachable",
+        message: "PUT to object storage failed before any response",
+        user_message: "连不上对象存储，文件没有传上去",
+        retryable: true,
+        trace_id: "",
+      });
+    }
     if (!put.ok) {
       throw new ApiRequestError(put.status, {
-        code: "asset.upload.checksum_mismatch",
+        code: "asset.upload.put_failed",
         message: `PUT ${put.status}`,
         user_message: "文件上传失败，请重试",
         retryable: true,
@@ -1035,4 +1284,17 @@ export const orgSkills = {
   spec: (id: string) => apiFetch<{ id: string; spec_yaml: string }>(`/skills/${id}/spec`),
 
   remove: (id: string) => apiFetch<void>(`/skills/${id}`, { method: "DELETE" }),
+};
+
+/**
+ * 本机运行时（试点）。
+ *
+ * 只有一个只读端点：这台浏览器背后的组织有没有开、桌面连接器在不在、
+ * 它**真实**支持什么。界面上「本机 Codex」这个选项能不能点，全看它。
+ *
+ * 桥接令牌那两个端点（poll / result）不在这里，也永远不会在这里——
+ * 那是桌面连接器与服务端之间的事，浏览器碰不到，也不该碰。
+ */
+export const localRuntime = {
+  status: () => apiFetch<LocalRuntimeStatus>("/local-runtime/status"),
 };

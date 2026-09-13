@@ -1,10 +1,12 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import { usePathname } from "next/navigation";
 
 import { ProjectWorkbench } from "@/components/freeflow/project/project-workbench";
 import { TaskCenter } from "@/components/freeflow/project/task-center";
+import { GenerationRecords } from "@/components/freeflow/project/generation-records";
+import { Button } from "@/components/ui/button";
 import { useImages } from "@/lib/freeflow/use-images";
 import { useProjectState } from "@/lib/freeflow/use-project-state";
 import { useTasks } from "@/lib/freeflow/use-tasks";
@@ -23,6 +25,7 @@ export default function FreeflowTasksPage({ params }: { params: Promise<{ id: st
   const tasks = useTasks(id);
   const images = useImages(id);
   const pathname = usePathname();
+  const [tab, setTab] = useState<"records" | "queue">("records");
 
   return (
     <ProjectWorkbench
@@ -32,7 +35,11 @@ export default function FreeflowTasksPage({ params }: { params: Promise<{ id: st
       images={images}
       activeHref={pathname}
     >
-      <TaskCenter tasks={tasks} projectId={id} />
+      <div className="mb-5 flex gap-2" aria-label="生成记录视图">
+        <Button variant={tab === "records" ? "primary" : "ghost"} onClick={() => setTab("records")}>生成记录</Button>
+        <Button variant={tab === "queue" ? "primary" : "ghost"} onClick={() => setTab("queue")}>运行队列</Button>
+      </div>
+      {tab === "records" ? <GenerationRecords projectId={id} /> : <TaskCenter tasks={tasks} projectId={id} />}
     </ProjectWorkbench>
   );
 }

@@ -5,9 +5,13 @@ import { createPortal } from "react-dom";
 import { ChevronDown, FolderOpen, Upload } from "lucide-react";
 
 import { AssetPicker } from "@/components/project/asset-picker";
+import { ImageSourcePicker } from "@/components/project/image-source-picker";
+import { PromptPanel } from "@/components/freeflow/project/prompt-panel";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status";
 import { assets as assetsApi, IMAGE_ACCEPT } from "@/lib/api";
+import { useLocalRuntime } from "@/lib/freeflow/use-local-runtime";
+import { usePreparedPrompt } from "@/lib/freeflow/prepared-prompts";
 import { cn } from "@/lib/utils";
 import type { RenderSubject, Renders, RenderView } from "@/lib/useRenders";
 
@@ -16,27 +20,63 @@ import type { RenderSubject, Renders, RenderView } from "@/lib/useRenders";
  *
  * 链接是预签名的、有有效期，所以只能在渲染时现签，不能提前塞进列表接口
  * ——资产库那边也是这么做的，两处必须是同一套取图方式。
+ *
+ * `fit` 决定图片和框比例不一致时裁还是缩。默认 `cover`（裁），因为立绘那种
+ * 竖构图填满框才好看。**场景四视图必须用 `contain`**：那是一张 2×2 的方图，
+ * 塞进 4/3 的框里 `cover` 会把上下各切掉一条——切掉的正好是上面两格和下面
+ * 两格的一部分，用户看到的"四视图"少了两个视角，还看不出少了。
  */
-export function RenderThumb({ assetId, alt }: { assetId: string; alt: string }) {
+export function RenderThumb({
+  assetId,
+  alt,
+  fit = "cover",
+}: {
+  assetId: string;
+  alt: string;
+  fit?: "cover" | "contain";
+}) {
   const [url, setUrl] = useState<string | null>(null);
+  /**
+   * 签到地址不等于取得到图。
+   *
+   * 预签名地址指向对象存储本身（`S3_PUBLIC_ENDPOINT_URL`），浏览器直连——
+   * 这个 host 连不上时（本地开发少一条端口转发就是这样），`<img>` 只会静静
+   * 变成一个裂图图标，旁边"重新生成"还好端端地摆着，看上去像是出图坏了。
+   * 实际上图是好的，取不回来而已，重新生成一次只会再花一次钱。
+   */
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let alive = true;
+    setFailed(false);
     assetsApi
       .downloadUrl(assetId)
       .then((r) => alive && setUrl(r.url))
-      .catch(() => undefined);
+      .catch(() => alive && setFailed(true));
     return () => {
       alive = false;
     };
   }, [assetId]);
+
+  if (failed) {
+    return (
+      <div className="flex size-full items-center justify-center bg-surface-3 p-2 text-center text-xs text-fg-muted">
+        图片加载失败
+      </div>
+    );
+  }
 
   if (!url) return <div className="size-full animate-pulse bg-surface-3" />;
 
   return (
     <a href={url} target="_blank" rel="noreferrer" className="block size-full">
       {/* eslint-disable-next-line @next/next/no-img-element -- 预签名 URL 是运行时才知道的外部地址，用不了 next/image 的构建期优化 */}
-      <img src={url} alt={alt} className="size-full object-cover" />
+      <img
+        src={url}
+        alt={alt}
+        className={cn("size-full", fit === "contain" ? "object-contain" : "object-cover")}
+        onError={() => setFailed(true)}
+      />
     </a>
   );
 }
@@ -65,6 +105,8 @@ export function RenderSlot({
   alt,
   className,
   aspect = "aspect-[3/4]",
+  fit,
+  caption,
 }: {
   subject: RenderSubject;
   renders: Renders;
@@ -73,12 +115,35 @@ export function RenderSlot({
   alt: string;
   className?: string;
   aspect?: string;
+  /** 图和框比例不一致时裁还是缩。四视图这种"每一格都是内容"的图要 `contain`。 */
+  fit?: "cover" | "contain";
+  /** 图下面的一行小字，说明这张图是什么。不传就不占位置。 */
+  caption?: string;
 }) {
   const view: RenderView | null = renders.renderOf(subject);
   const pending = renders.isPending(subject);
   const slotError = renders.errorOf(subject);
   const active = view?.status === "queued" || view?.status === "running";
   const failed = view?.status === "failed" || view?.status === "cancelled";
+  /**
+   * 这个对象有没有一份用户已经看过、还没过期的提示词。
+   *
+   * 有的话出图就用那一份（`useRenders` 在发请求时自己去取），所以这里要
+   * 说一句——否则"我刚在面板里改了要求"和"这次出图用的是哪份词"之间
+   * 没有任何可见的联系。没准备过时整行不渲染，不给默认状态加一行噪音。
+   */
+  const promptKind = subject.kind === "shot" ? "shot_image" : subject.kind;
+  const promptSubjectKey = subject.kind === "shot" ? String(subject.index) : subject.ref;
+  const preparedPrompt = usePreparedPrompt(renders.projectId, promptKind, promptSubjectKey);
+  /**
+   * 出图来源（平台 API / 本机 Codex）。
+   *
+   * 在这里取而不是从页面一路传下来：这个组件是三种出图位（角色、场景、
+   * 分镜）唯一的公共落点，从这里接一次，三处入口同时就有了，
+   * 而 WN 正在改的那些页面一个字都不用动。状态与选择都是全站一份
+   * （见 `use-local-runtime.ts`），十几个出图位不会各拉一次接口。
+   */
+  const runtime = useLocalRuntime(renders.projectId);
 
   // 分镜出图没有"基准图"，`base_*_asset_id` 只长在角色和场景档案上
   const assignSubject = subject.kind === "shot" ? null : subject;
@@ -96,7 +161,14 @@ export function RenderSlot({
       >
         {view?.assetId ? (
           <>
-            <RenderThumb assetId={view.assetId} alt={alt} />
+            <RenderThumb assetId={view.assetId} alt={alt} fit={fit} />
+            {view.source === "generated" && view.imageSource === "local" && (
+              // 这张是用户自己电脑上的 Codex 画的，花的是他的订阅额度而不是
+              // 平台 Credits。不标出来，"这张图花了谁的钱"就没法回答。
+              <span className="absolute top-1 right-1 rounded bg-fg/70 px-1 py-0.5 text-[10px] leading-none font-medium text-bg">
+                本机
+              </span>
+            )}
             {view.source === "assigned" && (
               // 这张不是生成的，是用户自己给的。不标出来的话，"我这张图是
               // 哪来的、要不要重新生成"就只能靠回忆。
@@ -133,6 +205,8 @@ export function RenderSlot({
         )}
       </div>
 
+      {caption && <p className="text-[10px] leading-4 text-fg-subtle">{caption}</p>}
+
       {retryTaskId ? (
         <Button
           size="sm"
@@ -147,22 +221,53 @@ export function RenderSlot({
           size="sm"
           variant={view?.assetId ? "ghost" : "primary"}
           disabled={pending || active}
-          onClick={() => renders.generate(subject)}
-          // 真实上游调用，会扣 Credits——按钮上说清楚，不要让用户点完才知道
-          title={view?.assetId ? "重新出一张，会再扣一次 Credits" : "真实出图，会扣 Credits"}
+          onClick={() => renders.generate(subject, runtime.source)}
+          // 真实上游调用，会扣 Credits——按钮上说清楚，不要让用户点完才知道。
+          // 选了本机时**多**花一份他自己的订阅额度，Credits 那份并没有省掉：
+          // 写成"走你自己的订阅额度"会被读成"本机不扣 Credits"，与实际相反。
+          title={
+            runtime.source === "local"
+              ? "用你电脑上的 Codex 出图：消耗你自己的订阅额度，平台 Credits 仍按同价计费"
+              : view?.assetId
+                ? "重新出一张，会再扣一次 Credits"
+                : "真实出图，会扣 Credits"
+          }
         >
           {pending ? "提交中…" : active ? "生成中…" : view?.assetId ? "重新生成" : label}
         </Button>
       )}
 
-      {assignSubject && (
-        <BaseImageActions
-          subject={assignSubject}
-          renders={renders}
-          pickerTitle={`选一张图作为${label.replace(/^生成/, "")}`}
-          disabled={pending || active}
-          triggerClassName="w-full"
-        />
+      {/* 花钱的那颗在上面单独站着；下面这一格是三件不直接出图的事——
+          选来源、看提示词、用一张已有的图。四颗按钮等宽等色地摞成一列时，
+          最贵的那次点击和最便宜的那次长得一模一样；圈起来降一档之后，
+          主按钮重新是唯一的主按钮，而这三件仍然一眼看得到。 */}
+      <div className="flex flex-col gap-0.5 rounded-md border border-border/60 bg-surface-2/40 p-1">
+        {/* 来源选择就贴在出图按钮下面：它改变的正是这颗按钮按下去会发生什么。
+            没配这个试点的项目里它不渲染任何东西（见 ImageSourcePicker）。 */}
+        <ImageSourcePicker runtime={runtime} disabled={pending || active} />
+        {renders.projectId && (
+          <PromptPanel
+            projectId={renders.projectId}
+            kind={promptKind}
+            subjectKey={promptSubjectKey}
+            disabled={pending || active}
+            disabledReason={active ? "这一张正在生成，完成后再准备提示词" : undefined}
+          />
+        )}
+
+        {assignSubject && (
+          <BaseImageActions
+            subject={assignSubject}
+            renders={renders}
+            pickerTitle={`选一张图作为${label.replace(/^生成/, "")}`}
+            disabled={pending || active}
+            triggerClassName="w-full"
+          />
+        )}
+      </div>
+
+      {preparedPrompt && (
+        <p className="text-[10px] leading-4 text-fg-subtle">出图将使用你已准备的提示词</p>
       )}
 
       {slotError && (

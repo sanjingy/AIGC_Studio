@@ -39,6 +39,8 @@ export type Shot = {
   shot_size: string;
   angle: string;
   camera_move: string;
+  /** 引用该场景已声明的光照状态名。留空 = 用该场景的 `default_lighting`。 */
+  lighting_ref: string;
   content: string;
   speaker_ref: string;
   dialogue: string;
@@ -51,6 +53,7 @@ const FIELDS: ShotFieldKey[] = [
   "shot_size",
   "angle",
   "camera_move",
+  "lighting_ref",
   "content",
   "speaker_ref",
   "dialogue",
@@ -64,6 +67,9 @@ function draftOf(shot: Shot): ShotDraft {
     shot_size: shot.shot_size ?? "",
     angle: shot.angle ?? "",
     camera_move: shot.camera_move ?? "",
+    // 存量分镜没有这一列（2026-09-07 之前的产出）。空串就是"跟随场景默认"，
+    // 与后端对漏填的处理一致，不需要另立一个"未知"状态。
+    lighting_ref: shot.lighting_ref ?? "",
     content: shot.content ?? "",
     speaker_ref: shot.speaker_ref ?? "",
     dialogue: shot.dialogue ?? "",

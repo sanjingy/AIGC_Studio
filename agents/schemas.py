@@ -696,6 +696,19 @@ class CharacterSheets(_Strict):
 
 class SceneSheets(_Strict):
     era: str = Field(max_length=40, description="时代背景，决定角色默认人种")
+
+    #: 全剧**唯一**的整体色调（原 Skill B4）。
+    #:
+    #: 它不是某个场景的光，也不是某一镜的光——那两件事分别由
+    #: `SceneSheet.lighting_states` 和分镜的 `lighting_ref` 管。这一项回答的是
+    #: "这部片子整体看起来是什么调子"，写进每一张场景概念图与每一个镜头，
+    #: 让剪在一起的镜头像同一部片子。
+    #:
+    #: **可留空**：这个字段是后加的，存量项目的场景产出里没有它。留空时
+    #: 提示词层回落到画风目录上的 `color_grading`（见
+    #: `prompting.context._global_tone`），不编一个色调出来。
+    global_tone: str = Field(default="", max_length=60)
+
     scenes: list[SceneSheet] = Field(min_length=1, max_length=30)
 
 
@@ -755,6 +768,119 @@ class Storyboard(_Strict):
     shots: list[StoryboardShot] = Field(min_length=1, max_length=600)
 
 
+# --------------------------------------------------------------- 成品提示词层
+#
+# ADR-036：最终喂给出图/视频模型的那段提示词**由 Agent 合成**，不再由
+# `consistency/compose.py` 确定性拼装。下面四个 schema 是那四类成品词的输出
+# 契约，各自对应超哥 Skill 里的一段模板（`references/` 下的 B/C 两份原文）：
+#
+#   CharacterPortraitPrompt  B3 角色立绘（模板 A 人类 / 模板 B 非人类）
+#   SceneViewsPrompt         B5 场景概念图 2×2 四视图
+#   ShotFramePrompt          单镜首帧（C4 九宫格五要素的单镜适配）
+#   ShotVideoPrompt          C2 逐镜视频提示词
+#
+# **风格词不在这些 schema 里**。它由系统按项目锁定的画风逐字提供，Agent 被
+# 要求原样抄进 `prompt`，抄漏或改写由 `prompting.rules` 的校验器判为不合格
+# （ADR-036 第 2、4 条）。放进 schema 会变成"模型自己填的一个字段"，
+# 那时校验的就是它自己写的东西，等于没校验。
+#
+# 每个 schema 除了 `prompt` 都还带几个**结构化自检字段**。它们不是装饰：
+# 模型必须先把"这一格拍什么""这个角色带什么道具"想清楚才填得出来，而校验器
+# 拿它们去比对 `prompt`——五要素缺一项、四格少一格，在这里就能判出来，
+# 不必等图出完了用眼睛看。
+
+
+class CharacterPortraitPrompt(_Strict):
+    """B3 角色立绘的成品提示词。
+
+    `template` 二选一且**不得混用**（原 Skill B3 执行规则）：人类角色走模板 A，
+    动物/怪物/神兽/异形走模板 B。两套模板的要素顺序完全不同，用错一套出来的
+    不是"稍差一点"，而是拿人类的五官/妆容/鞋子去套一头狼。
+
+    `accessories` 单独成字段，是因为原 Skill 明写「关键配件：手持或佩戴，
+    无则填「无」」——而实测最容易发生的退化是模型一律写"无道具"图省事，
+    把角色身上那件**剧情关键**的东西（钥匙串、腰牌、眼镜）抹掉。让它显式
+    填一格，校验器才能在"确实没有"和"没想过"之间分得开。
+    """
+
+    template: Literal["人类", "非人类"]
+    prompt: str = Field(min_length=40, max_length=2400)
+    #: 写进提示词的国籍/人种词。必须与角色档案一致，不得自行改写（原 Skill B3
+    #: 执行规则最后一条）。非人类角色填物种/类别。
+    subject_identity: str = Field(min_length=1, max_length=60)
+    #: 关键配件。**确实没有**时填「无」，不是留空——留空分不清"没有"和"漏了"。
+    accessories: str = Field(min_length=1, max_length=160)
+
+
+class SceneQuadrants(_Strict):
+    """B5 四视图每一格拍什么。四格机位固定，不因场景类型改变。"""
+
+    top_left: str = Field(min_length=1, max_length=400, description="场景正中天花板垂直俯视")
+    top_right: str = Field(min_length=1, max_length=400, description="沿摄影主轴平视正视图")
+    bottom_left: str = Field(min_length=1, max_length=400, description="右前角朝左后角对角线")
+    bottom_right: str = Field(min_length=1, max_length=400, description="右后角朝左前角")
+
+
+class SceneViewsPrompt(_Strict):
+    """B5 场景概念图（2×2 四视图）的成品提示词。
+
+    `fixed_elements` 是原 Skill 的「元素锁定清单」：四个格子只是摄影机角度
+    不同，场景本身的元素**完全一致**，家具朝向在四格之间不得变。先列清单再
+    写四格描述，是原文规定的执行顺序，也是这张图能当空间基准的全部理由。
+    """
+
+    prompt: str = Field(min_length=80, max_length=4000)
+    #: 四格共用的固定元素（地面、墙面、主体家具及其朝向、标志性道具、光源）
+    fixed_elements: list[str] = Field(min_length=2, max_length=16)
+    quadrants: SceneQuadrants
+
+
+class ShotFramePrompt(_Strict):
+    """单镜首帧的成品提示词（C4 九宫格五要素的单镜适配）。
+
+    五要素逐个成字段而不是让模型"写在一段里就行"：原文把「身后背景」标成
+    **最容易出错的要素**，因为角色朝向一变背后空间就完全不同，模型会套用一个
+    固定背景。拆成字段之后，缺哪一项在 schema 层就红，不必等图。
+
+    **这不是九宫格**。九宫格是一次出九格的排版图，需要实测切格质量才能开生产
+    入口（见 `project_docs/plans/2026-09-11_...` §5 C4）。这里借的是它的五要素
+    检查标准，产出仍是单镜一张。
+    """
+
+    prompt: str = Field(min_length=40, max_length=2400)
+    #: 要素①：景别（特写类必须带局部说明，且局部说明**替换**"特写"二字）
+    shot_size: str = Field(min_length=1, max_length=40)
+    #: 要素②：非默认拍摄角度。正面/平视/居中是默认，默认就留空
+    angle: str = Field(default="", max_length=60)
+    #: 要素③：角色朝向。无人物出场的空镜写「无人物出场」，不留空
+    facing: str = Field(min_length=1, max_length=120)
+    #: 要素④：身后背景。必须从空间锚点推演，不得套用固定背景
+    behind: str = Field(min_length=1, max_length=200)
+    #: 要素⑤：姿态/表情 + 光影。背对/侧对镜头时不写面部表情
+    pose_lighting: str = Field(min_length=1, max_length=200)
+
+
+class ShotVideoPrompt(_Strict):
+    """C2 逐镜视频提示词的成品。
+
+    `cuts` 是【切镜】行，**每个切镜独立一行**（原 Skill C 阶段全局约束第 10 条）。
+    拆成列表而不是让模型在 `prompt` 里换行，是因为"两个切镜挤在同一行"是原文
+    点名的禁止项，而列表让它在结构上就不可能发生。
+
+    `prompt` 是可直接投喂的代码块全文：资产标注句 → 各切镜 → 最后一行强制的
+    「只添加音效和台词，禁止添加背景音乐，禁止出现字幕。」最后那行不可省略、
+    不可移到代码块外侧，由校验器守着。
+    """
+
+    prompt: str = Field(min_length=40, max_length=4000)
+    #: 资产标注句：@是[角色]，@是[场景]，[声音资产]，[视频版风格词]，在[场景名]，[光影基调]。
+    asset_line: str = Field(min_length=1, max_length=1200)
+    #: 每个切镜一条，顺序即播放顺序
+    cuts: list[str] = Field(min_length=1, max_length=12)
+    #: 空间锚点卡（写在代码块外侧）。同场景后续镜号人物状态无变化时可留空
+    anchor_card: str = Field(default="", max_length=1200)
+
+
 SCHEMAS: dict[str, type[BaseModel]] = {
     "RouterDecision": RouterDecision,
     "StoryOutline": StoryOutline,
@@ -766,6 +892,10 @@ SCHEMAS: dict[str, type[BaseModel]] = {
     "CharacterSheets": CharacterSheets,
     "SceneSheets": SceneSheets,
     "Storyboard": Storyboard,
+    "CharacterPortraitPrompt": CharacterPortraitPrompt,
+    "SceneViewsPrompt": SceneViewsPrompt,
+    "ShotFramePrompt": ShotFramePrompt,
+    "ShotVideoPrompt": ShotVideoPrompt,
 }
 
 

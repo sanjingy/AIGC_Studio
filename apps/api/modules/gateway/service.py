@@ -339,9 +339,17 @@ async def _resolve(
 
 async def _candidates(resolution: Resolution) -> list[Route]:
     if not resolution.routes:
+        # 这里以前几乎走不到：缺 Key 时文本退回 MockLLM、出图退回 mock_image，
+        # 用户拿到的是假内容而不是这条错误。两条自动兜底都撤掉之后，
+        # "一个模型都没有"如实走到这里，所以文案要能直接给用户看——
+        # 说清楚差什么、该去哪儿配，不要求他去读日志。
         raise AppError(
             "provider.unavailable",
-            message=f"没有注册任何提供 {resolution.capability} 的 Provider（是否缺少 API Key？）",
+            message=(
+                f"没有可用的模型来完成「{resolution.capability}」。"
+                "请在设置页配置你自己的 Provider Key，或联系管理员为平台配置 Key。"
+            ),
+            detail={"capability": resolution.capability},
         )
 
     healthy: list[Route] = []

@@ -7,9 +7,15 @@
 
 三条规则决定了这里的所有设计：
 
-1. **提示词只能由 `compose` 合成。** 前端传过来的任何画面描述都不作数，
-   风格词永远由系统注入（17_ConsistencyEngine.md §4）。所以这两个端点
-   的入参只有"要画哪个角色 / 哪一镜"，没有 prompt。
+1. **提示词由提示词 Agent 合成，前端传不了。** 画面描述不作数，风格词
+   永远由系统逐字注入并校验是否被原样保留（ADR-036 / 17_ConsistencyEngine
+   §4）。所以这几个端点的入参只有"要画哪个角色 / 哪一镜"、可选的创作要求，
+   以及可选的"用我刚才看过的那一版提示词"（`prompt_run_id`），没有 prompt。
+
+   **这里以前调的是 `compose` 的确定性拼接**（`reference_portrait_prompt` /
+   `reference_scene_prompt` / `compose_shot`），ADR-036 把那条路整体换掉了。
+   `compose.py` 本身保留（`scripts/validation_slice.py` 和既有单测还在用），
+   但它**已经不在生产出图路径上**——见该模块的 docstring。
 2. **走同一条任务路径。** 建任务、预扣、入队、结算全部交给
    `task.service.create_task`，这里一行状态机逻辑都不写——
    执行状态的唯一真相是 `tasks.status`（ADR-008）。
@@ -41,6 +47,7 @@ from apps.api.modules.consistency import compose
 from apps.api.modules.consistency import service as consistency
 from apps.api.modules.consistency.models import CharacterProfile, SceneProfile, StyleProfile
 from apps.api.modules.project import service as project_service
+from apps.api.modules.prompting import rules as prompt_rules
 from apps.api.modules.task import service as task_service
 from apps.api.modules.task.models import Task
 
@@ -51,6 +58,26 @@ IMAGE_TASK = "image.generate"
 # 出图尺寸。写死在这里不违反"价格不进代码"——它是画面规格不是价格，
 # 计费按张数算（pricing._shape 只看 n）。
 DEFAULT_SIZE = "1024*1024"
+
+# 每一类出图要的画幅。
+#
+# **提示词里写的比例和请求参数必须是同一个。** 原 Skill 的 B3 模板末尾写
+# 「9:16」、B5 写「16:9」，而在这之前三条路径一律按 `DEFAULT_SIZE` 发方图：
+# 模型一边被告知画竖图、一边被要求填满一个正方形画布，构图必然被裁或被拉，
+# 而这张图是后续所有镜头的基准。
+#
+# 取值是万相 t2i 文档里的标准档（`catalog.SPECS` 现在挂的是
+# `wan2.2-t2i-flash` / `wan2.2-t2i-plus`）。**没有按模板里那句「2K高清」
+# 去凑一个 2K 尺寸**：那需要确认这两个模型到底收不收，猜一个填进去只会在
+# 上游换成参数错误。模板文案保持原文不动（源模板逐字照抄是硬规则），
+# 与实际画幅的这点落差记在交付报告里。
+#
+# 镜头首帧维持方图：分镜的既有比例就是它，这一轮不动。
+SIZE_OF_KIND: dict[str, str] = {
+    prompt_rules.KIND_CHARACTER: "720*1280",  # 9:16 竖图，B3 模板末尾那句
+    prompt_rules.KIND_SCENE: "1280*720",  # 16:9 横图，B5 模板末尾那句
+    prompt_rules.KIND_SHOT_IMAGE: DEFAULT_SIZE,
+}
 
 SUBJECT_CHARACTER = "character"
 SUBJECT_SCENE = "scene"
@@ -65,6 +92,19 @@ SUBJECT_SHOT = "shot"
 # 相反，所以必须在数据里分得开，不能让前端靠"有没有 task_id"去猜。
 SOURCE_GENERATED = "generated"
 SOURCE_ASSIGNED = "assigned"
+
+# 这张图是**谁**画的。
+#
+# `api` 是平台的 Provider 网关（万相等），花的是平台 Credits 对应的上游成本；
+# `local` 是用户自己电脑上的 Codex，花的是他自己的订阅额度。两条路的产物
+# 落在同一张 `tasks` 行、同一个资产库，但**代价的承担者不同**，所以必须
+# 在任务建起来的那一刻就钉死在 payload 里，不能等执行时再看"哪个可用"。
+#
+# 钉死的另一个理由更硬：选了本机就**不许**回落到付费 API。运行时再决定
+# 等于给了它一个悄悄替用户花钱的机会。
+IMAGE_SOURCE_API = "api"
+IMAGE_SOURCE_LOCAL = "local"
+IMAGE_SOURCES = (IMAGE_SOURCE_API, IMAGE_SOURCE_LOCAL)
 
 # 一次列多少条出图记录。26 个镜号 + 若干角色立绘 + 若干场景参考图，
 # 再加上重试，100 条足够覆盖一个项目的全部出图，且不用分页。
@@ -93,6 +133,10 @@ class Render:
     created_at: datetime
     #: SOURCE_GENERATED / SOURCE_ASSIGNED
     source: str = SOURCE_GENERATED
+    #: 这一张是谁画的：`api`（平台 Provider）还是 `local`（用户自己的 Codex）。
+    #: 用户自己钉上去的那种没人画，所以是 None。界面据此标注来源——
+    #: 两条路的代价承担者不同，不标出来用户没法判断"这张图花了谁的钱"。
+    image_source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,54 +225,120 @@ async def _scene_profiles(
     return style, profiles
 
 
-async def _scene_for_shot(
+def _resolve_source(source: str) -> str:
+    """校验来源取值。**判活不在这里。**
+
+    以前这个函数还会顺手对本机来源做一次 preflight。判死本身是对的
+    （建了任务就要预扣，预扣完再失败还得退，用户还会在任务中心看到一条
+    本来就不该存在的失败记录），但它长在三个出图端点上就只是**入口守卫**，
+    `retry_task` 和 `POST /tasks` 两条合法路径绕得过去。
+
+    所以那道闸整体搬进了 `task_service.preflight_local_image`——所有建任务
+    的路径都要经过 `create_task`，所有重试都要经过 `retry_task`，放在那里
+    它才是不变式。这里只剩"这个取值认不认得"，是纯参数校验，不碰 IO。
+    """
+    if source not in IMAGE_SOURCES:
+        raise AppError(
+            "common.validation_failed",
+            message=f"unknown image source {source}",
+            detail={"allowed": list(IMAGE_SOURCES)},
+        )
+    return source
+
+
+async def _replayed(
+    db: AsyncSession, *, org_id: uuid.UUID, idempotency_key: str | None
+) -> Task | None:
+    """幂等重放命中的那条任务。**必须在做任何昂贵的事情之前问。**
+
+    `create_task` 里本来就有这一步，但它在入参组装完之后才跑。自从提示词
+    改由 Agent 合成（ADR-036），"组装入参"就等于**一次真实的模型调用**——
+    等 `create_task` 去短路，用户重发一次请求就白花一次推理，而幂等键的
+    全部意义就是"重发不该有副作用"。
+    """
+    if not idempotency_key:
+        return None
+    return await task_service.find_by_idempotency_key(db, org_id=org_id, key=idempotency_key)
+
+
+async def _resolve_prompt(
     db: AsyncSession,
     *,
     org_id: uuid.UUID,
     project_id: uuid.UUID,
-    state: dict[str, Any],
-    shot: dict[str, Any],
-) -> SceneProfile | None:
-    """这一镜发生在哪个场景。**取不到就返回 None，不报错。**
+    kind: str,
+    subject_key: str,
+    source: str,
+    prompt_run_id: uuid.UUID | None,
+    instruction: str,
+) -> tuple[str, Any, Any]:
+    """校验来源 → 离线预检 → 取成品提示词。**这三步的顺序不能换。**
 
-    这是一条刻意的优雅降级，不是漏写的校验。镜头出图在场景档案存在
-    之前就已经跑通了，把场景变成硬前置条件会让所有存量项目、以及任何
-    分镜表里没写 `scene_ref` 的镜头，从"能出图"变成"点了报 409"。
-    多一份空间锚点是改进，不该顺手变成新的门槛。
+    预检必须排在取词之前：选了「本机出图」而连接器不在线时，这一次出图
+    从一开始就不该发生——先推理再发现连不上，等于白花一次钱，而且用户
+    还会在任务中心看到一条本来就不该存在的失败记录。
 
-    降级的代价是这一镜少了空间一致性——所以它在日志里必须留痕，
-    否则"为什么这两镜的房间不一样"就查不出来了。
+    取词可能真的调一次模型（没点名 `prompt_run_id`、也没有可复用的历史
+    版本时）。校验不过就在这里抛，**不建任务、不预扣、不出图**，也不退回
+    `compose` 的旧拼接兜底——退回一次，用户拿到的是一张与全片画风无关的图，
+    而且没有任何地方会告诉他。
     """
-    ref = str(shot.get("scene_ref", "") or "").strip()
-    if not ref:
-        return None
-
-    scenes_output = state.get("scenes")
-    if not isinstance(scenes_output, dict) or not scenes_output.get("scenes"):
-        log.warning(
-            "consistency.shot_without_scene",
-            project_id=str(project_id),
-            scene_ref=ref,
-            reason="no_scenes_output",
-        )
-        return None
-
-    _style, profiles = await consistency.sync_from_scenes_output(
-        db, org_id=org_id, project_id=project_id, output=scenes_output
+    source = _resolve_source(source)
+    await task_service.preflight_local_image(
+        org_id=org_id,
+        project_id=project_id,
+        task_type=IMAGE_TASK,
+        input_json={task_service.IMAGE_SOURCE_KEY: source, "n": 1},
     )
-    await db.commit()
+    # 延迟导入：`prompting.context` 反过来要 import `consistency.service`，
+    # 放在模块顶层会撞循环导入。
+    from apps.api.modules.prompting import service as prompting
 
-    scene = next((p for p in profiles if p.ref == ref), None)
-    if scene is None:
-        # 分镜表引用了一个不存在的场景 ref——和"引用了不存在的角色"
-        # 一样跳过，为它整镜失败不划算，但缺谁日志里看得见
-        log.warning(
-            "consistency.shot_unknown_scene_ref",
-            project_id=str(project_id),
-            scene_ref=ref,
-            reason="unknown_ref",
-        )
-    return scene
+    prompt, basis = await prompting.resolve_for_render(
+        db,
+        org_id=org_id,
+        project_id=project_id,
+        kind=kind,
+        subject_key=subject_key,
+        prompt_run_id=prompt_run_id,
+        instruction=instruction,
+    )
+    return source, prompt, basis
+
+
+def _payload(
+    prompt: Any, basis: Any, *, project_id: uuid.UUID, created_by: uuid.UUID, source: str
+) -> dict[str, Any]:
+    """出图任务的 `input_json`。
+
+    `prompt` 是**模型产出的完整最终词**，不是由当前档案重新拼出来的——
+    重试沿用这份 `input_json`，所以重试不会重新推理，也就不会因为档案在
+    这期间变过而漂移到另一张图上。
+
+    另外三个键是这张图的血缘：哪一次推理写的词（`prompt_run_id`）、
+    按哪一版模板与校验规则（`rule_version`）、依据的内容摘要
+    （`basis_digest`）。缺了它们，"这张图为什么长这样"只能靠猜。
+    """
+    payload: dict[str, Any] = {
+        "prompt": prompt.prompt,
+        "negative_prompt": prompt.negative_prompt,
+        # 画幅跟着 kind 走，与提示词里写的比例一致（见 `SIZE_OF_KIND`）。
+        "size": SIZE_OF_KIND.get(basis.kind, DEFAULT_SIZE),
+        "n": 1,
+        "seed": basis.seed,
+        "project_id": str(project_id),
+        "owner_user_id": str(created_by),
+        "image_source": source,
+        "subject_kind": basis.subject_kind,
+        "prompt_run_id": str(prompt.run_id),
+        "rule_version": prompt.rule_version,
+        "basis_digest": prompt.basis_digest,
+    }
+    if basis.subject_ref is not None:
+        payload["subject_ref"] = basis.subject_ref
+    if basis.shot_index is not None:
+        payload["shot_index"] = basis.shot_index
+    return payload
 
 
 async def _create(
@@ -266,47 +376,53 @@ async def request_character_portrait(
     project_id: uuid.UUID,
     created_by: uuid.UUID,
     ref: str,
+    source: str = IMAGE_SOURCE_API,
     idempotency_key: str | None = None,
+    prompt_run_id: uuid.UUID | None = None,
+    instruction: str = "",
 ) -> Task:
-    """给一个角色出基准立绘。
+    """给一个角色出基准立绘（B3）。
 
-    立绘是后续所有镜头的一致性基准，提示词由 `reference_portrait_prompt`
-    合成——中性表情、中性光照、纯色背景，任何戏剧化的光影都会污染基准。
+    立绘是后续所有镜头的一致性基准。提示词由 `visual.character_prompt.v1`
+    合成——人类/非人类两套模板、四铁律、无任何表情、中性光照、纯色背景，
+    任何戏剧化的光影都会污染基准。全局色调**不注入**：基准图带上它，
+    相似度比对就失去了意义。
+
+    `prompt_run_id` 是"用我刚才在界面上看过的那一版词"。不给就自动准备
+    （同样的输入有合格历史版本时直接复用，不重复花一次推理），
+    所以不带请求体的老按钮照常能用——但走的是新 Agent，不是旧拼接。
     """
-    project, state = await _project_state(db, org_id=org_id, project_id=project_id)
-    style, profiles = await _profiles(db, org_id=org_id, project_id=project_id, state=state)
+    if (replay := await _replayed(db, org_id=org_id, idempotency_key=idempotency_key)) is not None:
+        return replay
 
-    profile = next((p for p in profiles if p.ref == ref), None)
-    if profile is None:
-        # 角色不属于这个项目，和"项目不属于这个租户"一样只给 404
-        raise AppError("common.not_found", message=f"character {ref}")
-
-    payload: dict[str, Any] = {
-        "prompt": compose.reference_portrait_prompt(profile, style),
-        "negative_prompt": style.negative_tokens,
-        "size": DEFAULT_SIZE,
-        "n": 1,
-        # 立绘用项目基准种子本身，镜头才在它上面按镜号偏移。
-        # 同一个角色重出立绘落在同一个种子上，便于对比改动。
-        "seed": style.seed_base or None,
-        "project_id": str(project_id),
-        "owner_user_id": str(created_by),
-        "subject_kind": SUBJECT_CHARACTER,
-        "subject_ref": profile.ref,
-    }
+    # 项目先取：跨租户在这里就 404，早于任何推理。
+    project = await project_service.get_project(db, org_id=org_id, project_id=project_id)
+    source, prompt, basis = await _resolve_prompt(
+        db,
+        org_id=org_id,
+        project_id=project_id,
+        kind=prompt_rules.KIND_CHARACTER,
+        subject_key=ref,
+        source=source,
+        prompt_run_id=prompt_run_id,
+        instruction=instruction,
+    )
     task = await _create(
         db,
         org_id=org_id,
         project=project,
         created_by=created_by,
-        payload=payload,
+        payload=_payload(
+            prompt, basis, project_id=project_id, created_by=created_by, source=source
+        ),
         idempotency_key=idempotency_key,
     )
     log.info(
         "consistency.portrait_requested",
         project_id=str(project_id),
-        ref=profile.ref,
+        ref=ref,
         task_id=str(task.id),
+        prompt_run_id=str(prompt.run_id),
     )
     return task
 
@@ -318,49 +434,49 @@ async def request_scene_reference(
     project_id: uuid.UUID,
     created_by: uuid.UUID,
     ref: str,
+    source: str = IMAGE_SOURCE_API,
     idempotency_key: str | None = None,
+    prompt_run_id: uuid.UUID | None = None,
+    instruction: str = "",
 ) -> Task:
-    """给一个场景出基准参考图。
+    """给一个场景出基准参考图（B5：2×2 四视图）。
 
-    这张图之于场景，等同于基准立绘之于角色：同一场景后续所有镜头的
-    空间基准。提示词由 `reference_scene_prompt` 合成，摄影主轴和固定
-    参照物一定在里面——那两个字段就是场景一致性的全部依据，
-    只存不用等于这条链路白做。
+    这张图之于场景，等同于基准立绘之于角色：同一场景后续所有镜头的空间
+    基准。提示词由 `visual.scene_prompt.v1` 合成——2×2 四格、四个固定机位、
+    元素锁定清单逐项照抄、人物排除的三重否定、无文字标注。摄影主轴缺失
+    时**不出图**（`prompt.context.incomplete`）：没有主轴，四格的"正面"
+    由模型每次自己挑，这张图就当不了基准，而当基准是它存在的唯一理由。
     """
-    project, state = await _project_state(db, org_id=org_id, project_id=project_id)
-    style, profiles = await _scene_profiles(db, org_id=org_id, project_id=project_id, state=state)
+    if (replay := await _replayed(db, org_id=org_id, idempotency_key=idempotency_key)) is not None:
+        return replay
 
-    profile = next((p for p in profiles if p.ref == ref), None)
-    if profile is None:
-        # 场景不属于这个项目，和"项目不属于这个租户"一样只给 404
-        raise AppError("common.not_found", message=f"scene {ref}")
-
-    payload: dict[str, Any] = {
-        "prompt": compose.reference_scene_prompt(profile, style),
-        "negative_prompt": style.negative_tokens,
-        "size": DEFAULT_SIZE,
-        "n": 1,
-        # 和立绘一样用项目基准种子本身：同一个场景重出参考图落在同一个
-        # 种子上，便于对比"改了描述到底有没有变好"。镜头才按镜号偏移。
-        "seed": style.seed_base or None,
-        "project_id": str(project_id),
-        "owner_user_id": str(created_by),
-        "subject_kind": SUBJECT_SCENE,
-        "subject_ref": profile.ref,
-    }
+    project = await project_service.get_project(db, org_id=org_id, project_id=project_id)
+    source, prompt, basis = await _resolve_prompt(
+        db,
+        org_id=org_id,
+        project_id=project_id,
+        kind=prompt_rules.KIND_SCENE,
+        subject_key=ref,
+        source=source,
+        prompt_run_id=prompt_run_id,
+        instruction=instruction,
+    )
     task = await _create(
         db,
         org_id=org_id,
         project=project,
         created_by=created_by,
-        payload=payload,
+        payload=_payload(
+            prompt, basis, project_id=project_id, created_by=created_by, source=source
+        ),
         idempotency_key=idempotency_key,
     )
     log.info(
         "consistency.scene_reference_requested",
         project_id=str(project_id),
-        ref=profile.ref,
+        ref=ref,
         task_id=str(task.id),
+        prompt_run_id=str(prompt.run_id),
     )
     return task
 
@@ -486,20 +602,6 @@ async def assign_scene_reference(
     )
 
 
-def _find_shot(state: dict[str, Any], shot_index: int) -> dict[str, Any]:
-    storyboard = state.get("storyboard")
-    if not isinstance(storyboard, dict) or not storyboard.get("shots"):
-        raise AppError(
-            "consistency.profile.missing",
-            message="项目还没有分镜产出",
-            detail={"missing_stage": "storyboard"},
-        )
-    for shot in storyboard["shots"]:
-        if isinstance(shot, dict) and int(shot.get("index", -1)) == shot_index:
-            return shot
-    raise AppError("common.not_found", message=f"shot {shot_index}")
-
-
 async def request_shot_image(
     db: AsyncSession,
     *,
@@ -507,79 +609,46 @@ async def request_shot_image(
     project_id: uuid.UUID,
     created_by: uuid.UUID,
     shot_index: int,
+    source: str = IMAGE_SOURCE_API,
     idempotency_key: str | None = None,
+    prompt_run_id: uuid.UUID | None = None,
+    instruction: str = "",
 ) -> Task:
-    """给一个镜号出图。
+    """给一个镜号出首帧（C4 五要素的单镜适配）。
 
-    出场人物按分镜表的 `character_refs` 取，顺序照抄——`compose_shot`
-    对角色顺序敏感，顺序一变模型的注意力分布就变。分镜表里写了但
-    档案里没有的 ref 直接跳过：那是 Agent 造了个不存在的角色，
-    为它整镜失败不划算，而且缺谁在日志里看得见。
+    提示词由 `visual.shot_frame_prompt.v1` 合成，喂给它的是分镜表上
+    **所有会影响画面的字段**——景别、角度、运镜、画面内容、出场人物、
+    场景、光照状态。在这之前只传了 `content`，用户在分镜工作台上改的景别
+    和角度全部丢在路上：界面显示改成功了，出来的图和改之前一样。
 
-    场景按分镜表的 `scene_ref` 取，取不到就不带场景信息（见
-    `_scene_for_shot`）——镜头出图在场景档案存在之前就跑通了，
-    不能因为多了一张表就让存量项目出不了图。
-
-    光照按分镜表的 `lighting_ref` 取该场景已声明的那一个状态。引用了不存在
-    的状态就降级到该场景的默认状态并记一条 warning（见
-    `compose.resolve_lighting`），不为此让整镜失败。
+    **缺场景档案、或分镜引用了没有档案的角色，一律 409 不出图**
+    （`prompt.context.incomplete`）。这两条以前都是"跳过并记 warning"：
+    跳过意味着模型手里少一份空间或少一个人的外貌，而它仍然要把这一镜画
+    出来——结果是它自己编，编出来的下一镜又不一样。参数缺失时不猜关键
+    身份是 ADR-037 第 2 条，这里是它在出图端的落点。
     """
-    project, state = await _project_state(db, org_id=org_id, project_id=project_id)
-    shot = _find_shot(state, shot_index)
-    style, profiles = await _profiles(db, org_id=org_id, project_id=project_id, state=state)
+    if (replay := await _replayed(db, org_id=org_id, idempotency_key=idempotency_key)) is not None:
+        return replay
 
-    by_ref = {p.ref: p for p in profiles}
-    refs = [str(r) for r in shot.get("character_refs", []) if isinstance(r, str)]
-    characters = [by_ref[r] for r in dict.fromkeys(refs) if r in by_ref]
-    if missing := [r for r in refs if r not in by_ref]:
-        log.warning(
-            "consistency.shot_unknown_refs",
-            project_id=str(project_id),
-            shot_index=shot_index,
-            refs=missing,
-        )
-
-    scene = await _scene_for_shot(db, org_id=org_id, project_id=project_id, state=state, shot=shot)
-
-    lighting_ref = str(shot.get("lighting_ref", "") or "").strip()
-    composed = compose.compose_shot(
-        content=str(shot.get("content", "")),
-        style=style,
-        characters=characters,
-        shot_index=shot_index,
-        scene=scene,
-        lighting_ref=lighting_ref,
+    project = await project_service.get_project(db, org_id=org_id, project_id=project_id)
+    source, prompt, basis = await _resolve_prompt(
+        db,
+        org_id=org_id,
+        project_id=project_id,
+        kind=prompt_rules.KIND_SHOT_IMAGE,
+        subject_key=str(shot_index),
+        source=source,
+        prompt_run_id=prompt_run_id,
+        instruction=instruction,
     )
-    if lighting_ref and composed.lighting_state != lighting_ref:
-        # 分镜表引用了这个场景没声明过的光照状态。和未知 `scene_ref` /
-        # 未知 `character_refs` 一样降级而不是报错（理由见
-        # `compose.resolve_lighting`），但降级必须留痕——否则"这一镜的光
-        # 为什么和分镜表上写的不一样"永远查不出来。
-        log.warning(
-            "consistency.shot_unknown_lighting_ref",
-            project_id=str(project_id),
-            shot_index=shot_index,
-            requested=lighting_ref,
-            used=composed.lighting_state,
-        )
-
-    payload: dict[str, Any] = {
-        "prompt": composed.prompt,
-        "negative_prompt": composed.negative_prompt,
-        "size": DEFAULT_SIZE,
-        "n": 1,
-        "seed": composed.seed,
-        "project_id": str(project_id),
-        "owner_user_id": str(created_by),
-        "subject_kind": SUBJECT_SHOT,
-        "shot_index": shot_index,
-    }
     task = await _create(
         db,
         org_id=org_id,
         project=project,
         created_by=created_by,
-        payload=payload,
+        payload=_payload(
+            prompt, basis, project_id=project_id, created_by=created_by, source=source
+        ),
         idempotency_key=idempotency_key,
     )
 
@@ -596,13 +665,21 @@ async def request_shot_image(
     #
     # attempt 用 task.attempt + 1：`begin_execution` 会把它自增，
     # "即将执行的那一次"永远是当前值 +1，与计费的预扣编号对齐。
+    #
+    # `resolved_prompt` 存的是模型产出的全文，不是 compose 的拼接结果。
     await consistency.record_conditioning(
         db,
         org_id=org_id,
         project_id=project_id,
         shot_index=shot_index,
-        composed=composed,
-        style_id=style.id,
+        composed=compose.Composed(
+            prompt=prompt.prompt,
+            negative_prompt=prompt.negative_prompt,
+            seed=basis.seed,
+            character_ids=list(basis.character_profile_ids),
+            scene_id=basis.scene_profile_id,
+        ),
+        style_id=uuid.UUID(basis.style_profile_id),
         attempt=task.attempt + 1,
     )
     await db.commit()
@@ -611,8 +688,9 @@ async def request_shot_image(
         "consistency.shot_requested",
         project_id=str(project_id),
         shot_index=shot_index,
-        characters=len(characters),
+        characters=len(basis.character_profile_ids),
         task_id=str(task.id),
+        prompt_run_id=str(prompt.run_id),
     )
     return task
 
@@ -723,6 +801,9 @@ async def list_renders(
                 error_code=row.error_code,
                 asset_id=_asset_id_of(row.output_json),
                 created_at=row.created_at,
+                # 老任务的 payload 里没有这个键（本机来源是后加的），
+                # 缺省按 api 读——它们确实都是平台画的。
+                image_source=str(payload.get("image_source") or IMAGE_SOURCE_API),
             )
         )
 

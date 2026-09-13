@@ -20,6 +20,7 @@ from apps.api.core.errors import ERRORS, AppError, Disposition
 from apps.api.core.logging import get_logger
 from apps.api.modules.billing import pricing
 from apps.api.modules.billing import service as billing
+from apps.api.modules.local_runtime import service as local_runtime
 from apps.api.modules.task import events
 from apps.api.modules.task import repository as repo
 from apps.api.modules.task.models import ALLOWED_TRANSITIONS, TASK_TYPES, Task
@@ -70,6 +71,71 @@ async def _enqueue(task_id: uuid.UUID) -> None:
         await pool.aclose()
 
 
+#: 出图任务的类型名。本机来源只对它有意义（文本那条不建任务）。
+IMAGE_TASK = "image.generate"
+
+#: `input_json` 里钉住来源的那个键，与 `consistency/render.py` 写进去的是同一个。
+IMAGE_SOURCE_KEY = "image_source"
+IMAGE_SOURCE_LOCAL = "local"
+
+
+async def preflight_local_image(
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    task_type: str,
+    input_json: dict[str, Any] | None,
+) -> None:
+    """选了「本机出图」的任务，在**建任务 / 重试之前**统一判死。
+
+    以前这道闸只长在 `POST /projects/{id}/images/*` 三个端点上
+    （`render.py::_resolve_source`），于是两条合法路径绕得过去：
+
+    * `retry_task` —— 沿用原 `input_json`（来源确实钉住了，这点是对的），
+      但连接器已经下线时它照样重新预扣、入队、执行，一路跑到 Worker 里
+      `complete_image` 才发现 `local_runtime.offline`。用户白等一轮，
+      任务中心里还多一条本来就不该存在的失败记录。
+    * `POST /tasks` —— `TaskCreateIn.input` 是自由 `dict`，白名单 org 里的
+      用户可以直接建一条带 `{"image_source": "local"}` 的 `image.generate`。
+
+    提到这一层之后它就是**不变式**而不是入口守卫：所有建任务的路径都从
+    `create_task` 走，所有重试都从 `retry_task` 走。
+
+    `n != 1` 也在这里挡（P3-13）：`pricing._shape` 按 `n` 计份数，而本机这条
+    永远只出一张（`build_image_prompt` 写死"生成 1 张"、`_generate_local`
+    只登记一个资产）。不挡的话是**按 n 张预扣、只给一张**，而且不报错。
+
+    跨模块只调对方 `service`（CLAUDE.md 硬规则）：这里调的是
+    `local_runtime.service`，不碰它的 transport / repository。
+    """
+    if task_type != IMAGE_TASK:
+        return
+    payload = input_json or {}
+    if str(payload.get(IMAGE_SOURCE_KEY) or "") != IMAGE_SOURCE_LOCAL:
+        return
+
+    try:
+        count = int(payload.get("n", 1))
+    except (TypeError, ValueError):
+        count = 0
+    if count != 1:
+        raise AppError(
+            "provider.params.invalid",
+            message="local image generation produces exactly one image",
+            detail={"n": payload.get("n")},
+        )
+
+    if project_id is None:
+        # 白名单是按 (org, project) 配的。不挂项目的出图任务没有机会命中它，
+        # 建了也只会在 Worker 里失败一次。
+        raise AppError(
+            "local_runtime.not_configured",
+            message="local image generation requires a project",
+        )
+
+    await local_runtime.preflight_image(org_id, project_id)
+
+
 async def create_task(
     db: AsyncSession,
     *,
@@ -99,6 +165,13 @@ async def create_task(
                 # 幂等键撞到别的租户：绝不能返回对方的任务
                 raise AppError("common.conflict", message="idempotency key conflict")
             return existing, False
+
+    # 本机来源的出图：不可用就在这里失败，**任务没建、钱没动**。
+    # 放在幂等短路之后：命中幂等键时什么都没新建，再判一次只会把一次
+    # 无害的重发变成失败。
+    await preflight_local_image(
+        org_id=org_id, project_id=project_id, task_type=task_type, input_json=input_json
+    )
 
     # 带上 org_id：这个租户给该能力配了自己的 Key 时，估价要走 BYOK 档
     # （ADR-025），不能按平台售价预扣。
@@ -164,6 +237,25 @@ async def create_task(
     return task, True
 
 
+async def find_by_idempotency_key(
+    db: AsyncSession, *, org_id: uuid.UUID, key: str
+) -> Task | None:
+    """幂等键命中的那条任务，没有就 None。跨租户撞键一律 409。
+
+    `create_task` 内部本来就有这一步，但它在**入参组装完毕之后**才跑。
+    出图那条路径不能等到那时候：入参里的提示词现在是一次真实的模型调用
+    产出的（ADR-036），等 `create_task` 去短路，一次幂等重放已经白花了
+    一次推理。所以调用方要能在**做任何昂贵的事情之前**先问一句。
+    """
+    existing = await repo.get_by_idempotency_key(db, key=key)
+    if existing is None:
+        return None
+    if existing.org_id != org_id:
+        # 与 create_task 里同一条判断：幂等键撞到别的租户，绝不返回对方的任务
+        raise AppError("common.conflict", message="idempotency key conflict")
+    return existing
+
+
 async def _abort_unfunded(db: AsyncSession, *, task_id: uuid.UUID) -> None:
     """预扣失败：把任务落到终态，绝不能留在 queued。"""
     task = await repo.get_for_worker(db, task_id=task_id)
@@ -201,7 +293,14 @@ async def list_tasks(
     status: str | None = None,
     limit: int = 30,
     cursor: datetime | None = None,
+    task_type: str | None = None,
 ) -> tuple[list[Task], datetime | None]:
+    """项目的任务分页。
+
+    `task_type` 在**数据库里**过滤，不是取回来再筛。生成记录那条路径只要
+    `image.generate`：先取 N 条再筛，一个跑过很多次文本阶段的项目会把
+    N 条名额全用在别的类型上，出图记录一条都不剩——而那正是用户要查的。
+    """
     limit = max(1, min(limit, MAX_PAGE_SIZE))
     rows = await repo.list_page(
         db,
@@ -210,6 +309,7 @@ async def list_tasks(
         status=status,
         limit=limit + 1,
         cursor=cursor,
+        task_type=task_type,
     )
     has_more = len(rows) > limit
     page = rows[:limit]
@@ -248,6 +348,15 @@ async def retry_task(db: AsyncSession, *, org_id: uuid.UUID, task_id: uuid.UUID)
             message=f"错误 {task.error_code} 不可重试",
             detail={"error_code": task.error_code},
         )
+
+    # 与建任务同一道闸。重试**沿用原 `input_json`**，所以来源仍是本机；
+    # 连接器此刻不在，就不该重新预扣一笔去跑一条注定失败的任务。
+    await preflight_local_image(
+        org_id=org_id,
+        project_id=task.project_id,
+        task_type=task.type,
+        input_json=task.input_json,
+    )
 
     task.status = "queued"
     task.error_code = None

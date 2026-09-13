@@ -142,6 +142,7 @@ function draftOfPreview(shot: PreviewShot): ShotDraft {
     shot_size: shot.framing,
     angle: "",
     camera_move: shot.camera,
+    lighting_ref: "",
     content: shot.description,
     speaker_ref: shot.characters[0] ?? "",
     dialogue: shot.dialogue ?? "",
@@ -227,7 +228,7 @@ export default function ShellPreviewPage() {
             shot={{ ...selectedShot, nodeIndex: selectedShot.index }}
             draft={draft}
             dirty={NO_DIRTY}
-            options={{ scenes: [], characters: [] }}
+            options={{ scenes: [], characters: [], lighting: {}, defaultLighting: {} }}
             disabled={false}
             onChange={(field, value) => setDraft((prev) => ({ ...prev, [field]: value }))}
             actions={
@@ -250,6 +251,8 @@ export default function ShellPreviewPage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         shotCount={SHOTS.length}
+        // 这是设计预览页，没有真实项目也就没有本机运行时状态；固定走平台那一档。
+        imageSource="api"
         estimateCredits={480}
         estimateRange={{ low: 420, high: 560 }}
         onConfirm={async () => undefined}

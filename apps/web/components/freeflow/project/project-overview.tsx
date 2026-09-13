@@ -22,8 +22,8 @@ import {
   StoryIcon,
   StoryboardIcon,
 } from "@/components/icons/studio-icons";
-import type { AgentRun, Approval, Project, ReviseTarget } from "@/lib/api";
-import { STAGE_LABEL, type ProjectState } from "@/lib/freeflow/use-project-state";
+import type { AgentRun, Approval, GateName, Project, ReviseTarget } from "@/lib/api";
+import { GATE_LABEL, STAGE_LABEL, type ProjectState } from "@/lib/freeflow/use-project-state";
 import type { Images as ImagesState, RenderSubject } from "@/lib/freeflow/use-images";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +46,21 @@ const ROLE_LABEL: Record<ReviseTarget, string> = {
   characters: "角色",
   scenes: "场景",
   storyboard: "分镜",
+};
+
+/**
+ * 每道门要审的东西在哪一页（ADR-037 四道门）。
+ *
+ * **一张表，不是三元式。** 上一版这里写的是
+ * `gate === "setup" ? story : storyboard`，两道门时碰巧对，加到四道门时
+ * 门① 和门③ 全落进了分镜页——用户点「去处理」会到一个跟他要确认的东西
+ * 毫无关系的页面上。`Record<GateName, ...>` 少一个键 TypeScript 直接报错。
+ */
+const GATE_PAGE: Record<GateName, { path: string; label: string }> = {
+  plan: { path: "/story", label: "故事页" },
+  setup: { path: "/story", label: "故事页" },
+  anchors: { path: "/scenes", label: "世界美术页" },
+  storyboard: { path: "/storyboard", label: "镜头工作台" },
 };
 
 const PROJECT_STATUS: Record<string, string> = {
@@ -320,8 +335,8 @@ export function ProjectOverview({
                 <AttentionCard
                   icon={GatePendingIcon}
                   tone="review"
-                  title={pendingApproval.gate === "setup" ? "剧本等待确认" : "分镜等待确认"}
-                  detail="在上面的审核门里确认或打回；确认本身不花钱，下一次「推进生产」才会调用模型。"
+                  title={`${GATE_LABEL[pendingApproval.gate as GateName] ?? "有一道门"}等待处理`}
+                  detail={`要审的内容在${GATE_PAGE[pendingApproval.gate as GateName]?.label ?? "对应产出页"}，上面的审核门和那一页是同一个动作。确认本身不花钱，下一次「推进生产」才会调用模型。`}
                 />
               )}
               {stale.size > 0 && (
@@ -626,12 +641,13 @@ function chooseNextAction({
 }): NextAction {
   const base = `/freeflow/projects/${project.id}`;
   if (pendingApproval) {
-    // 门就开在概览页上（AdvanceAction 下面那块），但产出要在对应页面看：
-    // 让用户先看到要批的是什么，再回来批。
+    // 门开在**产出页**上：门① 要核对的情节目录、门③ 要核对的锚点卡都在那里，
+    // 而它们的正文太长，塞不进概览页的一张卡。所以这里只负责把人送过去。
+    const page = GATE_PAGE[pendingApproval.gate as GateName];
     return {
-      href: pendingApproval.gate === "setup" ? `${base}/story` : `${base}/storyboard`,
-      label: pendingApproval.gate === "setup" ? "查看待确认的剧本" : "查看待确认的分镜",
-      detail: "确认与打回在产出页和概览页都能做，两处是同一个动作。",
+      href: `${base}${page?.path ?? "/overview"}`,
+      label: page ? `去${page.label}处理` : "处理待确认的门",
+      detail: "确认、打回和这道门要审的内容在同一页——那是唯一能边看边判断的地方。",
     };
   }
   if (runs.some((run) => run.status === "running" || run.status === "queued")) {
