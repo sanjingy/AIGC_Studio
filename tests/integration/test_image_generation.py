@@ -24,10 +24,12 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from apps.api.core.db import session_scope
-from apps.api.modules.agent import orchestrator
+from apps.api.modules.agent import llm, orchestrator
+from apps.api.modules.agent import service as agent_service
 from apps.api.modules.consistency import service as consistency
 from apps.api.modules.consistency.models import SceneProfile, ShotConditioning
 from apps.api.modules.project import service as project_service
+from apps.api.modules.prompting import rules as prompt_rules
 from apps.api.modules.task import service as task_service
 from apps.api.modules.task.models import Task
 from tests.conftest import advance_to_gate
@@ -87,6 +89,30 @@ async def _task_row(task_id: str) -> Task:
 
 async def _balance(client: AsyncClient) -> dict[str, int]:
     return dict((await client.get("/api/v1/credits/balance")).json())
+
+
+async def _model_input(client: AsyncClient, pid: str, kind: str, subject_key: str) -> str:
+    """这一次**送进模型**的上下文全文。
+
+    提示词改由 Agent 合成之后（ADR-036），"档案里的某个字段有没有进图"不再
+    由我们的代码决定，而是由模型写不写。平台能保证并且必须保证的是
+    **它拿到了这些东西**——所以这类断言落在送进去的上下文上，而不是落在
+    MockLLM 产出的那段文字上（那只会测出 Mock 的文采，测不出链路）。
+
+    模型有没有照做，由 `rules.check_output` 那一道守着，见
+    `tests/unit/test_prompt_builders.py`。
+    """
+    async with session_scope() as db:
+        runs = await agent_service.list_prompt_runs(
+            db,
+            org_id=await _org(client),
+            project_id=uuid.UUID(pid),
+            kind=kind,
+            subject_key=subject_key,
+            limit=1,
+        )
+    assert runs, f"{kind}/{subject_key} 没有留下提示词运行记录 —— 生产路径没走新 Agent"
+    return str(dict(runs[0].input_json)["user_input"])
 
 
 # ---------------------------------------------------------------- 编排器接线
@@ -197,8 +223,7 @@ async def test_portrait_task_carries_composed_prompt(alice: AsyncClient) -> None
         )
         scene_only = style.scene_tokens
 
-    assert "主角" in payload["prompt"], "提示词里必须有角色的结构化外貌"
-    assert "黑色短发，额前碎发" in payload["prompt"]
+    assert "主角" in payload["prompt"], "提示词里必须有这个角色"
     assert positive in payload["prompt"], "人物版风格词必须由系统注入"
     assert scene_only not in payload["prompt"], "基准立绘不该带场景版风格词"
     assert "纯色背景" in payload["prompt"], "基准立绘必须是中性构图"
@@ -207,6 +232,28 @@ async def test_portrait_task_carries_composed_prompt(alice: AsyncClient) -> None
     assert payload["project_id"] == pid
     assert payload["subject_kind"] == "character"
     assert payload["subject_ref"] == "zhu_jue"
+
+    # 这张图的血缘：哪一次推理写的词、按哪一版规则、依据什么内容。
+    # 缺了它们，"这张图为什么长这样"只能靠猜。
+    assert payload["prompt_run_id"]
+    assert payload["rule_version"] == prompt_rules.RULE_VERSION
+    assert payload["basis_digest"]
+
+    # 结构化外貌**既要送进模型，也要活到成品词里**。
+    #
+    # 只断言前者是不够的（这正是上一轮返工的根因）：平台把档案送到了，模型
+    # 把发型整句删掉、把服装归纳成两个字，任务照建、图照出，而这张立绘是
+    # 后续每一镜的比对基准。成品词这一侧由 `rules.check_output` 拿**上下文里
+    # 的已知事实**去比对，不合格根本建不出任务——所以这里断言得到的 payload
+    # 里确实有这些事实，等于同时证明了那道校验真的在生产路径上。
+    user_input = await _model_input(alice, pid, prompt_rules.KIND_CHARACTER, "zhu_jue")
+    assert "黑色短发，额前碎发" in user_input, "角色的发型没送给模型"
+    assert "深灰西装外套" in user_input, "角色的服装没送给模型"
+
+    assert "黑色短发" in payload["prompt"], "角色的发型没能活到最终出图的提示词里"
+    assert "额前碎发" in payload["prompt"]
+    assert "深灰西装外套" in payload["prompt"], "角色的服装没能活到最终出图的提示词里"
+    assert "黑色皮鞋" in payload["prompt"], "角色的鞋子没能活到最终出图的提示词里"
 
     # 计费：走的是普通任务那条路，预扣必须已经记上
     mid = await _balance(alice)
@@ -217,6 +264,53 @@ async def test_unknown_character_is_404(alice: AsyncClient) -> None:
     pid = await _run_to_storyboard(alice)
     r = await alice.post(f"{P}/{pid}/images/characters/nobody")
     assert r.status_code == 404
+
+
+async def test_a_rewritten_appearance_fact_is_refused_and_costs_nothing(
+    alice: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """模型改写了一处已知事实、同时把自报字段修得自洽 —— 仍然被拒。
+
+    这是本轮返工的独立反例，测的是校验的**判据**而不是它的结果：
+
+    - 只动一处（把档案上的「深灰西装外套」归纳成「西装」）。其余一个字不改，
+      所以过不了的原因只可能是那一处；
+    - 同时把 `subject_identity` / `accessories` 两个**模型自报**字段写成与档案
+      自洽的样子。只信任自报字段的校验在这里会全绿——而那正是上一轮的漏洞。
+
+    还要证明被拒之后**没花钱**：不建出图任务、预扣余额一分没动，但失败要留
+    得下记录，否则用户只看到界面报红、点开日志什么都没有。
+    """
+    pid = await _run_to_storyboard(alice)
+    original = llm._BUILDERS["CharacterPortraitPrompt"]
+
+    def tampered(seed: int, user: str) -> dict[str, Any]:
+        output = dict(original(seed, user))
+        output["prompt"] = str(output["prompt"]).replace("深灰西装外套", "西装")
+        output["subject_identity"] = "日本"
+        output["accessories"] = "警号铜牌"
+        return output
+
+    monkeypatch.setitem(llm._BUILDERS, "CharacterPortraitPrompt", tampered)
+
+    before_balance = await _balance(alice)
+    before_images = len((await alice.get(f"{P}/{pid}/images")).json())
+
+    r = await alice.post(f"{P}/{pid}/images/characters/zhu_jue")
+
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "prompt.output.invalid"
+    assert "深灰西装外套" in r.json()["error"]["message"], "错误里要点名是哪一处事实丢了"
+
+    # 不建图任务、不预扣
+    assert len((await alice.get(f"{P}/{pid}/images")).json()) == before_images
+    assert await _balance(alice) == before_balance, "被拒的请求动了余额"
+
+    # 但这次失败要查得到：模型到底写了什么、被哪一条规则拦下的
+    records = (await alice.get(f"{P}/{pid}/generation-records")).json()
+    assert any(x["error_code"] == "prompt.output.invalid" for x in records), (
+        f"校验失败没留下可查的记录：{[x['error_code'] for x in records]}"
+    )
 
 
 async def test_portrait_before_characters_stage_explains_itself(alice: AsyncClient) -> None:
@@ -332,14 +426,32 @@ async def test_scene_reference_task_carries_spatial_anchors(alice: AsyncClient) 
         )
         character_only = style.character_tokens
 
-    # 锚点：这两样不进提示词，场景出图就只是"看着像"而没有一致性
-    assert "铁门外的路面" in payload["prompt"], "摄影主轴的站位没进提示词"
-    assert "朝向建筑正面" in payload["prompt"]
-    assert "锈迹铁门" in payload["prompt"], "固定参照物的名称没进提示词"
-    assert "右扇下缘锈穿" in payload["prompt"], "固定参照物的描述没进提示词"
-    assert "摄影主轴" in payload["prompt"], "主轴必须是构图指令，不只是描述"
-    assert positive in payload["prompt"], "场景版风格词必须由系统注入"
-    assert character_only not in payload["prompt"], "场景参考图不该带人物质感词"
+    # 锚点：这两样不送给模型，场景出图就只是"看着像"而没有一致性
+    user_input = await _model_input(alice, pid, prompt_rules.KIND_SCENE, "gate")
+    assert "铁门外的路面" in user_input, "摄影主轴的站位没送给模型"
+    assert "朝向建筑正面" in user_input
+    assert "锈迹铁门" in user_input, "固定参照物的名称没送给模型"
+    assert "右扇下缘锈穿" in user_input, "固定参照物的描述没送给模型"
+
+    # 成品词这一侧守两样：B5 的硬结构（四格、三重否定、无文字标注），
+    # 以及**档案上的空间事实真的活到了最终提示词里**——主轴三段、每一条锚点
+    # 的名称与描述。后者是这张图能当空间基准的全部理由：只送进模型不算数，
+    # 模型不写，出来的四格仍然各朝各的方向。
+    prompt = payload["prompt"]
+    assert any(g in prompt for g in ("2x2", "2×2")), "场景概念图不是 2×2 四视图"
+    for _field, label in prompt_rules.QUADRANT_LABELS:
+        assert label in prompt, f"四视图缺了{label}"
+    for clause in prompt_rules.NO_PEOPLE_CLAUSES:
+        assert clause in prompt, f"人物排除的三重否定缺了：{clause}"
+
+    assert "铁门外的路面" in prompt, "摄影主轴的站位没能活到最终提示词里"
+    assert "朝向建筑正面" in prompt, "摄影主轴的朝向没能活到最终提示词里"
+    assert "锈迹铁门" in prompt, "固定参照物的名称没能活到最终提示词里"
+    assert "右扇下缘锈穿" in prompt, "固定参照物的描述没能活到最终提示词里"
+    assert any(p in prompt for p in prompt_rules.AXIS_BASIS_PHRASES), "没有把摄影主轴点明为构图依据"
+
+    assert positive in prompt, "场景版风格词必须由系统注入"
+    assert character_only not in prompt, "场景参考图不该带人物质感词"
     assert payload["negative_prompt"] == negative
     assert payload["seed"] == seed_base
     assert payload["subject_kind"] == "scene"
@@ -425,13 +537,28 @@ async def test_shot_prompt_carries_its_scene(alice: AsyncClient) -> None:
     row = await _task_row(created["id"])
     payload: dict[str, Any] = dict(row.input_json)
 
-    # mock 分镜表第 1 镜的 scene_ref 是 gate
-    assert "铁门外的路面" in payload["prompt"], "摄影主轴没进镜头提示词"
-    assert "锈迹铁门" in payload["prompt"], "固定参照物的名称没进镜头提示词"
-    assert "右扇下缘锈穿" in payload["prompt"], "固定参照物的描述没进镜头提示词"
-    # 顺序：角色 → 场景 → 画面 → 风格
-    assert payload["prompt"].index("主角") < payload["prompt"].index("铁门外的路面")
-    assert payload["prompt"].index("铁门外的路面") < payload["prompt"].index("第 1 镜的画面内容")
+    # mock 分镜表第 1 镜的 scene_ref 是 gate。空间锚点既要送进模型，
+    # **也要活到成品词里**——"身后是什么"必须从锚点推演，而推演过没有
+    # 只能看最终提示词里有没有留下那几条事实。只断言输入的话，模型套用
+    # 一个固定背景照样全绿，而下一镜的背景又会变成别的。
+    user_input = await _model_input(alice, pid, prompt_rules.KIND_SHOT_IMAGE, "1")
+    assert "铁门外的路面" in user_input, "摄影主轴没送给这一镜"
+    assert "锈迹铁门" in user_input, "固定参照物的名称没送给这一镜"
+    assert "右扇下缘锈穿" in user_input, "固定参照物的描述没送给这一镜"
+
+    prompt = payload["prompt"]
+    assert "铁门外的路面" in prompt, "摄影主轴的站位没能活到这一镜的最终提示词"
+    assert "朝向建筑正面" in prompt, "摄影主轴的朝向没能活到这一镜的最终提示词"
+    assert "红砖三层建筑的正门石阶" in prompt, "摄影主轴的远景末端没能活到这一镜的最终提示词"
+    assert "锈迹铁门" in prompt, "固定参照物的名称没能活到这一镜的最终提示词"
+    assert "右扇下缘锈穿" in prompt, "固定参照物的描述没能活到这一镜的最终提示词"
+    # **每一条**锚点，不是"至少一条"：留哪几条由模型自己挑的话，它挑剩下的
+    # 那几条下一镜就会换个样子，同一个院子又开始漂。
+    assert "右下角螺丝缺一颗" in prompt, "第二条锚点的描述没能活到这一镜的最终提示词"
+
+    # 五要素里的"身后背景"必须真的落在成品词上（schema 层强制非空，
+    # `rules` 层强制它出现在正文里）——它是原文点名最容易出错的一项。
+    assert payload["prompt"].strip()
 
     async with session_scope() as db:
         record = (
@@ -526,11 +653,21 @@ async def test_shot_in_a_single_state_scene_uses_that_state(alice: AsyncClient) 
     assert "顶部吊灯与桌面台灯为主" in prompt
 
 
-async def test_shot_without_scene_profile_still_renders(alice: AsyncClient) -> None:
-    """项目没有场景档案时，镜头照样出图，只是不带空间信息。
+async def test_shot_without_scene_profile_is_refused(alice: AsyncClient) -> None:
+    """项目没有场景档案时，镜头**不出图**，给一个明确的中文错误。
 
-    这是一条刻意的优雅降级：镜头出图在场景档案存在之前就跑通了，
-    把场景变成硬前置条件会让存量项目从"能出图"变成"点了报 409"。
+    ⚠️ **这是一次产品级行为变更**（ADR-036，需 Lead 确认）。这条用例原先
+    断言的是相反的行为："没有场景档案也照样出图，只是不带空间信息"，理由
+    是优雅降级，别让存量项目从"能出图"变成"点了报错"。
+
+    改变它的是新契约里的两条：C4 五要素要求**身后背景必须从空间锚点推演**，
+    而"缺关键前置数据返回明确中文错误、不自由猜关键身份"是 ADR-037 第 2 条。
+    没有场景档案时模型手里没有任何空间信息，它仍然要把这一镜画出来——
+    结果是它自己编一个背景，而下一镜编的又不一样。那正是这次整改要消灭的
+    东西，所以降级在这里不再成立。
+
+    代价是真实的：跑过分镜但没有场景档案的存量项目，出图入口会从"能点"
+    变成"点了报 409"。他们需要重跑一次场景阶段。
     """
     org_id = await _org(alice)
     pid = await _run_to_storyboard(alice)
@@ -543,14 +680,26 @@ async def test_shot_without_scene_profile_still_renders(alice: AsyncClient) -> N
         project.current_state_json = state
         await db.commit()
 
+    before = len((await alice.get(f"{P}/{pid}/images")).json())
     r = await alice.post(f"{P}/{pid}/images/shots/1")
-    assert r.status_code == 201, r.text
 
-    row = await _task_row(r.json()["id"])
-    payload: dict[str, Any] = dict(row.input_json)
-    assert "第 1 镜的画面内容" in payload["prompt"], "画面内容还得在"
-    assert "主角" in payload["prompt"], "角色还得在"
-    assert "铁门外的路面" not in payload["prompt"], "没有场景档案就不该凭空造一个"
+    assert r.status_code == 409, r.text
+    assert r.json()["error"]["code"] == "consistency.profile.missing"
+    assert r.json()["error"]["detail"]["missing_stage"] == "scenes"
+    # 文案要指到**缺的那一步**。同一个错误码在缺角色和缺场景两条路径上都会抛，
+    # 而它原来只说"还没有角色设定"——缺场景的用户照着做会去重跑角色阶段，
+    # 跑完回来仍然出不了图，而错误一个字都没变。
+    user_message = r.json()["error"]["user_message"]
+    assert "场景" in user_message, f"缺的是场景档案，文案却没提场景：{user_message}"
+
+    # 不建任务、不预扣：判不合格就不该留下一条注定失败的出图记录
+    assert len((await alice.get(f"{P}/{pid}/images")).json()) == before
+
+    # 但这次失败要能在生成记录里找到，否则用户只看到界面报红
+    records = (await alice.get(f"{P}/{pid}/generation-records")).json()
+    assert any(x["error_code"] == "consistency.profile.missing" for x in records), (
+        "前置失败没留下任何可查的记录"
+    )
 
 
 async def test_unknown_shot_is_404(alice: AsyncClient) -> None:

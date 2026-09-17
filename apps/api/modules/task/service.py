@@ -237,9 +237,7 @@ async def create_task(
     return task, True
 
 
-async def find_by_idempotency_key(
-    db: AsyncSession, *, org_id: uuid.UUID, key: str
-) -> Task | None:
+async def find_by_idempotency_key(db: AsyncSession, *, org_id: uuid.UUID, key: str) -> Task | None:
     """幂等键命中的那条任务，没有就 None。跨租户撞键一律 409。
 
     `create_task` 内部本来就有这一步，但它在**入参组装完毕之后**才跑。

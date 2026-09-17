@@ -57,7 +57,20 @@ packages = ["apps", "worker", "packages", "agents", "adapters", "skills"]
 [tool.ruff]
 line-length = 100
 target-version = "py313"
-extend-exclude = ["migrations/versions"]
+extend-exclude = [
+    "migrations/versions",
+    # `.claude/skills/` 下是装进来的第三方技能包（ui-ux-pro-max 是 MIT 的
+    # vendored 设计技能，orca-task-router 的 assets 是它自带的脚本），由上游
+    # 独立维护、随更新整包覆盖。按本仓的 ruff 口径去改它们，下一次更新就会
+    # 被覆盖回去，而 CI 会因此长期红着——这不是我们的源码，不该进我们的
+    # lint 口径。
+    #
+    # 只排这一层，**不排整个 `.claude/`**：同目录下将来若放我们自己写的
+    # hook / 脚本，仍然要被检查。apps / worker / packages / agents /
+    # adapters / skills / tests / tools / scripts / migrations 的检查范围
+    # 一律不变，上面的 select / banned-api 规则一条没删。
+    ".claude/skills",
+]
 
 [tool.ruff.lint]
 select = [

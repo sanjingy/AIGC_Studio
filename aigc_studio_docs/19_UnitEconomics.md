@@ -257,13 +257,13 @@ Gate 5 分镜确认
 
 ```python
 estimated_cost = (
-      shots * frames_per_shot * image_price * image_retry_factor
+    shots * frames_per_shot * image_price * image_retry_factor
     + shots * video_price_per_unit * video_retry_factor
     + prep_asset_count * image_price * image_retry_factor
-    + llm_tokens_in  * llm_price_in
+    + llm_tokens_in * llm_price_in
     + llm_tokens_out * llm_price_out
     + tts_chars * tts_price
-) * (1 + overhead_rate)          # overhead_rate ≈ 0.03
+) * (1 + overhead_rate)  # overhead_rate ≈ 0.03
 ```
 
 实现要求：

@@ -65,9 +65,7 @@ async def get_prompt(
     return _out(prompt) if prompt is not None else None
 
 
-@router.post(
-    "/{kind}/{subject_key}", response_model=PromptOut, status_code=status.HTTP_201_CREATED
-)
+@router.post("/{kind}/{subject_key}", response_model=PromptOut, status_code=status.HTTP_201_CREATED)
 async def prepare_prompt(
     project_id: uuid.UUID,
     user: CurrentUser,

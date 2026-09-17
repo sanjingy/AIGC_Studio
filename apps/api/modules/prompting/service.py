@@ -233,9 +233,11 @@ async def _prepare(
     一轮档案同步与提交，白花的是数据库而不是推理，但白花就是白花。
     """
     kind, subject_key = basis.kind, basis.subject_key
-    if (existing := await _reusable(
-        db, org_id=org_id, project_id=project_id, basis=basis, instruction=instruction
-    )) is not None:
+    if (
+        existing := await _reusable(
+            db, org_id=org_id, project_id=project_id, basis=basis, instruction=instruction
+        )
+    ) is not None:
         log.info(
             "prompting.reused",
             project_id=str(project_id),

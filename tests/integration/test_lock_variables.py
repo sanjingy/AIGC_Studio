@@ -55,14 +55,28 @@ async def test_style_catalog_comes_from_the_database(alice: AsyncClient) -> None
 
 
 async def test_scene_tokens_say_the_scene_is_empty(alice: AsyncClient) -> None:
-    """场景版必须明写"无人物"（ADR-036 第 3 条）。
+    """场景版必须明写这是一个**空**场景（ADR-036 第 3 条）。
 
     场景参考图是同一场景后续所有镜头的空间基准。基准图里画进一个人，
     那个人就会被当成这个空间的一部分带进每一镜。
+
+    判据接受**两种写法**，因为目录里现在有两代数据：四道门那一批
+    （`e4b7c9d21f38`）写的是「空场景无人物」，ADR-038 迁进来的超哥原版八条
+    （`a8c3e91d6402`）写的是「高质量实景空场景」「高质量空场景」。原版那批
+    是**逐字照抄源词库**的（源文 sha256 由
+    `tests/unit/test_chaoge_catalog_migration.py` 盯着），不能为了凑一个
+    关键词去改它——"源模板逐字照抄"是比这条断言更硬的规则。
+
+    所以这里钉的是**语义**而不是某一个词：场景版必须出现"空场景"或"无人物"
+    之一。两种写法都真的表达了"这里没有人"，而漏掉这件事的那种退化
+    （场景版被写成人物版的复制品）两个词都不会出现，仍然拦得住。
     """
     pid = await _project(alice)
     for option in (await _lock(alice, pid))["style_options"]:
-        assert "无人物" in option["scene_tokens"], f"{option['key']} 的场景版没写明空场景"
+        tokens = option["scene_tokens"]
+        assert any(word in tokens for word in ("空场景", "无人物")), (
+            f"{option['key']} 的场景版没写明空场景：{tokens}"
+        )
 
 
 async def test_a_project_with_no_lock_row_still_gets_the_options(alice: AsyncClient) -> None:

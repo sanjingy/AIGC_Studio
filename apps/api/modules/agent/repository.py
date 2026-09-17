@@ -315,10 +315,5 @@ async def list_prompt_runs(
     ]
     if succeeded_only:
         conditions.append(AgentRun.status == "succeeded")
-    stmt = (
-        select(AgentRun)
-        .where(*conditions)
-        .order_by(AgentRun.created_at.desc())
-        .limit(limit)
-    )
+    stmt = select(AgentRun).where(*conditions).order_by(AgentRun.created_at.desc()).limit(limit)
     return list((await db.execute(stmt)).scalars())

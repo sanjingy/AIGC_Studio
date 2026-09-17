@@ -590,9 +590,7 @@ async def _scene_basis(
     scene, lighting = _scene_block(profile, _sheet_of(state, "scenes", ref))
     _require_camera_axis(scene)
 
-    style_block = _style_block(
-        style, "scene", with_tone=True, tone=_global_tone(state, style)
-    )
+    style_block = _style_block(style, "scene", with_tone=True, tone=_global_tone(state, style))
     context: dict[str, Any] = {
         "kind": rules.KIND_SCENE,
         "rule_version": rules.RULE_VERSION,
@@ -672,9 +670,7 @@ async def _shot_basis(
     surface = "video" if kind == rules.KIND_SHOT_VIDEO else _shot_surface(refs)
     _require_style(style, surface)
 
-    style_block = _style_block(
-        style, surface, with_tone=True, tone=_global_tone(state, style)
-    )
+    style_block = _style_block(style, surface, with_tone=True, tone=_global_tone(state, style))
     context: dict[str, Any] = {
         "kind": kind,
         "rule_version": rules.RULE_VERSION,

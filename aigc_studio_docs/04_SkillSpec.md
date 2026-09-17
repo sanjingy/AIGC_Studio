@@ -40,7 +40,7 @@ required，其余三道可关——**门的数量是策略，不是常量**（AD
 
 ```python
 spec.effective_gates(review_mode="auto")  # → ["script", "final"]
-spec.effective_gates()                     # → 五道全在
+spec.effective_gates()  # → 五道全在
 ```
 
 新增一道门需要 ADR。

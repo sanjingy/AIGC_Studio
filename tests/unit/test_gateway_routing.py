@@ -177,10 +177,22 @@ async def test_all_down_raises_last_error() -> None:
 
 
 async def test_no_provider_registered_is_explicit() -> None:
-    """没配 Key 时的报错要说清原因，不能只丢一个通用错误。"""
+    """没配 Key 时的报错要说清原因，不能只丢一个通用错误。
+
+    期望按**当前真实文案**校准：两条自动兜底（文本退回 MockLLM、出图退回
+    mock_image）撤掉之后，"一个模型都没有"如实走到 `_resolve` 的那条分支，
+    文案是「没有可用的模型来完成「…」。请在设置页配置你自己的 Provider Key…」
+    ——里面没有「API Key」这个词组，旧的正则因此对不上。
+
+    **不放松成"随便抛个异常就算过"**：这条用例的价值全在"用户看得懂、且知道
+    该去哪儿配"。所以仍然钉三样：错误码、"没有可用的模型"这句判断、以及那句
+    把用户指向配置入口的 Key 提示。
+    """
     gw._registry = gw.Registry()
-    with pytest.raises(AppError, match="API Key"):
+    with pytest.raises(AppError, match="没有可用的模型") as exc:
         await gw.generate_text(TextRequest(system="s", user="u"))
+    assert exc.value.code == "provider.unavailable"
+    assert "Key" in exc.value.message, "文案要把用户指到配置 Key 的地方"
 
 
 # ------------------------------------------------------------------ 熔断

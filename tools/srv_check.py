@@ -37,7 +37,9 @@ KEY = os.path.expanduser("~/.ssh/id_ed25519")
 REMOTE = "/opt/aigc_studio"
 
 # 跑完必须恢复检出，否则下次部署的 git pull --ff-only 会撞上脏文件。
-RESTORE = f"cd {REMOTE} && git checkout -- . && git clean -fd -e docker-compose.override.yml -e .env"
+RESTORE = (
+    f"cd {REMOTE} && git checkout -- . && git clean -fd -e docker-compose.override.yml -e .env"
+)
 
 COMMANDS = {
     "pytest": "docker compose exec -T api pytest",

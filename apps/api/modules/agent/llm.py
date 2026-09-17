@@ -568,17 +568,33 @@ def _pad(text: str, minimum: int) -> str:
     return text
 
 
+def _anchor_names(scene_or_card: dict[str, Any]) -> list[str]:
+    """固定参照物的**名称**。
+
+    `fixed_references` 在库里是两段式的 `{"name", "description"}` 字典
+    （`SceneSheet` 的锚点，见 `prompting.context._scene_block`），不是字符串。
+    直接 `str()` 会把整个字典的 Python repr 拼进提示词——校验器照样放行
+    （清单里的项确实"出现在提示词里"），但产出的是一段
+    `{'name': '锈迹铁门', 'description': ...}`，而 Mock 的产出同时是
+    下游用例的输入样例，那种字符串会一路传到断言里。
+    """
+    out: list[str] = []
+    for ref in scene_or_card.get("fixed_references") or []:
+        name = str(ref.get("name", "") or "").strip() if isinstance(ref, dict) else str(ref).strip()
+        if name:
+            out.append(name)
+    return out
+
+
 def _character_prompt(seed: int, user: str) -> dict[str, Any]:
     del seed
     ctx = _ctx(user)
     character = dict(ctx.get("character") or {})
     era = dict(ctx.get("era") or {})
-    appearance = dict(character.get("appearance") or {})
     human = str(character.get("kind", "人类")) == "人类"
 
-    # 身份与配件都走 `rules` 里那一份定义，不在这里抄第二遍字段名——
+    # 身份、配件与外貌事实都走 `rules` 里那一份定义，不在这里抄第二遍字段名——
     # 抄了就会出现"Mock 认为档案里有、校验器认为没有"，而那种红是查不出来的。
-    del appearance
     identity = rules.known_identity(character, era)
     if not identity:
         identity = str(character.get("species", "") or "").strip() or "非人类"
@@ -587,11 +603,21 @@ def _character_prompt(seed: int, user: str) -> dict[str, Any]:
     # 关键配件往往就是这个角色的识别度所在。
     accessories = rules.known_accessories(character) or "无"
 
+    # 档案上的结构化外貌事实逐条照抄。档案本身与四铁律冲突时（写着背包书包）
+    # 跳过不写：照抄会触发禁止项，而该报的冲突由校验器显式报出来，
+    # 不靠 Mock 悄悄替用户改档案。
+    facts = [
+        f"{label}：{value}。"
+        for label, value in rules.known_appearance(character, "人类" if human else "非人类")
+        if not (human and any(b in value for b in rules.BANNED_ITEMS))
+    ]
+
     lines = [
         f"{identity}，{character.get('name', '角色')}，全身立绘，中性站姿，纯色背景。",
         _style_words(ctx),
+        *facts,
     ]
-    if accessories != "无":
+    if accessories not in rules.NOT_APPLICABLE:
         lines.append(f"关键配件：{accessories}。")
     if human:
         # 四铁律里校验器盯着的两条：必须写「无任何表情」，不许出现背包书包。
@@ -615,7 +641,7 @@ def _scene_prompt(seed: int, user: str) -> dict[str, Any]:
     # 元素锁定清单：四格只是机位不同，这些必须字字相同。schema 要求至少两项，
     # 不够就拿场景本身的描述凑——凑不出来才说明档案确实是空的。
     elements = [str(e).strip() for e in (scene.get("key_elements") or []) if str(e).strip()]
-    elements += [str(r).strip() for r in (scene.get("fixed_references") or []) if str(r).strip()]
+    elements += _anchor_names(scene)
     for extra in (str(scene.get("setting", "") or "").strip(), f"{name}的地面与墙面"):
         if len(elements) >= 2:
             break
@@ -629,11 +655,42 @@ def _scene_prompt(seed: int, user: str) -> dict[str, Any]:
         "bottom_left": "右前角朝左后角的对角线视图",
         "bottom_right": "右后角朝左前角的对角线视图",
     }
+    # 摄影主轴逐段照抄，并点明它是构图依据——校验器查的就是这两件事：
+    # 只把站位当背景描述写进去，正视图的"正面"仍然由模型每次自己挑。
+    axis = dict(scene.get("camera_axis") or {})
+    axis_text = "，".join(
+        bit
+        for bit in (str(axis.get(k, "") or "").strip() for k in ("position", "facing", "far_end"))
+        if bit
+    )
+    # 锚点的名称与描述都要写：只给名称模型不知道它长什么样、在哪，
+    # 四格之间就会挪位置。
+    #
+    # 局部名**必须**是 anchor_name / anchor_description，不能复用外层的 `name`：
+    # 推导式里的海象赋值绑定在**外层函数作用域**（PEP 572），写成 `name :=` 会把
+    # 上面那个场景名就地改写成最后一条锚点的名字，于是正文标题从「资料馆门口概念图」
+    # 变成「门柱铜牌概念图」。校验器查的是锚点和风格词有没有齐，标题叫什么它不查，
+    # 所以这条错**不会**让任何一条规则报红——只能靠命名把它挡在写出来之前。
+    anchor_facts = [
+        f"{anchor_name}：{anchor_description}"
+        for ref in (scene.get("fixed_references") or [])
+        if isinstance(ref, dict)
+        and (anchor_name := str(ref.get("name", "") or "").strip())
+        and (anchor_description := str(ref.get("description", "") or "").strip())
+    ]
+    lighting = str((ctx.get("lighting") or {}).get("description", "") or "")
+
     body = [
         f"{name}概念图，2x2 四宫格布局，四格机位固定。",
         _style_words(ctx),
         "元素锁定清单：" + "、".join(elements) + "。四格中以上元素完全一致，朝向不变。",
     ]
+    if axis_text:
+        body.append(f"以摄影主轴为构图依据：{axis_text}。")
+    if anchor_facts:
+        body.append("固定参照物：" + "；".join(anchor_facts) + "。")
+    if lighting:
+        body.append(f"光线：{lighting}。")
     body += [f"{label}：{quadrants[field]}。" for field, label in rules.QUADRANT_LABELS]
     # 三重否定一句都不能少：只写一句实测仍会漏进人影。
     body.append("。".join(rules.NO_PEOPLE_CLAUSES) + "。")
@@ -662,20 +719,40 @@ def _shot_frame_prompt(seed: int, user: str) -> dict[str, Any]:
     angle = str(shot.get("angle", "") or "").strip()
     names = "、".join(str(c.get("name", "") or c.get("ref", "")) for c in characters)
 
-    references = [str(r).strip() for r in (anchor.get("fixed_references") or []) if str(r).strip()]
+    references = _anchor_names(anchor)
     facing = f"{names}面向摄影主轴左前方" if characters else "无人物出场"
     behind = (
-        f"身后是{scene.get('name', '场景')}的"
-        f"{references[0] if references else '远景末端'}一侧空间"
+        f"身后是{scene.get('name', '场景')}的{references[0] if references else '远景末端'}一侧空间"
     )
     lighting = str((ctx.get("lighting") or {}).get("description", "") or "自然光")
     pose_lighting = f"{'保持静止姿态，' if characters else '空镜，'}{lighting}"
+
+    # 身后空间是从锚点卡推演出来的，证据要留在正文里：主轴三段（站位、朝向、
+    # 远景末端，合起来才是一条完整的参照轴）+ 每条锚点的名称与描述。缺了它们，
+    # "身后是什么"就只能靠编，而编出来的下一镜又不一样。
+    axis = dict(anchor.get("camera_axis") or scene.get("camera_axis") or {})
+    axis_text = "，".join(
+        bit
+        for bit in (str(axis.get(k, "") or "").strip() for k, _label in rules.AXIS_FIELDS)
+        if bit
+    )
+    # 同上：局部名不用 `name`。这个函数眼下没有外层 `name` 可被覆盖，所以今天
+    # 没有可观察的错，但留着同一个写法，下次谁加一行 `name = ...` 就会重演。
+    anchor_facts = [
+        f"{anchor_name}（{anchor_description}）"
+        for ref in (anchor.get("fixed_references") or scene.get("fixed_references") or [])
+        if isinstance(ref, dict)
+        and (anchor_name := str(ref.get("name", "") or "").strip())
+        and (anchor_description := str(ref.get("description", "") or "").strip())
+    ]
 
     body = [
         f"{shot_size}。",
         f"{angle}。" if angle else "",
         _style_words(ctx),
         str(shot.get("content", "") or ""),
+        f"摄影主轴参照：{axis_text}。" if axis_text else "",
+        "空间锚点：" + "；".join(anchor_facts) + "。" if anchor_facts else "",
         f"角色朝向：{facing}。",
         f"身后背景：{behind}。",
         f"姿态与光影：{pose_lighting}。",
@@ -700,9 +777,7 @@ def _shot_video_prompt(seed: int, user: str) -> dict[str, Any]:
     scene_name = str(scene.get("name", "") or "场景")
 
     names = "、".join(str(c.get("name", "") or c.get("ref", "")) for c in characters) or "空镜"
-    asset_line = (
-        f"@是{names}，@是{scene_name}，{_style_words(ctx)}，在{scene_name}，{lighting}。"
-    )
+    asset_line = f"@是{names}，@是{scene_name}，{_style_words(ctx)}，在{scene_name}，{lighting}。"
 
     dialogue = str(shot.get("dialogue", "") or "").strip()
     camera_move = str(shot.get("camera_move", "") or "").strip()

@@ -34,6 +34,12 @@ jobs:
       ENV: test
       POSTGRES_HOST: localhost
       REDIS_HOST: localhost
+      LOCAL_CLI_ENABLED: "false"
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
+      S3_ACCESS_KEY: aigc_ci
+      S3_SECRET_KEY: aigc_ci_test_password
+      S3_BUCKET: aigc-ci-assets
 
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +59,64 @@ jobs:
       - name: Typecheck (mypy)
         run: mypy apps worker packages agents adapters skills
 
+      - name: Database extensions (vector / pgcrypto)
+        # CI 的 postgres service **不会**执行 `infra/docker/postgres/init.sql`：
+        # 那份文件只在 docker-compose 里挂进 `/docker-entrypoint-initdb.d/`
+        # （docker-compose.yml:55），而 `services:` 起的容器没有这个挂载。
+        # 于是 fresh 库里没有 vector 类型，而 22dbb7fcecbc 与 d7a1e4c93b02
+        # 两个迁移都建 VECTOR(1024) 列——第一次 `alembic upgrade head` 必失败。
+        #
+        # 执行的是**仓库里那一份 init.sql 的原文**，不在这里另抄一遍 SQL：
+        # 抄成两份，compose 与 CI 迟早在"哪些扩展是必须的"上分叉，而分叉的那天
+        # 本地跑得通、CI 挂，或者反过来。语句自带 IF NOT EXISTS，重跑幂等。
+        #
+        # 连接串取自 Settings，与下一步 `alembic upgrade head` 用的是同一个
+        # URL，保证扩展建在迁移真正会用的那个库上，而不是碰巧同名的另一个。
+        # 扩展不随 `alembic downgrade base` 掉，所以升→降→升整套只需建一次。
+        run: |
+          python - <<'PY'
+          import asyncio
+          import pathlib
+
+          from sqlalchemy import text
+          from sqlalchemy.ext.asyncio import create_async_engine
+
+          from apps.api.core.config import get_settings
+
+          source = pathlib.Path("infra/docker/postgres/init.sql")
+          # 先逐行剥掉整行注释再按分号切：直接 split(";") 会把前面那两行
+          # `--` 注释连同语句切成一个片段，用 startswith("--") 判就会把真语句
+          # 一起跳过，而跳过之后这一步仍然"成功"——那比不加这一步更难查。
+          body = "\n".join(
+              line for line in source.read_text(encoding="utf-8").splitlines()
+              if not line.strip().startswith("--")
+          )
+          statements = [s.strip() for s in body.split(";") if s.strip()]
+          if not statements:
+              raise SystemExit(f"{source} 里没有可执行语句，扩展不会被建立")
+
+          async def main() -> None:
+              engine = create_async_engine(get_settings().database_url)
+              try:
+                  async with engine.begin() as conn:
+                      for statement in statements:
+                          await conn.execute(text(statement))
+                  async with engine.connect() as conn:
+                      installed = (
+                          await conn.execute(
+                              text("SELECT extname FROM pg_extension ORDER BY extname")
+                          )
+                      ).scalars().all()
+                  print("installed extensions:", ", ".join(installed))
+                  missing = {"vector", "pgcrypto"} - set(installed)
+                  if missing:
+                      raise SystemExit(f"扩展没建起来：{sorted(missing)}")
+              finally:
+                  await engine.dispose()
+
+          asyncio.run(main())
+          PY
+
       - name: Migrations up & down
         # 只 upgrade 不验证 downgrade，等于没测回滚（09_Database.md 第 14 节）
         run: |
@@ -61,7 +125,42 @@ jobs:
           alembic upgrade head
 
       - name: Tests
-        run: pytest --cov=apps --cov=worker --cov-report=term-missing
+        run: |
+          docker run -d --name aigc-ci-minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          curl --fail --retry 30 --retry-connrefused --retry-delay 1 \
+            http://localhost:9000/minio/health/ready
+          python - <<'PY'
+          import asyncio
+          import os
+          import aioboto3
+
+          async def prepare_bucket():
+              async with aioboto3.Session().client(
+                  "s3", endpoint_url=os.environ["S3_ENDPOINT_URL"],
+                  aws_access_key_id=os.environ["S3_ACCESS_KEY"],
+                  aws_secret_access_key=os.environ["S3_SECRET_KEY"],
+                  region_name="us-east-1",
+              ) as client:
+                  await client.create_bucket(Bucket=os.environ["S3_BUCKET"])
+
+          asyncio.run(prepare_bucket())
+          PY
+          python -m arq worker.main.WorkerSettings > worker-test.log 2>&1 &
+          test_worker_pid=$!
+          trap 'kill "$test_worker_pid" 2>/dev/null || true; wait "$test_worker_pid" || true' EXIT
+          for attempt in $(seq 1 30); do
+            kill -0 "$test_worker_pid" || { cat worker-test.log; exit 1; }
+            if python -m arq worker.main.WorkerSettings --check; then break; fi
+            sleep 1
+          done
+          python -m arq worker.main.WorkerSettings --check
+          pytest --cov=apps --cov=worker --cov-report=term-missing
+
+      - name: Worker diagnostics
+        if: failure()
+        run: test ! -f worker-test.log || tail -n 150 worker-test.log
 
   web:
     runs-on: ubuntu-latest

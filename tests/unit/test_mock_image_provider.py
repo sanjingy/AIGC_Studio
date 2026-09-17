@@ -68,11 +68,25 @@ def test_rule_2_key_present_uses_real_gateway(monkeypatch: pytest.MonkeyPatch) -
     assert all(r.provider_id != mock_image.PROVIDER_ID for r in routes)
 
 
-def test_rule_3_no_key_falls_back_to_mock(monkeypatch: pytest.MonkeyPatch) -> None:
-    """规则 3：没 Key 用 Mock，本地无凭据也能跑通全链路。"""
+def test_rule_3_no_key_no_longer_falls_back_to_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """规则 3 **已被撤销**：缺 Key 不再兜底成占位图。
+
+    撤销的理由记在 `mock_image.fallback` 的 docstring 里：部署出去但没配 Key
+    的环境，用户点"生成"拿回一张写着 MOCK IMAGE 的占位图，任务 `succeeded`、
+    Credits 照扣，而界面上没有任何地方说过这张图是假的——他会拿着它去对画风。
+    现在缺 Key 一律 `provider.unavailable`，如实报错。
+
+    这条用例断言的是**撤销本身**：谓词恒 False，且 `ENV=local` 下没有任何
+    Mock 路由被注册进来。哪天有人把兜底加回去，这里会红。
+    """
     _with_env(monkeypatch, ENV="local", DASHSCOPE_API_KEY="")
     assert mock_image.forced(CAP) is False
-    assert mock_image.fallback(CAP) is True
+    assert mock_image.fallback(CAP) is False
+
+    routes = gw.registry().for_capability(CAP)
+    assert all(r.provider_id != mock_image.PROVIDER_ID for r in routes), (
+        "缺 Key 时不该再有 Mock 路由——那正是被撤销的兜底"
+    )
 
 
 def test_text_generation_is_never_mocked_here(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -374,13 +374,9 @@ async def get_record(
     """一条生成记录的全文详情。**不调模型。**"""
     await project_service.get_project(db, org_id=org_id, project_id=project_id)
     if record_type == RECORD_AGENT:
-        return await _agent_detail(
-            db, org_id=org_id, project_id=project_id, record_id=record_id
-        )
+        return await _agent_detail(db, org_id=org_id, project_id=project_id, record_id=record_id)
     if record_type == RECORD_IMAGE:
-        return await _image_detail(
-            db, org_id=org_id, project_id=project_id, record_id=record_id
-        )
+        return await _image_detail(db, org_id=org_id, project_id=project_id, record_id=record_id)
     raise AppError(
         "common.validation_failed",
         message=f"未知的记录类型 {record_type!r}",

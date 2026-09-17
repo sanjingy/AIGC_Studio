@@ -27,7 +27,7 @@ from typing import Any
 # 规则版本。写进每一条提示词运行与每一个出图任务，用来回答
 # "这张图是按哪一版模板生成的"。模板（超哥 Skill 的 B/C 两份原文）或本文件
 # 的校验规则发生实质变化时递增，**不随代码提交递增**——它标的是规则不是版本。
-RULE_VERSION = "chaoge-1.0/adr036-20260911"
+RULE_VERSION = "chaoge-1.1/adr036-20260916"
 
 KIND_CHARACTER = "character"
 KIND_SCENE = "scene"
@@ -140,13 +140,17 @@ IDENTITY_KEYS: tuple[str, ...] = ("nationality", "ethnicity")
 ACCESSORY_KEYS: tuple[str, ...] = ("accessories", "key_accessories", "props")
 
 
+def _as_text(raw: Any) -> str:
+    """把档案上的一个值规范成一段文字。列表按顿号拼，其余按 str 取。"""
+    if isinstance(raw, list):
+        raw = "、".join(str(x).strip() for x in raw if str(x).strip())
+    return str(raw or "").strip()
+
+
 def _first_text(sources: Sequence[Mapping[str, Any]], keys: Sequence[str]) -> str:
     for source in sources:
         for key in keys:
-            raw = source.get(key)
-            if isinstance(raw, list):
-                raw = "、".join(str(x).strip() for x in raw if str(x).strip())
-            if value := str(raw or "").strip():
+            if value := _as_text(source.get(key)):
                 return value
     return ""
 
@@ -168,6 +172,195 @@ def known_accessories(character: Mapping[str, Any]) -> str:
     """
     sources: list[Mapping[str, Any]] = [character, dict(character.get("appearance") or {})]
     return _first_text(sources, ACCESSORY_KEYS)
+
+
+#: 档案上"这个人长什么样"的结构化事实，逐项对应模板 A 的一个要素槽位
+#: （国籍人种 → 年龄体型 → 五官 → 发型 → 肤色 → 服装 → 鞋子 → 配件 → 标志性细节）。
+#:
+#: **为什么校验这些而不是只校验 `subject_identity` / `accessories`**：那两个是
+#: 模型**自报**的字段，它可以把发型写成"短发"、把"深灰西装外套，白衬衫，无领带"
+#: 精简成"西装"，自报字段一个字不动，校验全绿——而这个角色已经换了个人。
+#: 立绘是后续每一镜的比对基准，基准上少一件衣服，全片都跟着少。
+#:
+#: 取值来源**以冻结的 `appearance_json` 为准**，顶层 sheet 只是回落，见
+#: `_appearance_fact`。两份不一致时听冻结的那一份：出图与相似度比对用的就是它。
+HUMAN_APPEARANCE_FACTS: tuple[tuple[str, str], ...] = (
+    ("age_range", "年龄段"),
+    ("hair", "发型发色"),
+    ("eyes", "眼睛"),
+    ("face", "五官轮廓"),
+    ("build", "身高体型体态"),
+    ("outfit", "服装造型"),
+    ("skin", "肤色"),
+    ("shoes", "鞋子"),
+    ("distinctive", "标志性细节"),
+)
+
+#: 非人类角色只查模板 B 真的有槽位的那几项。拿"鞋子""发型"去要求一头狼，
+#: 得到的只会是一条永远不合格的规则，而两套模板不得混用是 B3 的执行铁律。
+NON_HUMAN_APPEARANCE_FACTS: tuple[tuple[str, str], ...] = (
+    ("build", "体型"),
+    ("skin", "体表"),
+    ("distinctive", "标志性特征"),
+)
+
+#: 人类角色面部四铁律点名禁止的道具。既用来查成品词，也用来查档案本身——
+#: 档案上写着背包时，"照抄档案"和"严禁背包"是两条互相矛盾的指令。
+BANNED_ITEMS: tuple[str, ...] = ("背包", "书包")
+
+#: "档案写了没有"的几种写法。它们是**确定的事实**而不是待写进画面的东西，
+#: 要求提示词里出现「无」这两个字只会逼出一句废话。
+NOT_APPLICABLE: tuple[str, ...] = ("无", "无道具", "没有", "不适用")
+
+#: 摄影主轴的三段。顺序即"机位怎么摆"的叙述顺序。
+AXIS_FIELDS: tuple[tuple[str, str], ...] = (
+    ("position", "摄影机站位"),
+    ("facing", "朝向"),
+    ("far_end", "远景末端"),
+)
+
+#: 主轴被点明为构图依据时会出现的词。四视图的"正面"必须由主轴决定，
+#: 只把站位当背景描述写进去是不够的——那样模型仍然自己挑角度。
+AXIS_BASIS_PHRASES: tuple[str, ...] = ("摄影主轴", "主轴")
+
+
+def _appearance_fact(character: Mapping[str, Any], key: str) -> str:
+    """某一项结构化外貌事实的当前取值。**冻结的那一份说了算。**
+
+    `character["appearance"]` 是 `character_profiles.appearance_json`——
+    `consistency._appearance` 冻下来、出图与相似度比对真正用的那一版。
+    顶层来自 `current_state_json` 里的整份 sheet，上游重跑一次就会变，
+    而冻结的那份不会（`sync_from_characters_output` 对已锁定的角色不覆盖）。
+
+    两边不一致时听冻结的：否则校验会去要求提示词里出现一段**这张图根本不会
+    照着画**的旧事实，而模型照着新档案写反倒被判不合格。
+
+    键存在但值为空 = 冻结时这一项就是空的，**不回落**把旧 sheet 上的值复活；
+    键根本不存在（存量档案、或非人类模板才有的那几项）才回落到顶层。
+    """
+    frozen = character.get("appearance")
+    if isinstance(frozen, Mapping) and key in frozen:
+        return _as_text(frozen[key])
+    return _as_text(character.get(key))
+
+
+def known_appearance(character: Mapping[str, Any], template: str = "人类") -> list[tuple[str, str]]:
+    """档案已经确定的结构化外貌事实，`[(标签, 值)]`。没写的不在列表里。"""
+    keys = HUMAN_APPEARANCE_FACTS if template == "人类" else NON_HUMAN_APPEARANCE_FACTS
+    return [(label, value) for key, label in keys if (value := _appearance_fact(character, key))]
+
+
+def _fact_problems(prompt: str, facts: Sequence[tuple[str, str]], *, human: bool) -> list[str]:
+    """已知事实逐条查成品词。**判据是上下文，不是模型的自检字段。**
+
+    每条事实按中文分隔符拆开再逐项查，与 `split_style_tokens` 同一个理由：
+    "深灰西装外套，白衬衫，无领带"被精简成"深灰西装"时，整段匹配和逐项匹配
+    的区别就是抓不抓得住——而被丢掉的那件白衬衫下一镜就会变成别的颜色。
+
+    档案本身与模板硬约束冲突时**显式报错**，不静默取舍：既不偷偷放行一个
+    带背包的立绘（四铁律是实测出来的，背包会把人物比例带偏），也不偷偷把
+    档案上的事实删掉当没看见（那是在替用户改他的角色设定）。要修的是档案，
+    而只有他能修。
+    """
+    problems: list[str] = []
+    for label, value in facts:
+        for item in split_style_tokens(value):
+            if not item or item in NOT_APPLICABLE:
+                continue
+            if human and (banned := next((b for b in BANNED_ITEMS if b in item), None)):
+                problems.append(
+                    f"角色档案的{label}写着「{item}」，与人类角色面部四铁律「严禁{banned}」"
+                    "冲突：照抄档案就违反模板，按模板删掉又等于替用户改角色设定。"
+                    "请先修正角色档案里的这一项再出图"
+                )
+                continue
+            if item not in prompt:
+                problems.append(
+                    f"档案上的{label}「{item}」没有原样出现在提示词里"
+                    "（立绘是后续每一镜的比对基准，基准上少一项，全片都跟着少）"
+                )
+    return problems
+
+
+def _axis_problems(
+    prompt: str,
+    scene: Mapping[str, Any],
+    fields: Sequence[tuple[str, str]],
+    *,
+    basis_required: bool,
+) -> list[str]:
+    """摄影主轴有没有活到成品词里。空值不查——档案没写就是没写。"""
+    problems: list[str] = []
+    axis = dict(scene.get("camera_axis") or {})
+    for key, label in fields:
+        value = str(axis.get(key, "") or "").strip()
+        if value and value not in prompt:
+            problems.append(
+                f"场景摄影主轴的{label}「{value}」没有写进提示词"
+                "（主轴是这个场景空间一致性的全部依据，丢了它同一个房间两次生成会朝两个方向）"
+            )
+    if basis_required and axis and not any(p in prompt for p in AXIS_BASIS_PHRASES):
+        problems.append(
+            "提示词没有把摄影主轴点明为构图依据"
+            "（只把站位当背景描述写进去不够，正视图的「正面」必须由主轴决定）"
+        )
+    return problems
+
+
+def _anchor_problems(prompt: str, source: Mapping[str, Any]) -> list[str]:
+    """固定参照物的名称与描述有没有活到成品词里。**每一条都要，不打折。**
+
+    名称给模型"画的是什么东西"，描述给它"长什么样、在哪"。只留名称，
+    "门柱铜牌"这镜在左下镜在右——那正是空间锚点要防的东西。
+
+    四视图与单镜首帧**同一个要求**：完整的参照事实是这个空间的**参照系**，
+    写全它不等于要求每一件参照物都出现在本镜画面里。哪一部分入画由分镜表的
+    景别与角度决定，而那两项另有校验。放松成"至少落地一条"看似温和，实际是
+    让模型自己挑留哪几条——它挑剩下的那几条下一镜就会换个样子，于是同一个
+    房间又开始漂。
+    """
+    refs = [r for r in (source.get("fixed_references") or []) if isinstance(r, dict)]
+    problems: list[str] = []
+    for ref in refs:
+        name = str(ref.get("name", "") or "").strip()
+        description = str(ref.get("description", "") or "").strip()
+        if name and name not in prompt:
+            problems.append(
+                f"空间锚点「{name}」的名称没有写进提示词（元素锁定清单少一项，这一格就和别格对不上）"
+            )
+        if description and description not in prompt:
+            problems.append(
+                f"空间锚点「{name or description[:8]}」的描述没有写进提示词"
+                "（只给名称模型不知道它长什么样、在哪，两镜之间就会挪位置）"
+            )
+    return problems
+
+
+def _lighting_problems(prompt: str, context: Mapping[str, Any]) -> list[str]:
+    """这一次该用的光照状态在不在，不该用的有没有漏进来。
+
+    后半条不是洁癖：把场景声明的全部状态一起写进去，模型看到的是互相矛盾的
+    指令（"上午"和"傍晚"同时成立），结果只会是它自己挑一个——那和没有这个
+    字段一样。
+    """
+    problems: list[str] = []
+    lighting = dict(context.get("lighting") or {})
+    used = str(lighting.get("description", "") or "").strip()
+    if used and used not in prompt:
+        problems.append(
+            f"这一镜实际使用的光照状态「{lighting.get('name') or used}」的描述没有写进提示词"
+        )
+    scene = dict(context.get("scene") or {})
+    for state in scene.get("lighting_states") or []:
+        if not isinstance(state, dict):
+            continue
+        description = str(state.get("description", "") or "").strip()
+        if description and description != used and description in prompt:
+            problems.append(
+                f"没有被引用的光照状态「{state.get('name')}」也写进了提示词"
+                "（两种光同时成立时模型只会自己挑一个）"
+            )
+    return problems
 
 
 def _check_character(output: Mapping[str, Any], context: Mapping[str, Any]) -> list[str]:
@@ -197,9 +390,7 @@ def _check_character(output: Mapping[str, Any], context: Mapping[str, Any]) -> l
                 "（它决定五官、服装、发型，被改写会一路传导到全片）"
             )
         if identity and known not in identity and identity not in known:
-            problems.append(
-                f"提示词自报的身份是「{identity}」，档案上是「{known}」，两者对不上"
-            )
+            problems.append(f"提示词自报的身份是「{identity}」，档案上是「{known}」，两者对不上")
 
     accessories = str(output.get("accessories", "")).strip()
     if accessories and accessories != "无" and accessories not in prompt:
@@ -210,15 +401,18 @@ def _check_character(output: Mapping[str, Any], context: Mapping[str, Any]) -> l
 
     # 同理：档案里写了配件，模型却一律填「无」——这是实测最常见的退化，
     # 而它抹掉的往往正是这个角色的识别物（钥匙串、腰牌、眼镜）。
-    for item in split_style_tokens(known_accessories(character)):
-        if item and item not in prompt:
-            problems.append(
-                f"档案上的关键配件「{item}」没有写进提示词"
-                "（档案写了就不能省，省掉这个角色就少了识别度）"
-            )
+    human = template == "人类"
+    problems += _fact_problems(prompt, [("关键配件", known_accessories(character))], human=human)
 
-    if template == "人类":
-        for banned in ("背包", "书包"):
+    # 档案上已经确定的结构化外貌事实（发型、服装、鞋子、标志性细节……）逐项
+    # 必须活到成品词里。**只查 `subject_identity` / `accessories` 两个自报字段
+    # 是不够的**：模型可以把「深灰西装外套，白衬衫，无领带」精简成「西装」，
+    # 两个自报字段一个字不动、校验全绿，而这个角色已经换了身衣服——而这张
+    # 立绘正是后续每一镜的比对基准。
+    problems += _fact_problems(prompt, known_appearance(character, template), human=human)
+
+    if human:
+        for banned in BANNED_ITEMS:
             if banned in prompt:
                 problems.append(
                     f"立绘提示词里出现了「{banned}」（人类角色面部四铁律之一：严禁背包书包）"
@@ -229,10 +423,13 @@ def _check_character(output: Mapping[str, Any], context: Mapping[str, Any]) -> l
 
 
 def _check_scene(output: Mapping[str, Any], context: Mapping[str, Any]) -> list[str]:
-    del context
     problems: list[str] = []
     prompt = str(output.get("prompt", ""))
     quadrants = dict(output.get("quadrants") or {})
+    # 上下文**不能丢**：`fixed_elements` 是模型自己列的清单，拿它去查 prompt
+    # 只能证明"它写的东西它自己抄了一遍"。档案上真正钉死这个空间的是摄影主轴
+    # 和固定参照物，而那两样只有 context 里有。
+    scene = dict(context.get("scene") or {})
 
     if not any(g in prompt for g in ("2x2", "2×2", "2X2")):
         problems.append("场景概念图提示词没有声明 2x2 网格布局")
@@ -261,6 +458,13 @@ def _check_scene(output: Mapping[str, Any], context: Mapping[str, Any]) -> list[
         problems.append(
             f"元素锁定清单里的这些项没有写进提示词：{joined}（四格只是机位不同，元素必须完全一致）"
         )
+
+    # 档案上的空间事实：主轴三段、每一条锚点的名称与描述、这一次的光照状态。
+    # 四视图是**空间基准图**，它存在的唯一理由就是让后续每一镜有同一个空间可依，
+    # 所以这里要求得比单镜严：三段主轴齐全、每条锚点描述都落地。
+    problems += _axis_problems(prompt, scene, AXIS_FIELDS, basis_required=True)
+    problems += _anchor_problems(prompt, scene)
+    problems += _lighting_problems(prompt, context)
     return problems
 
 
@@ -307,6 +511,21 @@ def _check_shot_image(output: Mapping[str, Any], context: Mapping[str, Any]) -> 
         elif value not in prompt:
             problems.append(f"五要素的「{label}」没有写进提示词，自检字段与正文对不上")
 
+    # 五要素④「身后背景」要求从空间锚点推演，而"推演过没有"只能拿 context 去比：
+    # `behind` 是模型自己写的字段，它填一句"身后是走廊"同样非空、同样出现在正文里，
+    # 自检字段与正文自洽，而这一镜与这个场景已经没有任何关系了。
+    #
+    # 主轴三段与每一条锚点事实**全部要在**，与四视图同一个标准：它们合起来是
+    # 这一镜的空间参照系，不是"画面里要出现的东西清单"。远景末端同理——写全它
+    # 是为了让模型知道这条轴指向哪里，至于本镜拍到哪一段，由分镜表的景别与角度
+    # 决定（那两项另有校验），不由这里放松要求来决定。
+    scene = dict(context.get("scene") or {})
+    anchor = dict(context.get("anchor_card") or {})
+    spatial = anchor if (anchor.get("camera_axis") or anchor.get("fixed_references")) else scene
+    problems += _axis_problems(prompt, spatial, AXIS_FIELDS, basis_required=False)
+    problems += _anchor_problems(prompt, spatial)
+    problems += _lighting_problems(prompt, context)
+
     if "定格" in prompt:
         problems.append("镜头描述里出现了「定格」（原模板点名禁止）")
     for banned in ("字幕", "背景音乐"):
@@ -340,9 +559,7 @@ def _check_shot_video(output: Mapping[str, Any], context: Mapping[str, Any]) -> 
     minimum = 3 if dialogue else 2
     if len(cuts) < minimum:
         scope = "有台词的" if dialogue else ""
-        problems.append(
-            f"切镜数量不足：{scope}镜号最少 {minimum} 个切镜，实际 {len(cuts)} 个"
-        )
+        problems.append(f"切镜数量不足：{scope}镜号最少 {minimum} 个切镜，实际 {len(cuts)} 个")
     if dialogue and dialogue not in prompt:
         problems.append(f"分镜表上的台词「{dialogue}」没有逐字出现在提示词里")
 
@@ -358,9 +575,7 @@ def _check_shot_video(output: Mapping[str, Any], context: Mapping[str, Any]) -> 
     # 真的在描述它们了（原模板禁止行为清单）。
     for banned in ("背景音乐", "字幕"):
         if prompt.count(banned) > 1:
-            problems.append(
-                f"提示词正文里描述了「{banned}」（只允许出现在最后一行的禁止声明中）"
-            )
+            problems.append(f"提示词正文里描述了「{banned}」（只允许出现在最后一行的禁止声明中）")
     return problems
 
 

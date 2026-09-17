@@ -162,11 +162,11 @@ ADR-032 第 3 条要求每个视频模型在 adapter 里声明**单段最大时�
 class ModelSpec:
     model_id: str
     priority: int
-    pricing_key: str                     # 对应 model_pricing.model_id
+    pricing_key: str  # 对应 model_pricing.model_id
     # --- 视频能力专用 ---
-    max_segment_seconds: float | None = None   # 万相 ≈ 5，Seedance ≥ 15
+    max_segment_seconds: float | None = None  # 万相 ≈ 5，Seedance ≥ 15
     allowed_durations: tuple[float, ...] = ()  # 上游只接受枚举值时用
-    needs_init_image: bool = False             # i2v = True
+    needs_init_image: bool = False  # i2v = True
     # --- TTS 专用 ---
     voices: tuple[str, ...] = ()
 ```

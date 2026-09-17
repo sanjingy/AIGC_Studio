@@ -206,7 +206,7 @@ CREATE UNIQUE INDEX uq_segment_videos_current
 class VideoModelSpec:
     model_id: str
     priority: int
-    max_segment_ms: int        # 单段最大时长
+    max_segment_ms: int  # 单段最大时长
     supports_last_frame: bool  # 是否支持首尾帧模式（§7 方案 C 的前提）
     sizes: tuple[str, ...]
 ```
