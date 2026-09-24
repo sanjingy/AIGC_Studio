@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32">
+  <!-- 与左上角品牌区的 StudioMarkIcon 同一个形：打开的场记板。
+       浏览器标签页上一直是空的（/favicon.ico 每次都 404），
+       这是那条 404 的落点，不是新能力。 -->
+  <rect width="24" height="24" fill="#101114"/>
+  <g fill="none" stroke="#8296FF" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M4.5 7.5h15v11h-15z"/>
+    <path d="M4.5 7.5 8 4.5h11.5l-3.5 3"/>
+    <path d="m8.25 4.5 2.75 3m1-3 2.75 3"/>
+    <path d="M9 13h6m-3-3v6"/>
+  </g>
+</svg>

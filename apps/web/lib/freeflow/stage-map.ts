@@ -3,6 +3,7 @@
 import type { Approval, GateName, Stage } from "@/lib/api";
 import type { StageKey, StageState } from "@/components/freeflow/shell/workbench-shell";
 import type { OutputSet } from "@/lib/freeflow/use-project-state";
+import { stageHref } from "@/lib/freeflow/stage-links";
 
 /**
  * 后端十一个阶段 ←→ 顶栏阶段条的五段。**全站只有这一份归并表。**
@@ -121,8 +122,10 @@ export function buildStages(params: {
   approvals: Approval[];
   output: OutputSet;
   pendingGate: GateName | null;
+  /** 项目路由前缀 `/freeflow/projects/{id}`，用来给每一段生成查看链接 */
+  base: string;
 }): StageState[] {
-  const { stage, approvals, pendingGate } = params;
+  const { stage, approvals, pendingGate, base } = params;
   const current = SEGMENT_OF[stage];
   const currentIndex = ORDER.indexOf(current);
   const gateIndex = pendingGate ? ORDER.indexOf(SEGMENT_OF_GATE[pendingGate]) : -1;
@@ -140,7 +143,7 @@ export function buildStages(params: {
     } else {
       state = "pending";
     }
-    return { key, label: LABEL[key], state };
+    return { key, label: LABEL[key], state, href: stageHref(key, base) };
   });
 }
 

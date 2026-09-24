@@ -80,7 +80,7 @@ export function AssetPicker({
         className="absolute inset-0 cursor-default bg-fg/25"
       />
 
-      <div className="relative flex max-h-[80vh] w-[min(880px,100%)] flex-col rounded-lg border border-border bg-surface shadow-2xl">
+      <div className="relative flex max-h-[80vh] w-[min(880px,100%)] flex-col rounded-[2px] border border-border bg-surface shadow-2xl">
         <div className="flex h-13 shrink-0 items-center gap-3 border-b border-border px-4">
           <h2 className="truncate text-sm font-semibold text-fg">{title}</h2>
           <span className="truncate text-xs text-fg-subtle">
@@ -170,7 +170,7 @@ function AssetCard({
       onClick={onSelect}
       aria-pressed={selected}
       className={cn(
-        "cursor-pointer overflow-hidden rounded-lg border text-left transition-colors duration-150",
+        "cursor-pointer overflow-hidden rounded-[2px] border text-left transition-colors duration-150",
         selected
           ? "border-primary ring-2 ring-primary/40"
           : "border-border hover:border-border-strong",

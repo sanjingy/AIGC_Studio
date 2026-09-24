@@ -79,34 +79,50 @@ export function GenerationRecords({ projectId }: { projectId: string }) {
       .some((value) => value?.toLowerCase().includes(needle));
   }), [rows, query, filter, day]);
 
-  return <section className="space-y-5">
-    <header className="flex flex-wrap items-start justify-between gap-3">
-      <div><h2 className="text-lg font-semibold text-fg">生成记录</h2><p className="mt-1 text-sm leading-6 text-fg-muted">回看创作过程、实际提示词和生成结果，找到每一次变化的来源。</p></div>
-      <Button size="sm" disabled={loading} onClick={() => setRefresh((n) => n + 1)}><RefreshCw aria-hidden className="size-3.5" />刷新</Button>
-    </header>
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface p-3">
-      <label className="flex min-w-48 flex-1 items-center gap-2 rounded-lg bg-surface-2 px-3 py-2">
-        <Search aria-hidden className="size-4 text-fg-subtle" />
-        <input aria-label="搜索生成记录" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索角色、镜头、模型或错误" className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none" />
-      </label>
-      <select aria-label="记录类型" value={filter} onChange={(e) => setFilter(e.target.value)} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg">
-        <option value="all">全部记录</option><option value="agent">文本与提示词</option><option value="image">图片生成</option><option value="failed">失败与取消</option>
-      </select>
-      <input aria-label="按本地日期筛选" title="按浏览器本地日期筛选" type="date" value={day} onChange={(e) => setDay(e.target.value)} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg" />
-    </div>
-    <p className="text-xs text-fg-subtle">最近 100 条记录 · 当前显示 {filtered.length} 条 · 时间按本地时区显示</p>
-    {error && <p role="alert" className="rounded-lg bg-danger-soft p-3 text-sm text-danger">{error}</p>}
-    {loading && <p role="status" className="flex items-center gap-2 py-8 text-sm text-fg-muted"><Loader2 aria-hidden className="size-4 animate-spin" />正在读取生成记录…</p>}
-    {!loading && !error && !filtered.length && <div className="rounded-xl border border-dashed border-border bg-surface p-10 text-center"><FileText aria-hidden className="mx-auto mb-3 size-7 text-fg-subtle" /><p className="text-sm text-fg-muted">{rows.length ? "没有符合筛选条件的记录" : "还没有生成记录，完成一次创作或出图后会显示在这里"}</p></div>}
-    <div className="space-y-2">
+  // 这一页是「一本翻得动的账」，不是一墙卡片：同一栏的值要上下对得齐。
+  // 版式走 MASTER §5 的 .ff-ledger；筛选属于这本账本身，所以跟在栏头后面，
+  // 不在账本外面另起一块。
+  return <section className="space-y-3">
+    <div className="ff-ledger">
+      <div className="ff-ledger-head">
+        <h2>生成记录</h2>
+        <span className="flex items-center gap-3 font-normal">
+          <span className="tnum">{filtered.length} / {rows.length} 条</span>
+          <Button size="sm" variant="ghost" disabled={loading} onClick={() => setRefresh((n) => n + 1)}><RefreshCw aria-hidden className="size-3.5" />刷新</Button>
+        </span>
+      </div>
+      <p className="ff-ledger-note">回看创作过程、实际提示词和生成结果，找到每一次变化的来源。最近 100 条记录，时间按浏览器本地时区显示。</p>
+      <div className="ff-ledger-row flex-wrap" data-form="true">
+        <label className="flex min-w-48 flex-1 items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5">
+          <Search aria-hidden className="size-4 text-fg-subtle" />
+          <input aria-label="搜索生成记录" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索角色、镜头、模型或错误" className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none" />
+        </label>
+        <select aria-label="记录类型" value={filter} onChange={(e) => setFilter(e.target.value)} className="rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg">
+          <option value="all">全部记录</option><option value="agent">文本与提示词</option><option value="image">图片生成</option><option value="failed">失败与取消</option>
+        </select>
+        <input aria-label="按本地日期筛选" title="按浏览器本地日期筛选" type="date" value={day} onChange={(e) => setDay(e.target.value)} className="tnum rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg" />
+      </div>
+      {error && <p role="alert" className="ff-ledger-row text-sm text-danger">{error}</p>}
+      {loading && <p role="status" className="ff-ledger-row justify-center gap-2 py-8 text-sm text-fg-muted"><Loader2 aria-hidden className="size-4 animate-spin" />正在读取生成记录…</p>}
+      {!loading && !error && !filtered.length && <p className="ff-ledger-empty">{rows.length ? "没有符合筛选条件的记录" : "还没有生成记录，完成一次创作或出图后会显示在这里"}</p>}
       {filtered.map((row) => <button key={`${row.record_type}:${row.id}`} type="button" onClick={() => setSelected({ type: row.record_type, id: row.id })}
-        className="group flex w-full items-center gap-4 rounded-xl border border-border bg-surface p-4 text-left transition-colors hover:border-primary/40 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-primary">
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">{row.record_type === "image" ? <ImageIcon aria-hidden className="size-5" /> : <FileText aria-hidden className="size-5" />}</div>
-        <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-fg">{row.title}</p><p className="mt-1 truncate text-xs text-fg-muted">{[SUBJECT[row.subject_kind || ""], row.subject_key, row.model_id || "模型未记录", row.source === "local" ? "本机" : row.source === "api" ? "平台" : null].filter(Boolean).join(" · ")}</p><p className="mt-1 text-xs text-fg-subtle">{timeOf(row.created_at)} · {durationOf(row)}</p></div>
+        className="ff-ledger-row w-full text-left focus-visible:outline-2 focus-visible:outline-primary">
+        <span aria-hidden className="shrink-0 text-fg-subtle">{row.record_type === "image" ? <ImageIcon className="size-4" /> : <FileText className="size-4" />}</span>
+        <span className="ff-ledger-val block min-w-0">
+          <span className="block truncate text-sm font-medium text-fg">{row.title}</span>
+          {/* 中间点串接换成并排的列：主语（角色/场景/镜头 + ref）在左，
+              模型和来源各占一格，扫一列的时候同类的值上下对得齐。 */}
+          <span className="mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-4 gap-y-0.5 text-xs text-fg-muted">
+            {row.subject_kind && <span className="truncate">{SUBJECT[row.subject_kind] ?? row.subject_kind}{row.subject_key ? ` ${row.subject_key}` : ""}</span>}
+            <span className="code truncate text-fg-subtle">{row.model_id || "模型未记录"}</span>
+            {row.source && <span className="text-fg-subtle">{row.source === "local" ? "本机" : row.source === "api" ? "平台" : row.source}</span>}
+          </span>
+        </span>
         {/* 占位模型跑出来的那一条和真实结果在列表里长得一模一样，
             不标出来，用户回看时分不清"这版效果差"和"这版根本没调模型"。 */}
-        {isPlaceholderModel(row.model_id) && <span className="shrink-0 rounded-full bg-rf-warning/15 px-2.5 py-1 text-xs text-fg">{PLACEHOLDER_LABEL}</span>}
-        <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${row.status === "failed" ? "bg-danger-soft text-danger" : row.status === "succeeded" ? "bg-primary-soft text-primary" : "bg-surface-3 text-fg-muted"}`}>{STATUS[row.status] || row.status}</span>
+        {isPlaceholderModel(row.model_id) && <span className="shrink-0 rounded-[2px] bg-rf-warning/15 px-2 py-0.5 text-xs text-fg">{PLACEHOLDER_LABEL}</span>}
+        <span className={`shrink-0 rounded-[2px] px-2 py-0.5 text-xs ${row.status === "failed" ? "bg-danger-soft text-danger" : row.status === "succeeded" ? "bg-primary-soft text-primary" : "bg-surface-3 text-fg-muted"}`}>{STATUS[row.status] || row.status}</span>
+        <span className="ff-ledger-num hidden leading-4 sm:block">{timeOf(row.created_at)}<br />{durationOf(row)}</span>
       </button>)}
     </div>
     <Dialog open={selected !== null} onOpenChange={(open) => { if (!open) setSelected(null); }} labelledBy={titleId} placement="right" className="flex h-full w-full max-w-3xl flex-col overflow-hidden bg-surface shadow-2xl">
@@ -115,7 +131,7 @@ export function GenerationRecords({ projectId }: { projectId: string }) {
         {detailLoading && <p role="status" className="flex items-center gap-2 text-sm text-fg-muted"><Loader2 aria-hidden className="size-4 animate-spin" />读取详情…</p>}
         {detailError && <div role="alert" className="rounded-lg bg-danger-soft p-3 text-sm text-danger">{detailError}<Button size="sm" onClick={() => setRefresh((n) => n + 1)}>重试读取</Button></div>}
         {detail && <>
-          <dl className="grid grid-cols-2 gap-4 rounded-xl bg-surface-2 p-4 text-sm">
+          <dl className="grid grid-cols-2 gap-4 rounded-[2px] bg-surface-2 p-4 text-sm">
             <div><dt className="text-xs text-fg-subtle">状态</dt><dd className="mt-1 text-fg">{STATUS[detail.status] || detail.status}</dd></div>
             <div><dt className="text-xs text-fg-subtle">实际模型</dt><dd className="mt-1 break-all text-fg">{detail.model_id || "未记录"}</dd></div>
             <div><dt className="text-xs text-fg-subtle">开始时间</dt><dd className="mt-1 text-fg">{timeOf(detail.created_at)}</dd></div>
@@ -127,7 +143,7 @@ export function GenerationRecords({ projectId }: { projectId: string }) {
           {detail.incomplete && <p role="status" className="rounded-lg bg-rf-warning/10 p-3 text-sm leading-6 text-fg">这条历史记录不完整，部分输入或输出可能未保存全文。这里展示存档内容，不会用当前设定补造当时的提示词。</p>}
           {detail.error_code && <p className="rounded-lg bg-danger-soft p-3 text-sm text-danger">失败原因：{detail.error_code}</p>}
           {/* contain 而不是 cover：场景那张是 2×2 四视图，裁掉的正是其中两格。 */}
-          {detail.asset_ids.length > 0 && <div className="grid grid-cols-2 gap-3">{detail.asset_ids.map((id) => <div key={id} className="aspect-square overflow-hidden rounded-xl border border-border bg-surface-2"><RenderThumb assetId={id} alt="这次生成的图片" fit="contain" /></div>)}</div>}
+          {detail.asset_ids.length > 0 && <div className="grid grid-cols-2 gap-3">{detail.asset_ids.map((id) => <div key={id} className="aspect-square overflow-hidden rounded-[2px] border border-border bg-surface-2"><RenderThumb assetId={id} alt="这次生成的图片" fit="contain" /></div>)}</div>}
           {detail.user_input && <details><summary className="cursor-pointer text-sm font-medium text-fg">查看本次输入</summary><div className="mt-3"><PromptText label="输入存档" text={detail.user_input} /></div></details>}
           <PromptText label={detail.record_type === "image" ? "实际提交的图片提示词" : "提示词存档"} text={detail.prompt} />
           {detail.negative_prompt && <PromptText label="负面提示词" text={detail.negative_prompt} />}
@@ -135,7 +151,7 @@ export function GenerationRecords({ projectId }: { projectId: string }) {
           {detail.record_type === "agent" && detail.output && <details><summary className="cursor-pointer text-sm font-medium text-fg">查看本次文本产出</summary><div className="mt-3"><PromptText label="产出存档" text={JSON.stringify(detail.output, null, 2)} /></div></details>}
           <details className="border-t border-border pt-4"><summary className="cursor-pointer text-sm text-fg-muted">技术详情与校验记录</summary><div className="mt-4 space-y-3 text-xs text-fg-muted">
             <p className="break-all">记录编号：{detail.id}</p><p>规则版本：{detail.rule_version || "历史版本未记录"}</p><p className="break-all">输入版本：{detail.basis_digest || "未记录"}</p>
-            {detail.steps.map((step) => <div key={`${step.index}:${step.kind}`} className="rounded-lg bg-surface-2 p-3"><p>尝试 {step.index + 1} · {step.kind === "validate" ? "校验" : "模型调用"} · {step.duration_ms} ms</p>{step.error && <p className="mt-2 whitespace-pre-wrap break-words text-danger">{step.error}</p>}</div>)}
+            {detail.steps.map((step) => <div key={`${step.index}:${step.kind}`} className="rounded-[2px] bg-surface-2 p-3"><p className="flex items-baseline gap-x-4"><span className="tnum">尝试 {step.index + 1}</span><span>{step.kind === "validate" ? "校验" : "模型调用"}</span><span className="tnum ml-auto">{step.duration_ms} ms</span></p>{step.error && <p className="mt-2 whitespace-pre-wrap break-words text-danger">{step.error}</p>}</div>)}
           </div></details>
         </>}
       </div>

@@ -103,10 +103,10 @@ export function BatchRenderDialog(props: {
       describedBy={descriptionId}
       dismissible={!submitting}
       overlayClassName="bg-rf-overlay backdrop-blur-sm"
-      className="w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-surface-3 text-fg shadow-rf-card"
+      className="w-full max-w-lg overflow-hidden rounded-[2px] border border-border bg-surface-3 text-fg shadow-rf-card"
     >
       <header className="flex items-start gap-3 border-b border-border px-6 py-5">
-        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary">
+        <span className="grid size-9 shrink-0 place-items-center rounded-[2px] bg-primary-soft text-primary">
           <RenderImageIcon aria-hidden className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
@@ -124,11 +124,11 @@ export function BatchRenderDialog(props: {
         <section aria-labelledby={`${titleId}-strategy`}>
           <p
             id={`${titleId}-strategy`}
-            className="text-[10px] font-semibold tracking-[0.16em] text-fg-subtle uppercase"
+            className="text-[11px] font-semibold text-fg-muted"
           >
             生成策略
           </p>
-          <div className="mt-3 rounded-xl border border-primary bg-primary-soft p-4">
+          <div className="mt-3 rounded-[2px] border border-primary bg-primary-soft p-4">
             <div className="flex items-center gap-3">
               <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-fg">
                 <RenderImageIcon aria-hidden className="size-4" />
@@ -141,7 +141,7 @@ export function BatchRenderDialog(props: {
           </div>
         </section>
 
-        <dl className="divide-y divide-border rounded-xl border border-border bg-surface-2 px-4">
+        <dl className="divide-y divide-border rounded-[2px] border border-border bg-surface-2 px-4">
           <div className="flex items-center justify-between gap-4 py-3 text-xs">
             <dt className="text-fg-muted">镜头数</dt>
             <dd className="tnum font-semibold text-fg">{shotCount}</dd>

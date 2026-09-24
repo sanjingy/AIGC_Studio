@@ -26,6 +26,7 @@ from apps.api.modules.billing.router import credentials_router
 from apps.api.modules.billing.router import router as billing_router
 from apps.api.modules.consistency.router import router as images_router
 from apps.api.modules.content.router import router as content_router
+from apps.api.modules.gateway.router import config_router as model_config_router
 from apps.api.modules.gateway.router import router as model_catalog_router
 from apps.api.modules.local_runtime.router import router as local_runtime_router
 from apps.api.modules.project.router import router as project_router
@@ -157,6 +158,7 @@ app.include_router(images_router, prefix=API_PREFIX)
 app.include_router(content_router, prefix=API_PREFIX)
 app.include_router(skill_router, prefix=API_PREFIX)
 app.include_router(model_catalog_router, prefix=API_PREFIX)
+app.include_router(model_config_router, prefix=API_PREFIX)
 # 成品提示词与生成记录（ADR-036）。GET 一律零推理，POST 才会真的调模型。
 app.include_router(prompting_router, prefix=API_PREFIX)
 app.include_router(prompting_records_router, prefix=API_PREFIX)

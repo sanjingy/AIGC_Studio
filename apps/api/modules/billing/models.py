@@ -157,8 +157,14 @@ class ProviderCredential(OrgEntity):
     created_by: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
 
     __table_args__ = (
-        # 一个 org 同一个 capability 只挂一把 Key，本轮不做多把轮换。
+        # 一个 org 在同一个能力上**每家各一把** Key（同能力多 Provider，
+        # 迁移 3a9d2c7e5b10 之前是每个能力只能一把）。仍然不做同一家多把轮换。
         # 注意：唯一约束不排除软删行，所以"换 Key"要走原地 UPDATE，
         # 别做成"软删旧的再插新的"——那会撞这条约束。
-        UniqueConstraint("org_id", "capability", name="uq_provider_credentials_org_capability"),
+        UniqueConstraint(
+            "org_id",
+            "capability",
+            "provider_id",
+            name="uq_provider_credentials_org_capability_provider",
+        ),
     )

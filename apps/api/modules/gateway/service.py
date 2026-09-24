@@ -24,6 +24,10 @@ Gateway 查 `projects.model_preference[capability]`，把匹配的那条路由
 选中的模型熔断了、或者这一次调用失败了，仍然按原来的优先级顺序落到
 同能力的下一个模型上。"只准跑这一个，坏了就报错"从来不是用户在下拉框里
 选一次时表达的意思。
+
+**选哪家、用谁的 Key 由 `upstreams.decide` 判定**（项目选择 > 组织默认 >
+平台目录默认）。它和计费的 BYOK 判断是同一个函数，所以"页面上存的
+Provider / 模型 / 计费来源"和"这次真的拿去调的"是同一份结论。
 """
 
 from __future__ import annotations
@@ -42,11 +46,12 @@ from adapters.providers.base import (
     TextRequest,
     TextResponse,
 )
+from adapters.providers.openai_compat import OpenAICompatTextProvider
 from apps.api.core.db import session_scope
 from apps.api.core.errors import ERRORS, AppError
 from apps.api.core.logging import get_logger
 from apps.api.modules.billing import credentials
-from apps.api.modules.gateway import breaker, catalog, mock_image, probe
+from apps.api.modules.gateway import breaker, catalog, mock_image, probe, upstreams
 from apps.api.modules.project import service as project_service
 
 log = get_logger(__name__)
@@ -237,14 +242,30 @@ async def _preferred_model(
     return model_id
 
 
-async def _load_org_key(*, org_id: uuid.UUID, capability: str) -> credentials.ResolvedKey | None:
-    """查这个 org 有没有给这个能力配自己的 Key。
+async def _load_org_key(
+    *, org_id: uuid.UUID, capability: str, provider_id: str
+) -> credentials.ResolvedKey | None:
+    """查这个 org 有没有给这个能力的**这一家**配自己的 Key。
 
-    单开一个函数是为了给测试一个替换点——它是这条链路上唯一需要真实
+    单开一个函数是为了给测试一个替换点——它是这条链路上需要真实
     数据库的一环，而路由/熔断/failover 的行为不该只能靠整套 DB 才能测。
     """
     async with session_scope() as db:
-        return await credentials.resolve_for_call(db, org_id=org_id, capability=capability)
+        return await credentials.resolve_for_call(
+            db, org_id=org_id, capability=capability, provider_id=provider_id
+        )
+
+
+async def _load_org_default(*, org_id: uuid.UUID, capability: str) -> upstreams.DefaultRow | None:
+    """组织默认（`org_model_defaults`）。替换点，理由同 `_load_org_key`。"""
+    async with session_scope() as db:
+        return await upstreams.load_default(db, org_id=org_id, capability=capability)
+
+
+async def _load_custom_endpoint(*, org_id: uuid.UUID) -> upstreams.ResolvedEndpoint | None:
+    """文本自定义端点（`org_text_endpoints`）。替换点，理由同 `_load_org_key`。"""
+    async with session_scope() as db:
+        return await upstreams.load_endpoint(db, org_id=org_id)
 
 
 def _mock_resolution(capability: str) -> Resolution:
@@ -268,62 +289,155 @@ def _mock_resolution(capability: str) -> Resolution:
     )
 
 
+def _prefer(
+    routes: list[Route], *, provider_id: str | None, model_id: str | None, pinned: bool
+) -> list[Route]:
+    """按选中的上游与模型排路由。
+
+    `pinned=True`（组织或项目**明确选过**这家）时只留这一家的路由：
+    用户选了 A 家，A 家平台 Key 没配或全挂了，不能静默拿 B 家顶上——
+    那是"页面上存的"和"真调用的"对不上。同一家内部仍然是重排不是过滤，
+    选中的模型坏了照样 failover 到这家的下一个模型（ADR-031 第 7 条）。
+
+    `pinned=False` 是没人选过，按平台目录的默认顺序跑，跨家 failover 照旧。
+    """
+    if provider_id is not None and pinned:
+        routes = [r for r in routes if r.provider_id == provider_id]
+    elif provider_id is not None:
+        routes = [r for r in routes if r.provider_id == provider_id] + [
+            r for r in routes if r.provider_id != provider_id
+        ]
+    return _prefer_model(routes, model_id)
+
+
+def _custom_resolution(
+    capability: str, endpoint: upstreams.ResolvedEndpoint, org_id: uuid.UUID
+) -> Resolution:
+    """文本自定义端点的那一条虚拟路由（05_MODEL_GATEWAY.md §5.2）。
+
+    **只在文本能力这一个分支里拼**：`decide()` 对别的能力永远不会给出
+    自定义端点，`supports_custom_endpoint` 是写死的能力判断，表里也没有
+    capability 列——视频 / TTS 的解析路径碰不到它。
+    """
+    assert catalog.supports_custom_endpoint(capability)
+    route = Route(
+        catalog.CUSTOM_TEXT_PROVIDER_ID,
+        endpoint.model_id,
+        priority=0,
+        factory=partial(
+            OpenAICompatTextProvider,
+            base_url=endpoint.base_url,
+            api_key=endpoint.api_key,
+            model_id=endpoint.model_id,
+            key_source=KeySource.ORG,
+        ),
+        key_source=KeySource.ORG,
+        org_id=org_id,
+    )
+    log.info(
+        "gateway.key_source",
+        capability=capability,
+        org_id=str(org_id),
+        key_source=KeySource.ORG.value,
+        provider=catalog.CUSTOM_TEXT_PROVIDER_ID,
+    )
+    return Resolution(
+        capability=capability, routes=[route], key_source=KeySource.ORG, secret=endpoint.api_key
+    )
+
+
 async def _resolve(
     capability: str,
     *,
     org_id: uuid.UUID | None,
     preferred_model_id: str | None = None,
 ) -> Resolution:
-    """决定这次调用用谁的 Key，以及路由按什么顺序试。
+    """决定这次调用用哪家、哪个模型、谁的 Key，以及路由按什么顺序试。
 
-    org 配了自己的 Key 就**只**返回他那家的路由——不把平台路由缀在后面。
-    缀上去的话，用户的 Key 一失败就会自动落到平台档，用户看不到自己的
-    Key 坏了，平台默默替他付了钱，账面上还是 BYOK 折扣价。
+    选哪家由 `upstreams.decide` 给（项目选择 > 组织默认 > 平台目录默认）。
+    用谁的 Key：组织默认对这家显式选了计费来源就照它；没选过就按旧规则
+    ——这家有自己的 Key 就只用他那把（ADR-027）。
 
-    `preferred_model_id` 是项目级模型覆盖（ADR-024），作用在**两条路的
-    出口上**——BYOK 也吃这份偏好，那时候候选集是同一把 Key 的几个模型，
-    "用户想用哪个模型"这个诉求跟 Key 是谁的无关。
+    用他那把时**只**返回他那家的路由，不把平台路由缀在后面。缀上去的话，
+    用户的 Key 一失败就会自动落到平台档，用户看不到自己的 Key 坏了，
+    平台默默替他付了钱，账面上还是 BYOK 折扣价。
 
-    出图还有第三条路：一把 Key 都没有时回退到 Mock（`mock_image`，
-    FR-CONS-011）。它分两段插在这里而不是合成一个判断，因为
-    `ENV=test` 那一条必须**压过 BYOK**（测试环境里 org 存了自己的 Key
-    也不许打真上游），而"平台没配 Key"那一条必须**让位于 BYOK**
+    出图还有 Mock（`mock_image`，FR-CONS-011）。它分两段插在这里而不是合成
+    一个判断，因为 `ENV=test` 那一条必须**压过 BYOK**（测试环境里 org 存了
+    自己的 Key 也不许打真上游），而"平台没配 Key"那一条必须**让位于 BYOK**
     （平台没 Key、用户自带 Key，该用他的）。
     """
     if mock_image.forced(capability):
         return _mock_resolution(capability)
 
-    if org_id is not None:
-        own = await _load_org_key(org_id=org_id, capability=capability)
-        if own is not None:
-            spec = catalog.spec_for(own.provider_id, capability=capability)
-            if spec is None:
-                # 存 Key 之后平台把这个能力改绑到别家了。不能拿平台 Key 顶上
-                # （理由同上），也不能拿这把 Key 去调另一家的接口。
-                raise AppError(
-                    "provider.byok.rejected",
-                    message=(
-                        f"你为 {capability} 配置的 Provider {own.provider_id} 已不再提供该能力，"
-                        "请到设置页重新配置"
-                    ),
-                    detail={"capability": capability, "reason": "provider_retired"},
-                )
-            log.info(
-                "gateway.key_source",
-                capability=capability,
-                org_id=str(org_id),
-                key_source=KeySource.ORG.value,
-                provider=spec.provider_id,
+    default = (
+        await _load_org_default(org_id=org_id, capability=capability)
+        if org_id is not None
+        else None
+    )
+    decision = upstreams.decide(capability, preference=preferred_model_id, default=default)
+    pinned = decision.layer != "platform" and decision.provider_id is not None
+
+    if decision.provider_id == catalog.CUSTOM_TEXT_PROVIDER_ID:
+        endpoint = await _load_custom_endpoint(org_id=org_id) if org_id is not None else None
+        if endpoint is None or org_id is None:
+            raise AppError(
+                "provider.byok.rejected",
+                message="选中的是文本自定义端点，但它还没有配置或已被删除，请到模型页重新选择",
+                detail={"capability": capability, "reason": "custom_endpoint_missing"},
             )
-            return Resolution(
-                capability=capability,
-                routes=_prefer_model(
-                    _routes_for(spec, api_key=own.api_key, key_source=KeySource.ORG, org_id=org_id),
-                    preferred_model_id,
+        return _custom_resolution(capability, endpoint, org_id)
+
+    provider_id = decision.provider_id or catalog.provider_of().get(capability)
+    use_org_key = decision.key_source is KeySource.ORG
+    own: credentials.ResolvedKey | None = None
+    if (
+        org_id is not None
+        and provider_id is not None
+        and decision.key_source is not KeySource.PLATFORM
+    ):
+        own = await _load_org_key(org_id=org_id, capability=capability, provider_id=provider_id)
+        if own is None and use_org_key:
+            # 组织明确选了"用这家自己的 Key"，Key 却不在了。不拿平台 Key 顶上：
+            # 计费已经按 BYOK 折扣算过，顶上去就是平台掏钱。
+            raise AppError(
+                "provider.byok.rejected",
+                message=(
+                    f"{capability} 选的是用你自己的 {catalog.provider_label(provider_id)} "
+                    "Key 计费，但 Key 已被移除，请到模型页重新配置"
                 ),
-                key_source=KeySource.ORG,
-                secret=own.api_key,
+                detail={"capability": capability, "reason": "key_missing"},
             )
+
+    if own is not None and org_id is not None:
+        spec = catalog.spec_for(own.provider_id, capability=capability)
+        if spec is None:
+            # 存 Key 之后平台把这个能力改绑到别家了。不能拿平台 Key 顶上
+            # （理由同上），也不能拿这把 Key 去调另一家的接口。
+            raise AppError(
+                "provider.byok.rejected",
+                message=(
+                    f"你为 {capability} 配置的 Provider {own.provider_id} 已不再提供该能力，"
+                    "请到设置页重新配置"
+                ),
+                detail={"capability": capability, "reason": "provider_retired"},
+            )
+        log.info(
+            "gateway.key_source",
+            capability=capability,
+            org_id=str(org_id),
+            key_source=KeySource.ORG.value,
+            provider=spec.provider_id,
+        )
+        return Resolution(
+            capability=capability,
+            routes=_prefer_model(
+                _routes_for(spec, api_key=own.api_key, key_source=KeySource.ORG, org_id=org_id),
+                decision.model_id,
+            ),
+            key_source=KeySource.ORG,
+            secret=own.api_key,
+        )
 
     if mock_image.fallback(capability):
         return _mock_resolution(capability)
@@ -332,7 +446,12 @@ async def _resolve(
     # 偏好泄漏给所有租户的后续调用。
     return Resolution(
         capability=capability,
-        routes=_prefer_model(list(registry().for_capability(capability)), preferred_model_id),
+        routes=_prefer(
+            list(registry().for_capability(capability)),
+            provider_id=decision.provider_id,
+            model_id=decision.model_id,
+            pinned=pinned,
+        ),
         key_source=KeySource.PLATFORM,
     )
 

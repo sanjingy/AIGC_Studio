@@ -454,10 +454,10 @@ export function ShotDetail(props: {
   const sceneName = options.scenes.find((s) => s.ref === draft.scene_ref)?.name;
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-border bg-surface shadow-rf-card">
+    <article className="overflow-hidden rounded-[2px] border border-border bg-surface shadow-rf-card">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="shrink-0 font-mono text-xs text-primary">{shot.code}</span>
+          <span className="shrink-0 code text-xs text-primary">{shot.code}</span>
           <h2 className="truncate text-sm font-semibold text-fg">{shot.title}</h2>
         </div>
         <div className="flex flex-wrap items-center gap-2">{props.actions}</div>
@@ -466,7 +466,7 @@ export function ShotDetail(props: {
       {/* gap-px + 底色 = 一条分隔线，同时在单列断点下自动消失 */}
       <div className="grid gap-px bg-border lg:grid-cols-[minmax(0,1.15fr)_minmax(16rem,0.85fr)]">
         <div className="min-w-0 bg-surface p-5">
-          <div className="relative mb-4 aspect-video overflow-hidden rounded-xl border border-border bg-bg">
+          <div className="relative mb-4 aspect-video overflow-hidden rounded-[2px] border border-border bg-bg">
             <ShotImage
               src={shot.imageUrl}
               alt={`${shot.code} ${shot.title}`}
@@ -519,7 +519,7 @@ export function ShotDetail(props: {
         </div>
 
         <div className="min-w-0 bg-surface p-5">
-          <div className="flex items-center gap-2 text-[10px] font-semibold tracking-[0.16em] text-fg-subtle uppercase">
+          <div className="flex items-center gap-2 text-[11px] font-semibold text-fg-muted">
             <Camera aria-hidden className="size-3.5 text-primary" />
             镜头参数
           </div>
@@ -576,7 +576,7 @@ export function ShotDetail(props: {
           </div>
 
           <div className="mt-6 border-t border-border pt-5">
-            <p className="flex items-center gap-2 text-[10px] font-semibold tracking-[0.16em] text-fg-subtle uppercase">
+            <p className="flex items-center gap-2 text-[11px] font-semibold text-fg-muted">
               <MessageSquare aria-hidden className="size-3.5 text-rf-agent" />
               台词与声音
             </p>

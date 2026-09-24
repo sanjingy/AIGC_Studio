@@ -90,7 +90,7 @@ export function ProjectAssets({ projectId }: { projectId: string }) {
       <div className="flex items-baseline gap-2">
         <h1 className="text-sm font-semibold text-fg">项目素材</h1>
         <span className="tnum text-xs text-fg-subtle">
-          {files.length} 个文件 · {profiles.length} 份档案
+          {files.length} 个文件，{profiles.length} 份档案
         </span>
       </div>
 
@@ -102,7 +102,7 @@ export function ProjectAssets({ projectId }: { projectId: string }) {
             aria-pressed={kind === k.key}
             onClick={() => setKind(k.key)}
             className={cn(
-              "cursor-pointer rounded-lg px-3 py-1.5 text-xs transition-colors duration-150",
+              "cursor-pointer rounded-[2px] px-3 py-1.5 text-xs transition-colors duration-150",
               kind === k.key
                 ? "bg-primary-soft font-medium text-primary"
                 : "text-fg-muted hover:bg-surface-2 hover:text-fg",
@@ -121,7 +121,7 @@ export function ProjectAssets({ projectId }: { projectId: string }) {
       {loading && <ProjectAssetsSkeleton />}
 
       {!loading && !error && visibleFiles.length === 0 && visibleProfiles.length === 0 && (
-        <div className="rf-empty-state rounded-lg border border-dashed border-border-strong px-4 py-10 text-center">
+        <div className="rf-empty-state rounded-[2px] border border-dashed border-border-strong px-4 py-10 text-center">
           <span className="rf-empty-icon"><AssetLibraryIcon aria-hidden className="size-6" /></span>
           <p className="mt-2 text-sm text-fg-subtle">这个筛选下还没有素材。出图跑完之后会自动出现在这里。</p>
         </div>
@@ -147,10 +147,13 @@ export function ProjectAssets({ projectId }: { projectId: string }) {
                   <p className="truncate text-xs text-fg" title={a.filename}>
                     {a.filename}
                   </p>
-                  <p className="tnum mt-0.5 text-xs text-fg-subtle">
-                    {a.size_bytes === null ? "—" : formatBytes(a.size_bytes)}
-                    {" · "}
-                    {new Date(a.created_at).toLocaleDateString("zh-CN")}
+                  <p className="mt-0.5 flex items-baseline justify-between gap-2 text-xs text-fg-subtle">
+                    <span className="code truncate">
+                      {a.size_bytes === null ? "—" : formatBytes(a.size_bytes)}
+                    </span>
+                    <span className="code shrink-0">
+                      {new Date(a.created_at).toLocaleDateString("zh-CN")}
+                    </span>
                   </p>
                 </div>
               </li>
@@ -162,9 +165,9 @@ export function ProjectAssets({ projectId }: { projectId: string }) {
       {visibleProfiles.length > 0 && (
         <section className="flex flex-col gap-1.5">
           <h2 className="text-xs font-medium text-fg-subtle">
-            结构化产出 · 不占存储容量（REQ-031）
+            结构化产出，不占存储容量（REQ-031）
           </h2>
-          <ul className="overflow-hidden rounded-lg border border-border bg-surface">
+          <ul className="overflow-hidden rounded-[2px] border border-border bg-surface">
             {visibleProfiles.map((p) => {
               const isChar = p.kind === "characters";
               const Icon = isChar ? CharacterIcon : SceneIcon;
@@ -179,9 +182,13 @@ export function ProjectAssets({ projectId }: { projectId: string }) {
                   <Icon aria-hidden className="size-4 shrink-0 text-fg-subtle" />
                   <div className="min-w-0 flex-1">
                     <div className="text-sm text-fg">{isChar ? "角色档案" : "场景档案"}</div>
-                    <div className="tnum mt-0.5 text-xs text-fg-subtle">
-                      {p.agent_id} · {count} 条 ·{" "}
-                      {new Date(p.created_at).toLocaleDateString("zh-CN")}
+                    <div className="mt-0.5 flex items-baseline justify-between gap-2 text-xs text-fg-subtle">
+                      <span className="code truncate">
+                        {p.agent_id}，{count} 条
+                      </span>
+                      <span className="code shrink-0">
+                        {new Date(p.created_at).toLocaleDateString("zh-CN")}
+                      </span>
                     </div>
                   </div>
                 </li>

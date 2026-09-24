@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw, X } from "lucide-react";
 
-import { QueueIcon } from "@/components/icons/studio-icons";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status";
 import { projects, type Render, type Task, type TaskStatus } from "@/lib/api";
@@ -43,10 +42,11 @@ const SUBJECT_LABEL: Record<Render["subject_kind"], string> = {
   shot: "分镜首帧图",
 };
 
+/** 任务行上的主语。是一个名字，不是 `A · B` 的 meta 串，所以不用分隔符。 */
 function describe(render: Render): string {
   const base = SUBJECT_LABEL[render.subject_kind];
-  if (render.subject_kind === "shot") return `${base} · 镜头 ${render.shot_index}`;
-  return render.subject_ref ? `${base} · ${render.subject_ref}` : base;
+  if (render.subject_kind === "shot") return `${base} 镜头 ${render.shot_index}`;
+  return render.subject_ref ? `${base} ${render.subject_ref}` : base;
 }
 
 /**
@@ -98,9 +98,12 @@ export function TaskCenter({
       .renders(projectId)
       .then((rows) => {
         if (!alive) return;
+        // 接口按契约给数组；真给了别的就当成"没有出图记录"，
+        // 任务列表本身还有用，不该被主语这一列拖成白屏。
+        const list = Array.isArray(rows) ? rows : [];
         setSubjects(
           new Map(
-            rows
+            list
               .filter((r): r is Render & { task_id: string } => r.task_id !== null)
               .map((r) => [r.task_id, describe(r)]),
           ),
@@ -119,17 +122,14 @@ export function TaskCenter({
   const active = tasks.items.filter((t) => t.status === "queued" || t.status === "running").length;
 
   return (
-    <div className="mx-auto flex w-full max-w-[920px] flex-col gap-3 p-6">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-sm font-semibold text-fg">生成队列</h1>
+    <div className="mx-auto flex w-full max-w-[980px] flex-col gap-3 p-6">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 className="text-lg font-semibold tracking-tight text-fg">生成队列</h1>
         <span className="tnum text-xs text-fg-subtle">
-          {tasks.items.length} 个任务 · {active} 个进行中
+          {tasks.items.length} 个任务，{active} 个进行中
         </span>
         <span
-          className={cn(
-            "text-xs",
-            tasks.connection === "live" ? "text-fg-subtle" : "text-running",
-          )}
+          className={cn("text-xs", tasks.connection === "live" ? "text-fg-subtle" : "text-running")}
         >
           {CONNECTION_LABEL[tasks.connection] ?? tasks.connection}
         </span>
@@ -139,45 +139,53 @@ export function TaskCenter({
         </Button>
       </div>
 
-      <div className="flex gap-1">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            aria-pressed={bucket === t.key}
-            onClick={() => setBucket(t.key)}
-            className={cn(
-              "cursor-pointer rounded-lg px-3 py-1.5 text-xs transition-colors duration-150",
-              bucket === t.key
-                ? "bg-primary-soft font-medium text-primary"
-                : "text-fg-muted hover:bg-surface-2 hover:text-fg",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
       {tasks.error && (
-        <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
+        <p role="alert" className="rounded-[2px] bg-danger-soft px-3 py-2 text-sm text-danger">
           {tasks.error}
         </p>
       )}
       {tasks.actionError && (
-        <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
+        <p role="alert" className="rounded-[2px] bg-danger-soft px-3 py-2 text-sm text-danger">
           {tasks.actionError}
         </p>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-rf-card">
+      {/* 账本：栏头里放筛选，不在账本外面再摆一排胶囊按钮。
+          筛选本来就是「看这本账的哪一栏」，属于栏头。 */}
+      <section className="ff-ledger">
+        <div className="ff-ledger-head">
+          <div className="flex flex-wrap items-center gap-1">
+            {TABS.map((t) => {
+              const count = tasks.items.filter((task) => inBucket(task.status, t.key)).length;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  aria-pressed={bucket === t.key}
+                  onClick={() => setBucket(t.key)}
+                  className={cn(
+                    "cursor-pointer rounded-[2px] px-2.5 py-1 text-xs transition-colors duration-150",
+                    bucket === t.key
+                      ? "bg-primary-soft font-semibold text-primary"
+                      : "text-fg-muted hover:bg-surface-3 hover:text-fg",
+                  )}
+                >
+                  {t.label}
+                  <span className="tnum ml-1.5 text-fg-subtle">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          <span className="hidden font-normal sm:inline">进度 / 状态</span>
+        </div>
+
         {tasks.loading && <TaskSkeleton />}
         {!tasks.loading && visible.length === 0 && (
-          <div className="rf-empty-state px-4 py-9 text-center">
-            <span className="rf-empty-icon"><QueueIcon aria-hidden className="size-6" /></span>
-            <h2 className="mt-2.5 text-sm font-semibold text-fg">
+          <div className="ff-ledger-empty">
+            <p className="text-sm font-medium text-fg">
               {tasks.items.length === 0 ? "还没有生成任务" : "当前筛选下没有任务"}
-            </h2>
-            <p className="mx-auto mt-1 max-w-2xl text-sm leading-6 text-fg-subtle">
+            </p>
+            <p className="mx-auto mt-1.5 max-w-xl leading-6">
               {tasks.items.length === 0
                 ? "出图、批量出图会在这里出现——文本阶段（advance / revise）是同步调用，只落 agent_runs，不建任务。"
                 : "切换上方筛选即可查看其他状态的任务。"}
@@ -194,7 +202,7 @@ export function TaskCenter({
             onCancel={() => void tasks.cancel(task.id)}
           />
         ))}
-      </div>
+      </section>
 
       <p className="text-xs leading-5 text-fg-subtle">
         重试会<strong className="font-medium text-fg-muted">重新预扣一笔</strong> Credits，不是免费再跑一次。取消只对还没开始或
@@ -209,13 +217,13 @@ function TaskSkeleton() {
     <div role="status" aria-label="加载中" className="divide-y divide-border">
       <span className="sr-only">加载中…</span>
       {[0, 1, 2].map((row) => (
-        <div key={row} className="flex items-center gap-4 px-4 py-3.5">
+        <div key={row} className="flex items-center gap-4 px-4 py-3">
           <div className="min-w-0 flex-1 space-y-2">
             <span className="rf-skeleton block h-3 w-2/5 rounded-sm" />
             <span className="rf-skeleton block h-2.5 w-3/5 rounded-sm" />
           </div>
-          <span className="rf-skeleton hidden h-1 w-28 rounded-full sm:block" />
-          <span className="rf-skeleton block h-5 w-14 rounded-full" />
+          <span className="rf-skeleton hidden h-1 w-28 sm:block" />
+          <span className="rf-skeleton block h-5 w-14 rounded-[2px]" />
         </div>
       ))}
     </div>
@@ -240,7 +248,7 @@ function TaskRow({
   const cost = task.actual_cost || task.estimated_cost;
 
   return (
-    <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-3 transition-colors duration-150 last:border-0 hover:bg-surface-2/55">
+    <div className="ff-ledger-row">
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-fg">
           {title}
@@ -253,7 +261,7 @@ function TaskRow({
         <div className="tnum mt-0.5 truncate text-xs text-fg-subtle">
           {new Date(task.created_at).toLocaleString("zh-CN")}
           {cost > 0 &&
-            ` · ${task.actual_cost > 0 ? "实扣" : "预估"} ${cost.toLocaleString("zh-CN")} Credits`}
+            `，${task.actual_cost > 0 ? "实扣" : "预估"} ${cost.toLocaleString("zh-CN")} Credits`}
         </div>
         {task.status === "failed" && (
           <p className="mt-1 text-xs text-danger">
@@ -269,12 +277,12 @@ function TaskRow({
       <div className="hidden w-[140px] shrink-0 sm:block">
         {running && (
           <div className="flex flex-col gap-1">
-            <div className="h-1 overflow-hidden rounded-full bg-surface-2">
-              <div
-                className="h-full bg-running transition-[width] duration-200"
+            <span className="ff-meter" data-tone="running">
+              <span
+                className="transition-[width] duration-200"
                 style={{ width: `${Math.max(2, Math.min(100, task.progress))}%` }}
               />
-            </div>
+            </span>
             <span className="tnum text-xs text-fg-subtle">{task.progress}%</span>
           </div>
         )}

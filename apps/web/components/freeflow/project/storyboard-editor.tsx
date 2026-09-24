@@ -274,7 +274,7 @@ export function StoryboardEditor({
   if (shots.length === 0) {
     return (
       <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 p-4 lg:p-6">
-        <div className="rf-empty-state rounded-2xl border border-dashed border-border-strong px-6 py-9 text-center">
+        <div className="rf-empty-state rounded-[2px] border border-dashed border-border-strong px-6 py-9 text-center">
           <span className="rf-empty-icon"><StoryboardIcon aria-hidden className="size-7" /></span>
           <h2 className="mt-3 text-sm font-semibold text-fg">还没有分镜产出</h2>
           <p className="mx-auto mt-1 max-w-xl text-sm leading-6 text-fg-subtle">
@@ -323,8 +323,8 @@ export function StoryboardEditor({
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-sm font-semibold text-fg">镜头工作台</h1>
         <span className="tnum text-xs text-fg-subtle">
-          共 {shots.length} 镜 · {shots.length - missing.length} 镜已有首帧图
-          {outdatedCount > 0 && ` · ${outdatedCount} 张图可能过期`}
+          共 {shots.length} 镜，{shots.length - missing.length} 镜已有首帧图
+          {outdatedCount > 0 && `，${outdatedCount} 张图可能过期`}
         </span>
 
         <Button
@@ -378,6 +378,16 @@ export function StoryboardEditor({
       )}
 
       <GateActions state={state} gate="storyboard" />
+
+      {/* 先是整条序列：画面、镜号、时长、状态形成接触表的节奏。
+          编辑字段退到下面「选中这一镜」的工作区，不再把整页做成长表单。 */}
+      <ShotGrid shots={cards} selectedIndex={activeAt} onSelect={selectShot} />
+
+      <div className="flex items-baseline gap-2.5 border-t border-border pt-4">
+        <span className="ff-shot-no">{activeCard.code}</span>
+        <h2 className="min-w-0 truncate text-sm font-semibold text-fg">{activeCard.title}</h2>
+        <span className="ml-auto shrink-0 text-xs text-fg-subtle">正在编辑这一镜</span>
+      </div>
 
       <ShotEditor
         // 换镜头时重建组件，草稿状态跟着一起重置——留着上一镜的草稿，
@@ -441,8 +451,6 @@ export function StoryboardEditor({
       {activeView?.status === "failed" && activeView.errorCode && (
         <p className="text-xs text-danger">失败错误码：{activeView.errorCode}</p>
       )}
-
-      <ShotGrid shots={cards} selectedIndex={activeAt} onSelect={selectShot} />
 
       <p className="rounded-md border border-border bg-surface-2 px-3 py-2 text-xs leading-5 text-fg-subtle">
         先保存镜头修改，再准备提示词或出图。提示词会结合景别、角度、角色和场景设定，

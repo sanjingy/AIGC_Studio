@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { StoryIcon } from "@/components/icons/studio-icons";
 import { PlotIndexView, plotIndexMeta } from "@/components/project/plot-index-view";
 import { ScreenplayView, screenplayMeta } from "@/components/project/screenplay-view";
+import { STORY_ANCHORS } from "@/lib/freeflow/stage-links";
 import type { ProjectState } from "@/lib/freeflow/use-project-state";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +33,21 @@ export function StoryWorkspace({
   const plotIndex = state.output.plot_index;
   const screenplay = state.output.screenplay;
   const [episodeIndex, setEpisodeIndex] = useState<number | null>(null);
+
+  // 从阶段条点「故事 / 剧本」进来时带着 hash，但内容是异步加载的：浏览器那一次
+  // 自动定位发生在 section 还不存在的时候。内容到位后、以及之后每次 hash 变化，
+  // 自己定位一次。
+  useEffect(() => {
+    const go = () => {
+      const id = window.location.hash.replace(/^#/, "");
+      if (id !== STORY_ANCHORS.story && id !== STORY_ANCHORS.script) return;
+      const el = document.getElementById(id);
+      if (el) scrollWithinPane(el);
+    };
+    go();
+    window.addEventListener("hashchange", go);
+    return () => window.removeEventListener("hashchange", go);
+  }, [Boolean(plotIndex), Boolean(screenplay)]);
   const episodes: EpisodeRef[] = Array.isArray(screenplay?.episodes)
     ? screenplay.episodes
         .map((episode: any) => ({
@@ -45,7 +61,7 @@ export function StoryWorkspace({
     return (
       <main className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4">
-          <div className="rf-empty-state rounded-xl border border-dashed border-border-strong px-6 py-8 text-center">
+          <div className="rf-empty-state rounded-[2px] border border-dashed border-border-strong px-6 py-8 text-center">
             <span className="rf-empty-icon"><StoryIcon aria-hidden className="size-7" /></span>
             <h2 className="mt-3 text-sm font-semibold text-fg">还没有故事产出</h2>
             <p className="mt-1 text-sm leading-6 text-fg-subtle">
@@ -82,8 +98,8 @@ export function StoryWorkspace({
                门在这个组件里、目录也在这个组件里，但两者中间隔着几个兄弟节点，
                而滚动定位本来就是浏览器的事。 */
             <section
-              id="plot-index"
-              className="scroll-mt-4 overflow-hidden rounded-xl border border-border bg-surface"
+              id={STORY_ANCHORS.story}
+              className="scroll-mt-4 overflow-hidden rounded-[2px] border border-border bg-surface"
             >
               <div className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-3">
                 <h3 className="text-sm font-semibold text-fg">情节目录</h3>
@@ -106,7 +122,7 @@ export function StoryWorkspace({
               {episodes.map((episode) => (
                 <EpisodeChip
                   key={episode.index}
-                  label={`第 ${episode.index} 集 · ${episode.title}`}
+                  label={`第 ${episode.index} 集　${episode.title}`}
                   active={episode.index === episodeIndex}
                   onClick={() => setEpisodeIndex(episode.index)}
                 />
@@ -115,7 +131,9 @@ export function StoryWorkspace({
           )}
 
           {screenplay && (
-            <section className="overflow-hidden rounded-xl border border-border bg-surface">
+            /* 剧本走纸面：全站唯一的浅色面。剧本本来就是纸，
+               这个对比只用在这里，别处不复用。 */
+            <section id={STORY_ANCHORS.script} className="ff-paper scroll-mt-4 overflow-hidden">
               <div className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-3">
                 <h3 className="text-sm font-semibold text-fg">
                   {episodeIndex === null ? "完整剧本" : `第 ${episodeIndex} 集剧本`}
@@ -150,7 +168,7 @@ function EpisodeChip({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "max-w-56 cursor-pointer truncate rounded-full px-2.5 py-1 text-xs transition-colors duration-150",
+        "max-w-56 cursor-pointer truncate rounded-[2px] px-2.5 py-1 text-xs transition-colors duration-150",
         active
           ? "bg-primary-soft font-medium text-primary"
           : "bg-surface-2 text-fg-muted hover:bg-surface-3 hover:text-fg",
@@ -160,4 +178,27 @@ function EpisodeChip({
       {label}
     </button>
   );
+}
+
+/**
+ * 只滚动**最近的那个可滚动容器**，不用 `scrollIntoView`。
+ *
+ * 工作台外壳是 `overflow-hidden` 的定高布局，`scrollIntoView` 会把沿途所有祖先
+ * 都滚一遍——包括外壳本身，结果是顶栏和胶片条被推出视口、底部露出一截空白。
+ * 浏览器的原生 hash 定位也会这么干，所以顺手把被推走的 overflow-hidden 祖先复位。
+ */
+function scrollWithinPane(el: HTMLElement) {
+  let pane: HTMLElement | null = null;
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const overflowY = getComputedStyle(node).overflowY;
+    if (!pane && (overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight) {
+      pane = node;
+    } else if (overflowY === "hidden" && node.scrollTop !== 0) {
+      node.scrollTop = 0;
+    }
+  }
+  if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+  if (!pane) return;
+  const offset = el.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+  pane.scrollTo({ top: pane.scrollTop + offset - 16 });
 }

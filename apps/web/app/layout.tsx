@@ -11,14 +11,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
-      <body
-        style={{
-          // 拉丁与数字用 Plus Jakarta Sans（检索命中），中文走系统栈——
-          // 中文 Web 字体几 MB，对每天开一整天的工作台是净负担。
-          fontFamily:
-            '"Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif',
-        }}
-      >
+      {/* 字体栈在 globals.css 的 --font-sans / --font-mono 上，不在这里内联：
+          两处各写一份必然分叉。全部是系统字体，不下载任何 Web 字体。 */}
+      <body>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           {children}
         </ThemeProvider>

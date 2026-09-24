@@ -57,14 +57,12 @@ export function SidebarNav({
           "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",
         )}
       >
-        <div className="grid size-9 shrink-0 place-items-center rounded-lg border border-primary/35 bg-primary-soft text-primary shadow-rf-glow">
+        <div className="grid size-8 shrink-0 place-items-center rounded-[2px] border border-border-strong bg-surface-2 text-primary">
           <StudioMarkIcon aria-hidden className="size-5" />
         </div>
         <div className={cn("min-w-0", collapsed && "hidden", "max-md:hidden")}>
           <p className="truncate text-sm font-semibold tracking-tight text-fg">AIGC Studio</p>
-          <p className="mt-1 truncate text-[11px] text-fg-subtle">
-            影像创作工作台
-          </p>
+          <p className="mt-0.5 truncate text-[11px] text-fg-subtle">影像创作工作台</p>
         </div>
       </Link>
 
@@ -76,7 +74,7 @@ export function SidebarNav({
           collapsed={collapsed}
         />
         {utilityNavigation.length > 0 && (
-          <div className="border-t border-border">
+          <div className="mx-2.5 border-t border-border max-md:mx-2">
             <SidebarNavGroup
               label="资产与运行"
               items={utilityNavigation}
@@ -95,7 +93,7 @@ export function SidebarNav({
           aria-label={collapsed ? "展开侧栏" : "折叠侧栏"}
           onClick={() => onCollapsedChange(!collapsed)}
           className={cn(
-            "flex h-10 w-full cursor-pointer items-center gap-3 rounded-xl px-3 text-sm text-fg-muted",
+            "flex h-9 w-full cursor-pointer items-center gap-3 rounded-md px-3 text-sm text-fg-muted",
             "transition-colors duration-200 hover:bg-surface-2 hover:text-fg motion-reduce:transition-none",
             collapsed && "justify-center px-0",
           )}

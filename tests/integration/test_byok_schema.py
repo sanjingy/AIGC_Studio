@@ -51,10 +51,11 @@ async def test_provider_credential_round_trips_through_db(db: AsyncSession) -> N
 
 
 async def test_one_key_per_org_capability() -> None:
-    """一个 org 同一个 capability 只挂一把 Key。
+    """一个 org 在同一个 capability 上，**同一家**只挂一把 Key。
 
-    第二把必须被数据库拦住——本轮不做多把轮换，靠约束把这条钉死，
-    否则以后总会有某条新路径悄悄插进第二行。
+    第二把必须被数据库拦住——本轮不做同一家多把轮换，靠约束把这条钉死，
+    否则以后总会有某条新路径悄悄插进第二行。同能力下**另一家**的 Key
+    是允许的（迁移 3a9d2c7e5b10，同能力多 Provider），见下面最后一段。
     """
     org_id = uuid.uuid4()
 
@@ -75,6 +76,18 @@ async def test_one_key_per_org_capability() -> None:
     with pytest.raises(IntegrityError):
         async with session_scope() as s:
             await _add(s)
+
+    # 同一个 capability 换一家则不冲突
+    async with session_scope() as s:
+        s.add(
+            ProviderCredential(
+                org_id=org_id,
+                capability="image_generation",
+                provider_id="another-image-vendor",
+                key_encrypted=encrypt_secret(FAKE_KEY),
+                created_by=uuid.uuid4(),
+            )
+        )
 
     # 换一个 capability 则不冲突
     async with session_scope() as s:

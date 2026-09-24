@@ -100,7 +100,7 @@ export function NodeCard({ data, selected }: NodeProps<CanvasNode>) {
               ) : (
                 <ChevronRight aria-hidden className="size-3" />
               )}
-              更多设置 · {extraParams.length}
+              更多设置（{extraParams.length}）
             </button>
             {expanded && (
               <dl className="mt-0.5 space-y-0.5 border-t border-border pt-1">

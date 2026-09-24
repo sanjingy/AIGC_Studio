@@ -55,11 +55,11 @@ const UTILITY_NAVIGATION: NavItem[] = [
 ];
 
 const STAGES: StageState[] = [
-  { key: "story", label: "故事", state: "locked" },
-  { key: "assets", label: "角色与世界", state: "ready" },
-  { key: "script", label: "剧本", state: "approved" },
-  { key: "storyboard", label: "镜头", state: "active" },
-  { key: "generation", label: "生成", state: "pending" },
+  { key: "story", label: "故事", state: "locked", href: "#story" },
+  { key: "assets", label: "角色与世界", state: "ready", href: "#assets" },
+  { key: "script", label: "剧本", state: "approved", href: "#script" },
+  { key: "storyboard", label: "镜头", state: "active", href: "#storyboard" },
+  { key: "generation", label: "生成", state: "pending", href: "#generation" },
 ];
 
 type PreviewShot = ShotCardData & {
@@ -175,7 +175,7 @@ export default function ShellPreviewPage() {
       stages={STAGES}
       primaryAction={{ label: "批量出图", onClick: () => setDialogOpen(true) }}
       aside={
-        <div className="space-y-4">
+        <div className="ff-rail">
           <AsideStageCard
             stage={STAGES[3]!}
             gate={{
@@ -204,7 +204,7 @@ export default function ShellPreviewPage() {
       <section aria-labelledby="preview-title" className="mx-auto w-full max-w-6xl px-5 py-7 lg:px-8 lg:py-9">
         <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
           <div>
-            <p className="font-mono text-[10px] tracking-[0.18em] text-primary uppercase">
+            <p className="code text-[11px] text-primary">
               Scene 01 / Shot design
             </p>
             <h1 id="preview-title" className="mt-3 text-3xl font-semibold tracking-tight text-fg">
@@ -214,7 +214,7 @@ export default function ShellPreviewPage() {
               检查镜头顺序、画面描述与一致性档案，再将已就绪的镜头加入生成队列。
             </p>
           </div>
-          <span className="tnum w-fit rounded-full border border-border bg-surface-2 px-3 py-1.5 text-xs text-fg-muted">
+          <span className="tnum w-fit rounded-[2px] border border-border bg-surface-2 px-3 py-1.5 text-xs text-fg-muted">
             {SHOTS.length} 个镜头
           </span>
         </div>

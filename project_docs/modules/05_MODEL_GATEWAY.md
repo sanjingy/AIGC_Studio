@@ -60,15 +60,16 @@ BYOK 的凭证表放在 `billing/credentials.py` 而不是本模块，
 | BYOK：免费探针测连接 | 已实现 | `gateway/probe.py`；`POST /provider-credentials/{capability}/test` |
 | 项目级模型偏好（按能力覆盖，重排不过滤） | 已实现 | `project/service.py::set_model_preference`；`gateway/service.py::_prefer_model`；`tests/integration/test_model_preference.py` |
 | 推理模型在 `no_reasoning_roles` 上被丢弃（ADR-024 硬约束 2） | 已实现 | `gateway/service.py::_preferred_model`；`catalog.REASONING_MODELS` |
-| 模型目录只读接口 + 全局模型页 | 已实现 | `GET /model-catalog`；`apps/web/components/freeflow/model-catalog-page.tsx` |
+| 模型目录只读接口 + 全局模型页 | 已实现 | `GET /model-catalog`（项目设置页用）；全局模型页 2026-09-24 起改读 `GET /model-config`，可逐能力选上游 / 模型 / 计费来源并保存（`apps/web/components/freeflow/model-catalog-page.tsx`） |
+| BYOK 同能力多 Provider | 已实现（2026-09-24） | `provider_credentials` 唯一约束改为 `(org_id, capability, provider_id)`；`/provider-credentials/{capability}?provider_id=`；删 Key 时把"自有计费"的组织默认退回平台额度 |
 | `org_id` 传到 Gateway（决定用谁的 Key） | 已实现 | 图像 `worker/jobs/generation.py`；文本 `agent/runner.py:300`（**本分支修复，`main` 上仍是漏传状态**） |
 | 出图任务回报实际使用的模型 | 部分实现 | `worker/jobs/generation.py` 返回 `model_id`、写进 asset metadata；**没有记录它来自哪一层，前端不显示** |
 | `video_generation`（图生视频） | 未实现 | `catalog.SPECS` 里没有；`credentials.CAPABILITY_LABELS` 与 `skills/builtin/novel_to_anime.yaml` 里只有能力字符串 → 按 §0 属"预留"，不计功能 |
 | `tts`（语音合成） | 未实现 | 同上 |
 | 视频模型的"单段最大时长"声明（ADR-032 第 3 条） | 未实现 | `ProviderSpec` 没有这个字段 |
-| 组织级模型默认 | 未实现 | 没有表、没有列、没有接口 |
+| 组织级模型默认（上游 + 模型 + 计费来源） | 已实现（2026-09-24） | 表 `org_model_defaults`（迁移 `3a9d2c7e5b10`）；`gateway/upstreams.py::decide` 三层判定（项目 > 组织 > 平台目录），Gateway `_resolve` 与计费 `pricing.uses_own_key` 共用；`GET/PUT /model-config`；`tests/integration/test_model_config_api.py` |
 | 生成前临时选择 + 界面上的模型选择按钮 | 未实现 | 没有接口，`/freeflow/models` 明确写着"选在项目设置里做" |
-| 文本能力的 OpenAI 兼容自定义端点 | 未实现 | 没有表、没有虚拟 Provider |
+| 文本能力的 OpenAI 兼容自定义端点 | 已实现（2026-09-24） | 表 `org_text_endpoints`（无 capability 列）；`adapters/providers/openai_compat.py` + `endpoint_url.py`（仅 https、拒私网/回环/元数据、调用前 DNS 复查、不跟随跳转）；虚拟路由 `provider.custom.text` 只在文本分支拼；`PUT/DELETE /model-config/text_generation/custom-endpoint`、`.../test` |
 | "可选模型 + 各自 Credits 估算"接口 | 未实现 | `GET /model-catalog` 不含任何金额 |
 | 换模型必重算 Credits 预估（ADR-024 硬约束 1） | **未实现（且当前被违反）** | 见 §11.1 |
 | ComfyUI / 本地 Runtime | 未实现 | ADR-003 / ADR-004 只有设计 |
@@ -83,7 +84,7 @@ BYOK 的凭证表放在 `billing/credentials.py` 而不是本模块，
 
 | 能力 id | 中文 | 现状 | 首批 Provider |
 |---|---|---|---|
-| `text_generation` | 文本生成 | 已实现 | DeepSeek（OpenAI 兼容自定义端点为 P1，未实现，见 §5.2） |
+| `text_generation` | 文本生成 | 已实现 | DeepSeek；OpenAI 兼容自定义端点（2026-09-24 已实现，见 §5.2） |
 | `image_generation` | 图像生成 | 已实现 | DashScope 万相 |
 | `video_generation` | 视频生成（图生视频） | 未实现（Wave 2） | DashScope 万相 i2v，之后 Seedance |
 | `tts` | 语音合成 | 未实现（Wave 2） | DashScope CosyVoice，之后 FishAudio / MiniMax |

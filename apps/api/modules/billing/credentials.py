@@ -22,7 +22,7 @@ from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
 from apps.api.modules.billing import repository as repo
 from apps.api.modules.billing.models import ProviderCredential
-from apps.api.modules.gateway import probe
+from apps.api.modules.gateway import catalog, probe
 from skills import registry as skill_registry
 
 log = get_logger(__name__)
@@ -81,14 +81,33 @@ def configurable_capabilities() -> tuple[str, ...]:
     return tuple(c for c in probe.PROVIDER_OF if c in declared)
 
 
-def _require_capability(capability: str) -> str:
+def _require_capability(capability: str, provider_id: str | None = None) -> str:
+    """校验能力可配 Key，并决定这把 Key 属于哪一家。
+
+    `provider_id` 不给就是这个能力的平台默认那家——旧接口
+    `/provider-credentials/{capability}` 不带 Provider，它的语义一直是
+    "给这个能力唯一的那家配 Key"，同能力多家之后仍然落到默认那家，
+    旧前端与旧测试不需要改。
+
+    给了就必须是这个能力下**目录里真有适配器**的一家。自定义端点不走这里，
+    它的 Key 和地址、模型绑在一起存在 `org_text_endpoints`。
+    """
     if capability not in configurable_capabilities():
         raise AppError(
             "common.validation_failed",
             message=f"能力 {capability!r} 暂不支持自带 Key",
             detail={"allowed": list(configurable_capabilities())},
         )
-    return probe.PROVIDER_OF[capability]
+    if provider_id is None:
+        return probe.PROVIDER_OF[capability]
+    allowed = [spec.provider_id for spec in catalog.providers_for(capability)]
+    if provider_id not in allowed:
+        raise AppError(
+            "common.validation_failed",
+            message=f"{capability} 下没有接入 Provider {provider_id!r}",
+            detail={"allowed": allowed},
+        )
+    return provider_id
 
 
 def _clean_key(api_key: str) -> str:
@@ -109,6 +128,10 @@ def _clean_key(api_key: str) -> str:
     return key
 
 
+# 自定义端点（`gateway.upstreams`）的 Key 用同一套清洗规则，不另写一份阈值。
+clean_key = _clean_key
+
+
 def mask(plaintext: str) -> str:
     """尾号展示串。给人识别"这是哪一把"用，不足以重建 Key。"""
     if len(plaintext) < _MIN_CHARS_FOR_HINT:
@@ -116,16 +139,18 @@ def mask(plaintext: str) -> str:
     return f"{plaintext[:_PREFIX_CHARS]}{_MASK_BODY}{plaintext[-_HINT_CHARS:]}"
 
 
-def _view(capability: str, row: ProviderCredential | None) -> CredentialView:
+def _view(
+    capability: str, row: ProviderCredential | None, *, provider_id: str | None = None
+) -> CredentialView:
     label = CAPABILITY_LABELS.get(capability, capability)
     if row is None:
-        provider_id = probe.PROVIDER_OF[capability]
+        provider_id = provider_id or probe.PROVIDER_OF[capability]
         return CredentialView(
             capability=capability,
             label=label,
             configured=False,
             provider_id=provider_id,
-            provider_label=probe.PROVIDER_LABELS.get(provider_id, provider_id),
+            provider_label=catalog.provider_label(provider_id),
             masked_key=None,
             updated_at=None,
         )
@@ -145,7 +170,7 @@ def _view(capability: str, row: ProviderCredential | None) -> CredentialView:
         label=label,
         configured=True,
         provider_id=row.provider_id,
-        provider_label=probe.PROVIDER_LABELS.get(row.provider_id, row.provider_id),
+        provider_label=catalog.provider_label(row.provider_id),
         masked_key=masked,
         updated_at=row.updated_at,
     )
@@ -161,13 +186,26 @@ async def list_for_org(db: AsyncSession, *, org_id: uuid.UUID) -> list[Credentia
     只返回已配置的那几条，前端就得自己拼出"还有哪些能配"，
     那份清单迟早和后端的不一致。
     """
-    rows = {r.capability: r for r in await repo.list_credentials(db, org_id=org_id)}
-    return [_view(cap, rows.get(cap)) for cap in configurable_capabilities()]
+    rows = {
+        (r.capability, r.provider_id): r for r in await repo.list_credentials(db, org_id=org_id)
+    }
+    # 一个能力下每家各一行：同能力多 Provider 之后"这个能力配没配"不再是
+    # 单一答案，得说清楚是哪一家。今天每个能力只有一家，输出与以前一致。
+    return [
+        _view(cap, rows.get((cap, spec.provider_id)), provider_id=spec.provider_id)
+        for cap in configurable_capabilities()
+        for spec in catalog.providers_for(cap)
+    ]
 
 
-async def has_own_key(db: AsyncSession, *, org_id: uuid.UUID, capability: str) -> bool:
-    """这个 org 是否给这个能力配了自己的 Key。计费分支就问这一句。"""
-    return await repo.get_credential(db, org_id=org_id, capability=capability) is not None
+async def has_own_key(
+    db: AsyncSession, *, org_id: uuid.UUID, capability: str, provider_id: str
+) -> bool:
+    """这个 org 是否给这个能力的**这一家**配了自己的 Key。"""
+    row = await repo.get_credential(
+        db, org_id=org_id, capability=capability, provider_id=provider_id
+    )
+    return row is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,7 +222,7 @@ class ResolvedKey:
 
 
 async def resolve_for_call(
-    db: AsyncSession, *, org_id: uuid.UUID, capability: str
+    db: AsyncSession, *, org_id: uuid.UUID, capability: str, provider_id: str
 ) -> ResolvedKey | None:
     """Gateway 每次调用前问的那一句：这次该用谁的 Key。
 
@@ -196,7 +234,9 @@ async def resolve_for_call(
     解密失败时**不回落平台 Key**：那一行还在，计费仍按 BYOK 折扣走，
     这时候拿平台 Key 顶上就是把漏洞换了个位置。抛错让用户重配。
     """
-    row = await repo.get_credential(db, org_id=org_id, capability=capability)
+    row = await repo.get_credential(
+        db, org_id=org_id, capability=capability, provider_id=provider_id
+    )
     if row is None:
         return None
     try:
@@ -221,13 +261,14 @@ async def put_key(
     user_id: uuid.UUID,
     capability: str,
     api_key: str,
+    provider_id: str | None = None,
 ) -> CredentialView:
     """新增或更换某个能力的 Key。就地覆盖，不留历史。
 
     不做"测过才让存"的强制：用户可能只是想先存下来，
     上游临时抽风也不该拦着他保存。测试连接是帮助，不是关卡。
     """
-    provider_id = _require_capability(capability)
+    provider_id = _require_capability(capability, provider_id)
     key = _clean_key(api_key)
 
     row = await repo.upsert_credential(
@@ -244,15 +285,19 @@ async def put_key(
     return _view(capability, row)
 
 
-async def delete_key(db: AsyncSession, *, org_id: uuid.UUID, capability: str) -> None:
+async def delete_key(
+    db: AsyncSession, *, org_id: uuid.UUID, capability: str, provider_id: str | None = None
+) -> None:
     """移除 Key。该能力的调用与计费**自动退回平台档**——
 
     不需要额外的开关：`pricing.estimate` 每次都现查有没有自有 Key，
     查不到就是平台计费。多一个"是否启用 BYOK"的字段就是多一份真相，
     迟早出现"删了 Key 但开关还开着"。
     """
-    _require_capability(capability)
-    row = await repo.get_credential(db, org_id=org_id, capability=capability)
+    provider_id = _require_capability(capability, provider_id)
+    row = await repo.get_credential(
+        db, org_id=org_id, capability=capability, provider_id=provider_id
+    )
     if row is None:
         # 跨租户访问会落到这里：按 org_id 查不到就是不存在。
         # 返 404 不返 403——403 会确认"这东西存在，只是你没权限"。
@@ -260,7 +305,7 @@ async def delete_key(db: AsyncSession, *, org_id: uuid.UUID, capability: str) ->
 
     await repo.soft_delete_credential(db, row=row)
     await db.commit()
-    log.info("credentials.removed", org_id=str(org_id), capability=capability)
+    log.info("credentials.removed", org_id=str(org_id), capability=capability, provider=provider_id)
 
 
 # ---------------------------------------------------------------- 测试连接
@@ -272,6 +317,7 @@ async def test_key(
     org_id: uuid.UUID,
     capability: str,
     api_key: str | None = None,
+    provider_id: str | None = None,
 ) -> probe.ProbeResult:
     """测试一把 Key 能不能用。
 
@@ -279,12 +325,14 @@ async def test_key(
     没给就测已存的那把——已配置的 Key 过期或被上游停用时，
     用户需要一个办法确认"是不是 Key 的问题"，而明文已经拿不回来了。
     """
-    provider_id = _require_capability(capability)
+    provider_id = _require_capability(capability, provider_id)
 
     if api_key is not None:
         key = _clean_key(api_key)
     else:
-        row = await repo.get_credential(db, org_id=org_id, capability=capability)
+        row = await repo.get_credential(
+            db, org_id=org_id, capability=capability, provider_id=provider_id
+        )
         if row is None:
             raise AppError("common.not_found", message="该能力还没有配置自己的 Key")
         try:

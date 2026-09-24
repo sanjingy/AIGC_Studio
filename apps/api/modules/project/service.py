@@ -120,7 +120,11 @@ async def set_model_preference(
 
     1. **按 key 合并，不整个覆盖。** 用户改了图片模型不该把之前存的
        文字模型偏好一起冲掉——前端只会传它正在改的那一个能力。
-    2. **只接受目录里真实存在的 id。** 目录是"有哪些模型"的唯一真相源
+    2. **只接受目录里真实存在的 id**，外加文本能力的一个固定值
+       `provider.custom.text`：表示"这个项目的文本走组织的自定义端点"，
+       模型随端点走。端点没配时它会在生成时明确报错（`provider.byok.rejected`），
+       不会静默退回平台默认。这里不查端点在不在——那是 Gateway 的表，
+       项目模块只认目录。 目录是"有哪些模型"的唯一真相源
        （`gateway/catalog.py`），存一个路由表里没有的 id 等于让偏好
        静默失效：Gateway 找不到匹配的路由就按默认优先级走，用户看着
        设置页显示"已选高质档"，实际跑的是另一个模型。
@@ -133,7 +137,10 @@ async def set_model_preference(
     """
     row = await get_project(db, org_id=org_id, project_id=project_id)
 
-    if model_id is not None:
+    custom = model_id == catalog.CUSTOM_TEXT_PROVIDER_ID and catalog.supports_custom_endpoint(
+        capability
+    )
+    if model_id is not None and not custom:
         allowed = catalog.model_ids(capability)
         if not allowed:
             raise AppError(

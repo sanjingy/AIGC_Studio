@@ -74,7 +74,7 @@ export function ScenesView({ data, renders }: { data: any; renders?: Renders }) 
               // 少掉的视角还看不出来。方框 + contain，一格都不裁。
               aspect="aspect-square"
               fit="contain"
-              caption="2×2 四视图 · 画面中无人物"
+              caption="2×2 四视图，画面中无人物"
               className="w-36"
             />
           )}
@@ -85,5 +85,5 @@ export function ScenesView({ data, renders }: { data: any; renders?: Renders }) 
 }
 
 export function scenesMeta(data: any): string {
-  return `${data.scenes?.length ?? 0} 个场景 · ${data.era ?? ""}`;
+  return `${data.scenes?.length ?? 0} 个场景，${data.era ?? ""}`;
 }

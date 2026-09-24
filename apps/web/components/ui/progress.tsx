@@ -25,10 +25,10 @@ export function Progress({
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={clamped}
-      className={cn("h-1 overflow-hidden rounded-full bg-border", className)}
+      className={cn("h-1 overflow-hidden rounded-[1px] bg-border", className)}
     >
       <div
-        className="h-full rounded-full bg-primary transition-[width] duration-200 motion-reduce:transition-none"
+        className="h-full bg-primary transition-[width] duration-200 motion-reduce:transition-none"
         style={{ width: `${clamped}%` }}
       />
     </div>

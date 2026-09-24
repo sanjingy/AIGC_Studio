@@ -80,7 +80,7 @@ export function GateActions({
   return (
     <section
       aria-label={`${GATE_LABEL[gate]}`}
-      className={cn("rounded-xl border border-primary/25 bg-primary-soft p-3.5", className)}
+      className={cn("rounded-[2px] border border-primary/25 bg-primary-soft p-3.5", className)}
     >
       <h3 className="flex items-center gap-2 text-sm font-semibold text-primary">
         <GatePendingIcon aria-hidden className="size-4 shrink-0" />
@@ -149,13 +149,13 @@ export function AdvanceAction({ state, className }: { state: ProjectState; class
   const showBox = needsSource || open;
 
   return (
-    <section className={cn("rounded-xl border border-border bg-surface p-3.5", className)}>
+    <section className={cn("rounded-[2px] border border-border bg-surface p-3.5", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-fg">推进生产</h3>
           <p className="mt-0.5 text-xs text-fg-subtle">
             当前阶段：{state.stageLabel}
-            {atGate && " · 先处理审核门才能继续"}
+            {atGate && "。先处理审核门才能继续"}
           </p>
         </div>
         <div className="flex items-center gap-2">

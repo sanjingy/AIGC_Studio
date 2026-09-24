@@ -135,7 +135,7 @@ function SkillUploadNotice({
   return (
     <div
       role="status"
-      className="rounded-xl border border-border bg-surface px-3 py-2.5 text-xs"
+      className="rounded-[2px] border border-border bg-surface px-3 py-2.5 text-xs"
     >
       <div className="flex items-center gap-1.5">
         {ok ? (
@@ -155,8 +155,8 @@ function SkillUploadNotice({
 
       {ok ? (
         <p className="mt-1.5 text-fg-subtle">
-          {result.stage_count} 个阶段 · {result.gates.length} 道门
-          {result.route ? ` · ${result.route}` : ""}
+          {result.stage_count} 个阶段，{result.gates.length} 道门
+          {result.route ? `，${result.route}` : ""}
         </p>
       ) : (
         // 错误原文照实显示。后端已经把 pydantic 的报告压成了逐行的中文，

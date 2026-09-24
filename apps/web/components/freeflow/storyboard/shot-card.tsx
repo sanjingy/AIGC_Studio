@@ -51,57 +51,43 @@ export function ShotCard(props: { shot: ShotCardData; selected: boolean; onSelec
       aria-pressed={selected}
       aria-label={`选择镜头 ${shot.code}：${shot.title}`}
       onClick={onSelect}
+      data-selected={selected ? "true" : undefined}
       className={cn(
-        "group w-full cursor-pointer overflow-hidden rounded-2xl border bg-surface-2 text-left shadow-rf-card",
-        "transition-[border-color,background-color,transform] duration-200",
-        // 位移只是锦上添花，声明了减少动效就别动
-        "hover:-translate-y-0.5 motion-reduce:transform-none motion-reduce:transition-none",
-        selected
-          ? "border-primary bg-primary-soft"
-          : "border-border hover:border-border-strong hover:bg-surface",
+        "ff-shot-frame group w-full cursor-pointer",
+        "transition-[border-color] duration-150",
       )}
     >
-      <div className="relative aspect-video overflow-hidden bg-surface">
-        <ShotImage
-          src={shot.imageUrl}
-          alt={`${shot.code} ${shot.title}`}
-          className="transition-transform duration-300 group-hover:scale-[1.02] motion-reduce:transform-none motion-reduce:transition-none"
-        />
+      <div className="ff-shot-gate">
+        <ShotImage src={shot.imageUrl} alt={`${shot.code} ${shot.title}`} />
 
-        <span className="absolute top-3 left-3 max-w-[60%] truncate rounded-full border border-border bg-rf-overlay px-2.5 py-1 font-mono text-[10px] font-medium text-fg backdrop-blur">
-          {shot.code}
-        </span>
+        <span className="ff-frame-no-burn !bottom-auto !top-1.5">{shot.code}</span>
         {shot.durationLabel && (
-          <span className="tnum absolute right-3 bottom-3 rounded-md bg-rf-overlay px-2 py-1 font-mono text-[10px] text-fg backdrop-blur">
-            {shot.durationLabel}
-          </span>
+          <span className="ff-frame-no-burn !left-auto right-1.5">{shot.durationLabel}</span>
         )}
         {shot.outdated && (
           <span
             title="这张图出在这一镜被改之前，可能与当前内容不符"
-            className="absolute bottom-3 left-3 inline-flex items-center gap-1 rounded-full border border-rf-agent/25 bg-rf-agent-soft px-2 py-0.5 text-[10px] text-rf-agent"
+            className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 rounded-[2px] border border-rf-agent/30 bg-rf-agent-soft px-1.5 py-0.5 text-[10px] text-rf-agent"
           >
             <StaleIcon aria-hidden className="size-2.5" />
             图可能过期
           </span>
         )}
         {selected && (
-          <span className="absolute top-3 right-3 grid size-6 place-items-center rounded-full bg-primary text-primary-fg">
-            <Check aria-hidden className="size-3.5" />
+          <span className="absolute top-1.5 right-1.5 grid size-5 place-items-center rounded-[2px] bg-primary text-primary-fg">
+            <Check aria-hidden className="size-3" />
             <span className="sr-only">已选择</span>
           </span>
         )}
       </div>
 
-      <div className="space-y-3 p-4">
-        <div className="flex items-start gap-3">
-          <span className="tnum pt-0.5 font-mono text-[10px] text-fg-subtle">
-            {String(shot.index).padStart(2, "0")}
-          </span>
+      <div className="flex flex-col gap-1.5 p-2.5">
+        <div className="flex items-start gap-2">
+          <span className="ff-shot-no pt-px">{String(shot.index).padStart(2, "0")}</span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-fg">{shot.title}</p>
-            <p className="mt-1 truncate text-xs text-fg-muted">
-              {shot.framing} · {shot.camera}
+            <p className="truncate text-[13px] font-semibold text-fg">{shot.title}</p>
+            <p className="mt-0.5 truncate text-[11px] text-fg-muted">
+              {shot.framing}／{shot.camera}
             </p>
             {shot.lighting && (
               <p
@@ -111,7 +97,7 @@ export function ShotCard(props: { shot: ShotCardData; selected: boolean; onSelec
                     : undefined
                 }
                 className={cn(
-                  "mt-0.5 truncate text-[11px]",
+                  "mt-0.5 truncate text-[10px]",
                   shot.lightingUnknown ? "text-rf-warning" : "text-fg-subtle",
                 )}
               >
@@ -141,7 +127,7 @@ export function ShotGrid(props: {
 
   if (shots.length === 0) {
     return (
-      <div className="rf-empty-state rounded-2xl border border-dashed border-border-strong px-4 py-10 text-center">
+      <div className="rf-empty-state rounded-[2px] border border-dashed border-border-strong px-4 py-10 text-center">
         <span className="rf-empty-icon"><StoryboardIcon aria-hidden className="size-6" /></span>
         <p className="mt-2 text-xs text-fg-subtle">还没有镜头。先完成分镜，这里会列出每一镜。</p>
       </div>
@@ -149,7 +135,7 @@ export function ShotGrid(props: {
   }
 
   return (
-    <ul aria-label="镜头列表" className="grid list-none gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+    <ul aria-label="镜头接触表" className="ff-contact-sheet list-none">
       {shots.map((shot, index) => (
         <li key={`${shot.code}-${shot.index}`}>
           <ShotCard

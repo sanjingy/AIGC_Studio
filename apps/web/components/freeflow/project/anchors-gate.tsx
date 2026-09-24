@@ -104,7 +104,7 @@ export function AnchorsGate({ state }: { state: ProjectState }) {
                 {inline.map((scene) => (
                   <span
                     key={scene.ref}
-                    className="rounded-full bg-surface px-2 py-px text-[11px] text-fg-muted"
+                    className="rounded-[2px] bg-surface px-2 py-px text-[11px] text-fg-muted"
                     title={scene.ref}
                   >
                     {scene.name}
@@ -136,9 +136,9 @@ export function AnchorsGate({ state }: { state: ProjectState }) {
                   <div className="flex flex-wrap items-baseline gap-1.5">
                     <SceneIcon aria-hidden className="size-3.5 shrink-0 text-primary" />
                     <span className="text-xs font-semibold text-fg">{scene.name}</span>
-                    <span className="font-mono text-[10px] text-fg-subtle">{scene.ref}</span>
+                    <span className="code text-[10px] text-fg-subtle">{scene.ref}</span>
                     {cardRefs.has(scene.ref) && (
-                      <span className="rounded-full bg-surface-3 px-1.5 py-px text-[10px] text-fg-muted">
+                      <span className="rounded-[2px] bg-surface-3 px-1.5 py-px text-[10px] text-fg-muted">
                         有锚点卡
                       </span>
                     )}
@@ -194,9 +194,9 @@ function AnchorCardRow({ card, incomplete }: { card: AnchorCard; incomplete: boo
       <div className="flex flex-wrap items-baseline gap-1.5">
         <SceneIcon aria-hidden className="size-3.5 shrink-0 text-primary" />
         <span className="text-sm font-semibold text-fg">{card.name}</span>
-        <span className="font-mono text-[10px] text-fg-subtle">{card.ref}</span>
+        <span className="code text-[10px] text-fg-subtle">{card.ref}</span>
         {incomplete && (
-          <span className="rounded-full bg-rf-warning-soft px-1.5 py-px text-[10px] font-medium text-rf-warning">
+          <span className="rounded-[2px] bg-rf-warning-soft px-1.5 py-px text-[10px] font-medium text-rf-warning">
             锚点为空
           </span>
         )}
@@ -207,7 +207,7 @@ function AnchorCardRow({ card, incomplete }: { card: AnchorCard; incomplete: boo
           {(card.reasons ?? []).map((reason) => (
             <li
               key={reason}
-              className="rounded-full bg-surface-2 px-2 py-px text-[11px] text-fg-muted"
+              className="rounded-[2px] bg-surface-2 px-2 py-px text-[11px] text-fg-muted"
             >
               {reason}
             </li>
@@ -249,10 +249,10 @@ function Block({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rf-panel-card rounded-xl border border-border p-3">
+    <section className="rf-panel-card rounded-[2px] border border-border p-3">
       <div className="flex flex-wrap items-baseline gap-2">
         <h4 className="text-sm font-semibold text-fg">{title}</h4>
-        <span className="tnum rounded-full bg-surface-2 px-2 py-px text-[11px] text-fg-muted">
+        <span className="tnum rounded-[2px] bg-surface-2 px-2 py-px text-[11px] text-fg-muted">
           {scope}
         </span>
       </div>

@@ -146,6 +146,11 @@ async def test_resolution_keeps_byok_when_platform_has_no_key(
 
     monkeypatch.setattr(gw, "_load_org_key", _own)
 
+    async def _no_default(**_kw: Any) -> None:
+        return None
+
+    monkeypatch.setattr(gw, "_load_org_default", _no_default)
+
     resolution = await gw._resolve(CAP, org_id=uuid.uuid4())
     assert [r.provider_id for r in resolution.routes] == ["provider.dashscope"] * len(
         resolution.routes

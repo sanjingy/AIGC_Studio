@@ -38,7 +38,7 @@ function actorText(batch: RevisionBatch, me: User | null): string {
   if (me && batch.actor_user_id === me.id) return "你";
   // 组织成员目录没有对应的读接口，拿不到别人的名字。显示一截 id 而不是
   // 编一个"某成员"——短 id 至少能把两个不同的人区分开。
-  return `其他成员 · ${batch.actor_user_id.slice(0, 8)}`;
+  return `其他成员 ${batch.actor_user_id.slice(0, 8)}`;
 }
 
 function BatchCard({
@@ -60,7 +60,7 @@ function BatchCard({
   return (
     <li
       className={cn(
-        "rounded-xl border p-3",
+        "rounded-[2px] border p-3",
         undone ? "border-border bg-surface-2 opacity-70" : "border-border bg-surface",
       )}
     >
@@ -70,12 +70,12 @@ function BatchCard({
           {new Date(batch.created_at).toLocaleString("zh-CN")}
         </span>
         {isUndo && (
-          <span className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[10px] text-fg-muted">
+          <span className="rounded-[2px] border border-border bg-surface-2 px-2 py-0.5 text-[10px] text-fg-muted">
             这是一次撤销
           </span>
         )}
         {undone && (
-          <span className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[10px] text-fg-muted">
+          <span className="rounded-[2px] border border-border bg-surface-2 px-2 py-0.5 text-[10px] text-fg-muted">
             已被撤销
           </span>
         )}
@@ -184,7 +184,7 @@ export function RevisionHistoryDrawer({
         )}
 
         {edit.batches.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-xs leading-5 text-fg-subtle">
+          <p className="rounded-[2px] border border-dashed border-border px-4 py-10 text-center text-xs leading-5 text-fg-subtle">
             {edit.loading ? "加载中…" : "还没有字段级改动。在镜头上改一个字段并保存，这里就会留下一条记录。"}
           </p>
         ) : (

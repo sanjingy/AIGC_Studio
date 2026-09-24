@@ -18,7 +18,7 @@ export function GlobalNavRail() {
     <nav aria-label="全局导航" className="ff-global-nav">
       <Link href="/freeflow" className="ff-brand" aria-label="AIGC Studio 创作首页">
         <span className="ff-brand-mark"><StudioMarkIcon aria-hidden className="size-5" /></span>
-        <span className="ff-brand-name">AIGC <span className="font-normal text-fg-muted">Studio</span></span>
+        <span className="ff-brand-name">AIGC Studio</span>
       </Link>
       <div className="ff-nav-heading">工作空间</div>
       <ul className="ff-nav-list">
@@ -28,7 +28,7 @@ export function GlobalNavRail() {
         })}
       </ul>
       <div className="ff-nav-bottom">
-        <div className="ff-studio-note"><span className="ff-note-line" /><p>让故事，成为画面。</p><span>你的 AI 影像创作空间</span></div>
+        <div className="ff-studio-note"><span className="ff-note-line" aria-hidden /><p>小说进，逐镜画面出。</p><span>视频合成在 M2，尚未接入</span></div>
         <div className="ff-profile"><span className="ff-avatar">A</span><div className="ff-nav-label"><p className="text-sm font-medium">个人工作空间</p><p className="mt-1 text-xs text-fg-subtle">AIGC Studio</p></div></div>
       </div>
     </nav>

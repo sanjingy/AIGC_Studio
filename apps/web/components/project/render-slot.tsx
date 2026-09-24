@@ -315,7 +315,7 @@ export function BaseImageActions({
   /**
    * 菜单画在 body 上（portal），不画在按钮旁边。
    *
-   * 右栏那张角色卡是 `overflow-hidden rounded-xl`——绝对定位的浮层会被它
+   * 右栏那张角色卡是 `overflow-hidden rounded-[2px]`——绝对定位的浮层会被它
    * 裁掉，只露出一条边。抽屉里也一样（它自己是个滚动容器）。所以位置只能
    * 自己算：拿触发器的视口坐标，用 fixed 定位画到最上层。
    *

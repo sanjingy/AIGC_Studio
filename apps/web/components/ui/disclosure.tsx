@@ -7,8 +7,8 @@ import { Panel } from "@/components/ui/panel";
 import { cn } from "@/lib/utils";
 
 /**
- * 折叠面板。视觉上就是一个 Panel + 可点的 PanelHeader，
- * 圆角、边框、内边距节奏与 Panel/PanelHeader 完全一致——
+ * 折叠面板。视觉上就是一个 Panel 加一条可点的标题栏，
+ * 圆角、边框、内边距节奏与 Panel 完全一致——
  * 折叠只是行为，不是另一套设计语言。
  *
  * **受控组件**：展开状态由上层持有。页面要能从别处（比如阶段进度条）

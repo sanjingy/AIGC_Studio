@@ -27,7 +27,7 @@ function OriginBadge({ origin }: { origin: NamedEntry["origin"] }) {
   return (
     <span
       title="这个名称是迁移时从描述里自动截出来的，没有人写过"
-      className="shrink-0 rounded-full bg-rf-agent-soft px-1.5 py-px text-[10px] font-medium text-rf-agent"
+      className="shrink-0 rounded-[2px] bg-rf-agent-soft px-1.5 py-px text-[10px] font-medium text-rf-agent"
     >
       自动截取
     </span>
@@ -113,7 +113,7 @@ export function LightingStates({
               </span>
               {isDefault && (
                 <span
-                  className="shrink-0 rounded-full bg-primary/15 px-1.5 py-px text-[10px] font-medium text-primary"
+                  className="shrink-0 rounded-[2px] bg-primary/15 px-1.5 py-px text-[10px] font-medium text-primary"
                   title="镜头没写光照时用这一个"
                 >
                   默认

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Header, Query, status
 
@@ -20,6 +21,7 @@ from apps.api.modules.billing.schemas import (
     TopupIn,
     TransactionOut,
 )
+from apps.api.modules.gateway import catalog, upstreams
 
 router = APIRouter(prefix="/credits", tags=["credits"])
 
@@ -111,28 +113,49 @@ async def list_credentials(user: CurrentUser, db: DbSession) -> ProviderCredenti
     return ProviderCredentialList(items=[_out(v) for v in views])
 
 
+# `provider_id` 不传就是这个能力的平台默认那家（旧前端的语义）。同能力多家
+# 之后，模型页按家传它：每家各存一把，互不覆盖。
+ProviderQuery = Annotated[str | None, Query(max_length=32)]
+
+
 @credentials_router.put("/{capability}", response_model=ProviderCredentialOut)
 async def put_credential(
     capability: str,
     payload: ProviderCredentialIn,
     user: CurrentUser,
     db: DbSession,
+    provider_id: ProviderQuery = None,
 ) -> ProviderCredentialOut:
-    """配置或更换某个能力的 Key。就地覆盖，同一个能力只留一把。"""
+    """配置或更换某个能力下某一家的 Key。就地覆盖，同一家只留一把。"""
     view = await credentials.put_key(
         db,
         org_id=user.org_id,
         user_id=user.id,
         capability=capability,
         api_key=payload.api_key,
+        provider_id=provider_id,
     )
     return _out(view)
 
 
 @credentials_router.delete("/{capability}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_credential(capability: str, user: CurrentUser, db: DbSession) -> None:
-    """移除 Key。该能力的调用与计费自动退回平台档。"""
-    await credentials.delete_key(db, org_id=user.org_id, capability=capability)
+async def delete_credential(
+    capability: str, user: CurrentUser, db: DbSession, provider_id: ProviderQuery = None
+) -> None:
+    """移除 Key。该能力的调用与计费自动退回平台档。
+
+    组织默认若选的是"用这家自有 Key 计费"，在**同一个事务里**改回平台额度
+    （`upstreams.on_key_removed` 不提交，`delete_key` 提交）。不改的话下一次
+    生成会因为"选了自有 Key 却没有 Key"失败，"移除即退回平台档"就成了空话。
+    """
+    target = provider_id or catalog.provider_of().get(capability)
+    if target is not None:
+        await upstreams.on_key_removed(
+            db, org_id=user.org_id, capability=capability, provider_id=target
+        )
+    await credentials.delete_key(
+        db, org_id=user.org_id, capability=capability, provider_id=provider_id
+    )
 
 
 @credentials_router.post("/{capability}/test", response_model=ProviderKeyTestOut)
@@ -141,6 +164,7 @@ async def test_credential(
     payload: ProviderKeyTestIn,
     user: CurrentUser,
     db: DbSession,
+    provider_id: ProviderQuery = None,
 ) -> ProviderKeyTestOut:
     """测试连接。走上游的免费端点，不产生生成费用。
 
@@ -148,7 +172,11 @@ async def test_credential(
     不是调用失败。结论在 `ok` 里，原因在 `message` 里。
     """
     result = await credentials.test_key(
-        db, org_id=user.org_id, capability=capability, api_key=payload.api_key
+        db,
+        org_id=user.org_id,
+        capability=capability,
+        api_key=payload.api_key,
+        provider_id=provider_id,
     )
     return ProviderKeyTestOut(
         ok=result.ok,

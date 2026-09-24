@@ -1,74 +1,112 @@
-/* 视觉来自 ReelFlow 原型，数据由页面注入 */
+/* ============================================================
+   AIGC Studio — Studio Ledger
+   设计系统见 design-system/aigc-studio/MASTER.md。
+   组件里禁止出现写死的颜色值，一律通过语义 token 取色。
+   ============================================================ */
 @import "tailwindcss";
 
 /* 暗色走 class 策略，由 next-themes 在 <html> 上打 .dark */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ============================================================
-   设计令牌 — 见 design-system/aigc-studio/MASTER.md
-   组件里禁止出现写死的颜色值，一律通过这些语义 token 取色。
+   基础调色板
+   六个命名值定调，其余全部由它们派生。角色不可漂移：
+   ultramarine 只表示「你可以动它」，amber 只表示「系统正在做」。
+   两者语义不重叠，所以永远不会在同一个位置互相替换。
    ============================================================ */
-
 :root {
-  /* --- 中性：slate 色阶（蓝偏中性，非纯灰）--- */
-  --bg: oklch(0.9842 0.0034 247.86); /* slate-50  */
-  --surface: oklch(1 0 0); /* white     */
-  --surface-2: oklch(0.9683 0.0069 247.9); /* slate-100 */
-  --surface-3: oklch(0.947 0.0097 252.81); /* slate-150 */
-  --border: oklch(0.9288 0.0126 255.51); /* slate-200 */
-  --border-strong: oklch(0.869 0.0198 252.89); /* slate-300 */
-  --fg: oklch(0.2077 0.0398 265.75); /* slate-900 */
-  --fg-muted: oklch(0.4455 0.0374 257.28); /* slate-600 */
-  --fg-subtle: oklch(0.4924 0.0345 257.79); /* 比 slate-500 深一档：
-      slate-500 在 surface-2 上只有 4.34:1，不达 4.5。实测后调深。 */
+  --studio-black: #101114; /* 外层背景、影院式留白 */
+  --graphite: #191b20; /* 导航与工作面 */
+  --slate-card: #23262d; /* 抬起的编辑面板 */
+  --slate-raised: #2b2f37; /* 面板内再抬一层：输入框、内嵌行 */
+  --paper: #f1f0eb; /* 主文字，以及全站唯一的浅色面（剧本纸） */
+  --ultramarine: #8296ff; /* 主要交互、选中、焦点 */
+  --safety-amber: #f2be5c; /* 生成中、待确认、拍摄提示 */
 
-  /* --- 主色：交互、选中、焦点 --- */
-  /* 亮底用 teal-700 而非检索给的 teal-600：600 在白底只有 3.74:1，
-     用于 13px 导航文字不达标。实测 700 = 5.47:1。 */
-  --primary: oklch(0.5109 0.0861 186.39); /* teal-700 */
-  --primary-hover: oklch(0.4308 0.0714 187.5); /* teal-800 */
-  --primary-fg: oklch(1 0 0);
-  --primary-soft: oklch(0.9636 0.0129 185.1);
+  /* 中性文字阶。slate-raised 是最亮的底，subtle 以它为准取
+     #9aa0aa（5.10:1）；更暗的 #8e939c 在它上面只有 4.35:1。 */
+  --ink-muted: #b6b9c0;
+  --ink-subtle: #9aa0aa;
 
-  /* --- 语义色：与主色分离，不复用 --- */
-  /* 同理全部下沉一档：600 系在白底普遍只有 3.2–3.3:1。 */
-  --running: oklch(0.5553 0.1455 49); /* amber-700，仅"生成中" */
-  --running-soft: oklch(0.9677 0.0237 79.74);
-  --success: oklch(0.5273 0.1371 150.07); /* green-700 */
-  --success-soft: oklch(0.9632 0.0189 157.87);
-  --danger: oklch(0.5054 0.1905 27.52); /* red-700 */
-  --danger-soft: oklch(0.9566 0.0185 17.48);
+  /* 成功与危险保持独立语义，不复用 ultramarine/amber */
+  --studio-success: #6fcf97;
+  --studio-danger: #f2776f;
+
+  /* 纸面上的墨色。剧本页是全站唯一的浅底，需要自己的文字阶。 */
+  --paper-ink: #1a1c20;
+  --paper-ink-muted: #4a4e57;
+  --paper-rule: #d9d6cd;
+
+  /* 几何：半径编码「这是画框还是控件」，不是装饰。
+     画面是矩形，所以承载画面的东西几乎不圆角。 */
+  --radius-frame: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* 字体：不引入任何需要联网下载的字体。
+     mono 只服务镜号、时间码、Credits、版本和模型标识。 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono",
+    "Roboto Mono", Menlo, Consolas, monospace;
+}
+
+/* 浅色主题：纸面在前。登录页与工作台外的页面走这套。 */
+:root {
+  --bg: #e9e7e0;
+  --surface: var(--paper);
+  --surface-2: #e4e2db;
+  --surface-3: #dbd8cf;
+  --border: #d3d0c6;
+  --border-strong: #b5b1a4;
+  --fg: var(--paper-ink);
+  --fg-muted: var(--paper-ink-muted);
+  --fg-subtle: #5f636c;
+
+  /* 纸上的 ultramarine 要压暗才够对比度：#8296ff 在纸面只有 2.7:1。 */
+  --primary: #3b4bc4;
+  --primary-hover: #2f3da6;
+  --primary-fg: var(--paper);
+  --primary-soft: #dfe1f7;
+
+  --running: #8a5a12;
+  --running-soft: #f4e9d2;
+  --success: #1f6b42;
+  --success-soft: #dcefe3;
+  --danger: #a32e26;
+  --danger-soft: #f6dedc;
+  --danger-fg: var(--paper);
 
   --ring: var(--primary);
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
 }
 
 .dark {
-  --bg: oklch(0.2077 0.0398 265.75); /* slate-900 */
-  --surface: oklch(0.2449 0.0388 264.35); /* slate-850 */
-  --surface-2: oklch(0.2795 0.0368 260.03); /* slate-800 */
-  --surface-3: oklch(0.3717 0.0392 257.29); /* slate-700 */
-  --border: oklch(0.3717 0.0392 257.29); /* slate-700 */
-  --border-strong: oklch(0.4455 0.0374 257.28); /* slate-600 */
-  --fg: oklch(0.9842 0.0034 247.86); /* slate-50  */
-  --fg-muted: oklch(0.7107 0.0351 256.79); /* slate-400 */
-  --fg-subtle: oklch(0.6847 0.0386 257.41); /* 比 slate-500 亮一档：
-      暗底上 slate-500 在 surface-2 只有 3.07:1。实测后调亮。 */
+  --bg: var(--studio-black);
+  --surface: var(--graphite);
+  --surface-2: var(--slate-card);
+  --surface-3: var(--slate-raised);
+  --border: #2c3038;
+  --border-strong: #3d424c;
+  --fg: var(--paper);
+  --fg-muted: var(--ink-muted);
+  --fg-subtle: var(--ink-subtle);
 
-  /* 暗底上主色要提亮，否则对比度不够 */
-  --primary: oklch(0.7845 0.1325 181.91); /* teal-400 */
-  --primary-hover: oklch(0.7038 0.123 182.5); /* teal-500 */
-  --primary-fg: oklch(0.2077 0.0398 265.75);
-  --primary-soft: oklch(0.32 0.04 184);
+  --primary: var(--ultramarine);
+  --primary-hover: #9aabff;
+  --primary-fg: var(--studio-black);
+  --primary-soft: #1e2133;
 
-  --running: oklch(0.8369 0.1644 84.43); /* amber-400 */
-  --running-soft: oklch(0.33 0.05 75);
-  --success: oklch(0.7227 0.192 149.58); /* green-500 */
-  --success-soft: oklch(0.31 0.05 150);
-  --danger: oklch(0.7106 0.1661 22.22); /* red-400 */
-  --danger-soft: oklch(0.33 0.06 25);
+  --running: var(--safety-amber);
+  --running-soft: #2e2719;
+  --success: var(--studio-success);
+  --success-soft: #16281f;
+  --danger: var(--studio-danger);
+  --danger-soft: #2e1c1c;
+  /* #f2776f 是浅色，白字只有 2.6:1；危险按钮上必须压墨色。 */
+  --danger-fg: var(--studio-black);
+
+  --ring: var(--primary);
 }
 
 /* 把语义 token 暴露给 Tailwind 工具类：bg-surface / text-fg-muted 等 */
@@ -94,13 +132,24 @@
   --color-success-soft: var(--success-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
+  --color-danger-fg: var(--danger-fg);
 
+  /* 剧本纸面：全站唯一的浅色面，固定值，不跟随主题翻转。 */
+  --color-paper: var(--paper);
+  --color-paper-ink: var(--paper-ink);
+  --color-paper-ink-muted: var(--paper-ink-muted);
+  --color-paper-rule: var(--paper-rule);
+
+  --radius-frame: var(--radius-frame);
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
 
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
   /* 工作台密度：正文 13px。偏离 16px 基准是有意的，
-     用对比度 ≥7:1 补偿。理由见 MASTER.md §3。 */
+     用对比度 >=7:1 补偿。理由见 MASTER.md §3。 */
   --text-xs: 12px;
   --text-xs--line-height: 16px;
   --text-sm: 13px;
@@ -114,7 +163,7 @@
   --text-2xl: 24px;
   --text-2xl--line-height: 32px;
 
-  /* ReelFlow 工作台视觉壳，仅由 .theme-reelflow 提供值。 */
+  /* 工作台壳层。值由 .theme-reelflow 提供。 */
   --color-rf-bg: var(--rf-bg);
   --color-rf-panel: var(--rf-panel);
   --color-rf-dialog: var(--rf-dialog);
@@ -140,46 +189,48 @@
   --shadow-rf-glow: var(--rf-glow-shadow);
 }
 
-/* ReelFlow 的控制室主题。变量隔离在壳节点下，不改变站内其它页面。 */
+/* ============================================================
+   工作台主题。变量挂在壳节点上靠继承往下发，
+   所以壳内的弹窗不能 portal 到 body 之外。
+   ============================================================ */
 .theme-reelflow {
   color-scheme: dark;
-  --rf-bg: #070a0f;
-  --rf-panel: #090d13;
-  --rf-dialog: #10151d;
-  --rf-elevated: rgb(255 255 255 / 0.035);
-  --rf-overlay: rgb(0 0 0 / 0.72);
-  --rf-line: rgb(255 255 255 / 0.08);
-  --rf-line-strong: rgb(255 255 255 / 0.16);
-  --rf-fg: rgb(255 255 255 / 0.94);
-  --rf-muted: rgb(255 255 255 / 0.62);
-  --rf-subtle: rgb(255 255 255 / 0.38);
-  --rf-cyan: #67e8f9;
-  --rf-cyan-soft: rgb(103 232 249 / 0.1);
-  --rf-agent: #c4b5fd;
-  --rf-agent-soft: rgb(196 181 253 / 0.12);
-  --rf-success: #6ee7b7;
-  --rf-success-soft: rgb(110 231 183 / 0.1);
-  --rf-warning: #fbbf24;
-  --rf-warning-soft: rgb(251 191 36 / 0.1);
-  --rf-danger: #f87171;
-  --rf-danger-soft: rgb(248 113 113 / 0.1);
-  --rf-card-shadow: 0 18px 50px rgb(0 0 0 / 0.24);
-  --rf-glow-shadow: 0 0 28px rgb(103 232 249 / 0.18);
+  --rf-bg: var(--studio-black);
+  --rf-panel: var(--graphite);
+  --rf-dialog: var(--slate-card);
+  --rf-elevated: var(--slate-raised);
+  --rf-overlay: rgb(8 9 11 / 0.74);
+  --rf-line: #2c3038;
+  --rf-line-strong: #3d424c;
+  --rf-fg: var(--paper);
+  --rf-muted: var(--ink-muted);
+  --rf-subtle: var(--ink-subtle);
 
-  /* 主色的 hover 态。原型里写的是 brightness(110%)，这里把它算成定值：
-     滤镜会连同按钮里的图标和文字一起提亮，颜色就不再由 token 说了算。
-     #67e8f9 × 1.1 = (113, 255, 255)，后两个通道本来就已经溢出到 255。 */
-  --rf-cyan-hover: #71ffff;
+  /* rf-cyan 是历史槽名，现在承载 ultramarine。组件不必改名。 */
+  --rf-cyan: var(--ultramarine);
+  --rf-cyan-hover: #9aabff;
+  --rf-cyan-soft: #1e2133;
 
-  /* --- 把 rf 调色板接到仓库既有的语义层 --- */
-  /* 上面那批 --rf-* 是这套视觉的调色板，下面这批是它在本仓库语义体系里的
-     位置。组件因此可以写 bg-surface / text-fg-muted / bg-primary 这些站内
-     通用类，而不用各自记住该取哪个 rf 变量；换主题只改这一段。
-     每一条都直接指向同一个 --rf-* 变量，所以颜色值与映射前逐一相等。 */
+  /* 参考/派生资产标记。与主色拉开色相，避免被读成可点击。 */
+  --rf-agent: #b9a6f0;
+  --rf-agent-soft: #241f33;
+
+  --rf-success: var(--studio-success);
+  --rf-success-soft: #16281f;
+  --rf-warning: var(--safety-amber);
+  --rf-warning-soft: #2e2719;
+  --rf-danger: var(--studio-danger);
+  --rf-danger-soft: #2e1c1c;
+
+  /* 阴影只表达层高，不做光晕。原方案的 cyan glow 已移除：
+     发光的按钮会和「生成中」的 amber 抢注意力。 */
+  --rf-card-shadow: 0 16px 40px rgb(0 0 0 / 0.45);
+  --rf-glow-shadow: 0 1px 0 rgb(255 255 255 / 0.06);
+
   --bg: var(--rf-bg);
   --surface: var(--rf-panel);
-  --surface-2: var(--rf-elevated);
-  --surface-3: var(--rf-dialog);
+  --surface-2: var(--rf-dialog);
+  --surface-3: var(--rf-elevated);
   --border: var(--rf-line);
   --border-strong: var(--rf-line-strong);
   --fg: var(--rf-fg);
@@ -191,13 +242,13 @@
   --primary-fg: var(--rf-bg);
   --primary-soft: var(--rf-cyan-soft);
 
-  /* rf 把「生成中」画成琥珀，和站内 --running 是同一个语义槽 */
   --running: var(--rf-warning);
   --running-soft: var(--rf-warning-soft);
   --success: var(--rf-success);
   --success-soft: var(--rf-success-soft);
   --danger: var(--rf-danger);
   --danger-soft: var(--rf-danger-soft);
+  --danger-fg: var(--studio-black);
 
   --ring: var(--rf-cyan);
 
@@ -205,73 +256,258 @@
   color: var(--rf-fg);
 }
 
-.rf-shot-placeholder {
-  background-image:
-    linear-gradient(color-mix(in oklab, var(--border) 56%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in oklab, var(--border) 56%, transparent) 1px, transparent 1px),
-    radial-gradient(circle at 50% 45%, var(--primary-soft), transparent 52%);
-  background-size: 24px 24px, 24px 24px, auto;
+/* ============================================================
+   胶片连续带 —— 这套界面唯一的大胆元素。
+   齿孔是全站唯一的纹理，只出现在阶段条和镜头序列上。
+
+   连续带不是一排独立卡片：帧与帧之间没有间距，只有一条接片线，
+   因为制作流程本身是连续的，跳不过任何一格。
+   ============================================================ */
+.ff-strip {
+  --ff-perf-band: 9px;
+  position: relative;
+  background: var(--surface);
+  border-block: 1px solid var(--border);
 }
 
-.theme-reelflow .rf-shot-placeholder {
-  background-image:
-    linear-gradient(var(--rf-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--rf-line) 1px, transparent 1px),
-    radial-gradient(circle at 18% 18%, var(--rf-cyan-soft), transparent 48%),
-    radial-gradient(circle at 82% 78%, var(--rf-agent-soft), transparent 52%);
-  background-size: 24px 24px, 24px 24px, auto, auto;
+/* 齿孔。孔洞露出壳层底色，带子因此像搭在台面上的一段胶片。 */
+.ff-strip::before,
+.ff-strip::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  height: var(--ff-perf-band);
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 7px,
+    var(--bg) 7px 14px,
+    transparent 14px 21px
+  );
+}
+.ff-strip::before {
+  top: 0;
+}
+.ff-strip::after {
+  bottom: 0;
 }
 
-/* 工作台的面板与网格卡共用同一套层次：外层面板更稳，内层卡片略抬起。
-   所有颜色都从语义 token 混合，亮暗主题不会分叉。 */
-.rf-panel-card {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--surface-2) 48%, var(--surface)) 0%,
-      var(--surface) 44%
-    );
+.ff-strip-scroll {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.ff-strip-track {
+  display: flex;
+  align-items: stretch;
+  min-width: max-content;
+  margin-block: var(--ff-perf-band);
+}
+
+/* 一格 = 一个阶段。接片线在右侧，最后一格不画。 */
+.ff-frame {
+  position: relative;
+  display: flex;
+  min-width: 112px;
+  border-right: 1px solid var(--border);
+}
+/* 整格就是链接：点哪一格就去看哪一段。它只导航，不改生产状态。 */
+.ff-frame-link {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 7px 12px;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+.ff-frame-link:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.ff-frame-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+/* 「正在查看」与「生产当前阶段」是两件事：后者是片门竖边（data-state），
+   前者是底边一道实线 + 名称下划线，两种编码可以同时出现在同一格。 */
+.ff-frame-link[data-viewing="true"] {
+  box-shadow: inset 0 -2px 0 var(--fg);
+}
+.ff-frame-link[data-viewing="true"] .ff-frame-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* 锁定与待开始整体压暗，但悬停与聚焦时恢复：它们仍然可以点开查看 */
+.ff-frame[data-state="locked"]:hover,
+.ff-frame[data-state="pending"]:hover,
+.ff-frame[data-state="locked"]:focus-within,
+.ff-frame[data-state="pending"]:focus-within {
+  opacity: 0.9;
+}
+.ff-frame:last-child {
+  border-right: 0;
+}
+
+/* 当前阶段「在片门里」：主色竖边卡住这一格。 */
+.ff-frame[data-state="active"] {
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
   box-shadow:
-    inset 0 1px 0 color-mix(in oklab, var(--fg) 5%, transparent),
-    0 18px 44px color-mix(in oklab, var(--fg) 5%, transparent);
+    inset 2px 0 0 var(--primary),
+    inset -2px 0 0 var(--primary);
+}
+.ff-frame[data-state="approved"] {
+  background: color-mix(in srgb, var(--success) 7%, transparent);
+}
+.ff-frame[data-state="locked"],
+.ff-frame[data-state="pending"] {
+  opacity: 0.55;
+}
+
+.ff-frame-no {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--fg-subtle);
+}
+.ff-frame-name {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  white-space: nowrap;
+}
+.ff-frame-state {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--fg-subtle);
+}
+
+/* ============================================================
+   场记板字段组。项目身份用真实字段表达，不用面包屑。
+   没有值的字段不渲染，不留空槽。
+   ============================================================ */
+.ff-slate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 26px;
+}
+.ff-slate-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.ff-slate-key {
+  font-size: 10px;
+  color: var(--fg-subtle);
+}
+.ff-slate-value {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ff-slate-value[data-numeric="true"] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   剧本纸面 —— 全站唯一的浅色面。
+   剧本本来就是纸，这个对比只用在剧本/故事正文上，别处不复用。
+   ============================================================ */
+.ff-paper {
+  /* 纸面上重新定义语义 token，子元素照常写 text-fg-muted / bg-surface-2，
+     不必各自知道"我现在在纸上"。换算过的每一档都实测过对比度：
+     subtle 取 #5c5f68（在两种纸色上 5.06 / 5.59），
+     取更浅的 #6b6f78 在 #e7e5de 上只有 4.00，不达标。 */
+  --fg: var(--paper-ink);
+  --fg-muted: var(--paper-ink-muted);
+  --fg-subtle: #5c5f68;
+  --surface: var(--paper);
+  --surface-2: #e7e5de;
+  --surface-3: #dddad1;
+  --border: var(--paper-rule);
+  --border-strong: #c2beb2;
+  --primary: #3b4bc4;
+  --primary-hover: #2f3da6;
+  --primary-fg: var(--paper);
+  --primary-soft: #dfe1f7;
+  --danger: #a32e26;
+  --danger-soft: #f6dedc;
+  --running: #8a5a12;
+  --running-soft: #f4e9d2;
+  --success: #1f6b42;
+  --success-soft: #dcefe3;
+  --ring: #3b4bc4;
+
+  border: 1px solid var(--paper-rule);
+  border-radius: var(--radius-frame);
+  background: var(--paper);
+  color: var(--paper-ink);
+}
+
+/* 纸上的场次块之间留一条实线，像剧本页的分场线。 */
+.ff-paper-scene {
+  border-left: 2px solid var(--border-strong);
+}
+.ff-paper ::selection {
+  background: color-mix(in srgb, var(--ultramarine) 34%, transparent);
+  color: var(--paper-ink);
+}
+
+/* ============================================================
+   画框与面板。承载画面的容器接近直角，圆角留给控件。
+   ============================================================ */
+.rf-shot-placeholder {
+  background-color: var(--surface-2);
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 22px 22px, 22px 22px;
+}
+
+.rf-panel-card {
+  background: var(--surface);
 }
 
 .rf-grid-card {
-  background:
-    linear-gradient(
-      155deg,
-      color-mix(in oklab, var(--surface-2) 58%, var(--surface)) 0%,
-      var(--surface) 58%
-    );
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--fg) 4%, transparent);
+  background: var(--surface-2);
 }
 
-/* 空态沿用取景框网格，但把对比度压低，避免它抢过真实画面。 */
 .rf-empty-state {
   background-color: var(--surface);
   background-image:
-    linear-gradient(color-mix(in oklab, var(--border) 52%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in oklab, var(--border) 52%, transparent) 1px, transparent 1px),
-    radial-gradient(circle at 50% 38%, var(--primary-soft), transparent 46%);
-  background-size: 28px 28px, 28px 28px, auto;
+    linear-gradient(color-mix(in srgb, var(--border) 60%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border) 60%, transparent) 1px, transparent 1px);
+  background-size: 26px 26px, 26px 26px;
 }
 
 .rf-empty-icon {
   display: inline-grid;
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   place-items: center;
-  border: 1px solid color-mix(in oklab, var(--primary) 28%, var(--border));
-  border-radius: var(--radius-lg);
-  background: var(--primary-soft);
-  color: var(--primary);
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--fg) 7%, transparent);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-frame);
+  background: var(--surface-2);
+  color: var(--fg-muted);
 }
 
 /* MASTER §6：骨架屏保持静态，不用 shimmer 干扰长时间工作的用户。 */
 .rf-skeleton {
-  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
-  background: color-mix(in oklab, var(--surface-3) 72%, var(--surface-2));
+  border: 1px solid var(--border);
+  background: var(--surface-2);
 }
 
 svg[data-studio-icon] {
@@ -294,6 +530,7 @@ svg[data-studio-icon] {
   body {
     background: var(--bg);
     color: var(--fg);
+    font-family: var(--font-sans);
     font-size: 13px;
     line-height: 18px;
     -webkit-font-smoothing: antialiased;
@@ -308,6 +545,14 @@ svg[data-studio-icon] {
     font-variant-numeric: tabular-nums;
   }
 
+  /* 镜号、时间码、Credits、版本、模型标识走等宽。
+     只给这些标识用，不把所有小标签都改成等宽。 */
+  .code {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+
   /* 焦点态必须可见。skill 优先级表第 1 条：不许移除焦点环。 */
   :focus-visible {
     outline: 2px solid var(--ring);
@@ -319,6 +564,7 @@ svg[data-studio-icon] {
   h2,
   h3 {
     text-wrap: balance;
+    letter-spacing: -0.02em;
   }
 }
 

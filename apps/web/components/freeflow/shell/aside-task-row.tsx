@@ -38,7 +38,7 @@ export function AsideTaskRow({ task }: { task: AsideTask }) {
       : Math.round(Math.min(100, Math.max(0, task.progress)));
 
   return (
-    <li className="rounded-xl border border-border bg-surface p-3">
+    <li className="ff-rail-item">
       <div className="flex items-start justify-between gap-3">
         <p className="min-w-0 truncate text-xs font-medium text-fg">{task.title}</p>
         <span className={cn("shrink-0 text-[10px]", failed ? "text-danger" : "text-fg-muted")}>
@@ -46,7 +46,7 @@ export function AsideTaskRow({ task }: { task: AsideTask }) {
         </span>
       </div>
       {progress !== undefined && (
-        <div className="mt-2.5 flex items-center gap-2">
+        <div className="mt-2 flex items-center gap-2">
           <Progress value={progress} label={`${task.title}进度`} className="flex-1" />
           <span className="tnum shrink-0 text-[10px] text-fg-muted">{progress}%</span>
         </div>

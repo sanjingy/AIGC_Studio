@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AssetLibraryIcon,
@@ -25,6 +25,8 @@ import {
 } from "@/components/freeflow/shell/workbench-shell";
 import type { Images, RenderSubject } from "@/lib/freeflow/use-images";
 import type { ProjectState } from "@/lib/freeflow/use-project-state";
+import { STAGE_HASH_EVENT } from "@/components/freeflow/shell/stage-rail";
+import { viewingStage } from "@/lib/freeflow/stage-links";
 import { buildStages, gateStatusOf, segmentOf } from "@/lib/freeflow/stage-map";
 import { taskTitle, type TasksState } from "@/lib/freeflow/use-tasks";
 
@@ -141,9 +143,25 @@ export function ProjectWorkbench({
         approvals: state.approvals,
         output: state.output,
         pendingGate: state.pendingGate,
+        base,
       }),
-    [state.stage, state.approvals, state.output, state.pendingGate],
+    [state.stage, state.approvals, state.output, state.pendingGate, base],
   );
+
+  // 故事页上"故事 / 剧本"两段靠 hash 区分；hash 变化不触发路由更新，单独听
+  const [hash, setHash] = useState("");
+  useEffect(() => {
+    const sync = () => setHash(window.location.hash);
+    const fromStrip = (e: Event) => setHash(String((e as CustomEvent<string>).detail ?? ""));
+    sync();
+    window.addEventListener("hashchange", sync);
+    window.addEventListener(STAGE_HASH_EVENT, fromStrip);
+    return () => {
+      window.removeEventListener("hashchange", sync);
+      window.removeEventListener(STAGE_HASH_EVENT, fromStrip);
+    };
+  }, [activeHref]);
+  const viewing = viewingStage(activeHref, hash);
 
   const activeStage =
     stages.find((s) => s.key === segmentOf(state.stage)) ?? stages[0] ?? null;
@@ -184,7 +202,7 @@ export function ProjectWorkbench({
   const gateStatus = gateStatusOf(state.stage, state.approvals);
 
   const aside = (
-    <div className="flex flex-col gap-4">
+    <div className="ff-rail">
       {activeStage && (
         <AsideStageCard
           stage={activeStage}
@@ -220,18 +238,39 @@ export function ProjectWorkbench({
         id: projectId,
         title: project?.title ?? "…",
         subtitle: project?.route_type ?? undefined,
-        savedAgo: state.snapshot
-          ? `状态更新于 ${new Date(state.snapshot.updated_at).toLocaleString("zh-CN")}`
-          : undefined,
+        // 场记板上的「镜头」字段。没有分镜产出时不传，字段整条不渲染。
+        shots: arrayOf(state.output.storyboard?.shots).length || undefined,
+        savedAgo: slateTime(state.snapshot?.updated_at),
       }}
       navigation={navigationOf(base)}
       utilityNavigation={utilityNavigationOf(base, running.length)}
       activeHref={activeHref}
       stages={stages}
+      viewingStage={viewing}
       primaryAction={primaryAction}
       aside={aside}
     >
       {children}
     </WorkbenchShell>
   );
+}
+
+/**
+ * 场记板上的「更新」字段。
+ *
+ * `updated_at` 缺失或不可解析时返回 undefined，让 `WorkbenchHeader`
+ * 把整条字段拿掉——场记板的规矩是「没写的就是还没定」。
+ * 之前这里只判 `state.snapshot` 是不是真值，快照在但字段缺（新建项目、
+ * 上游改形状）就会把 `Invalid Date` 四个字写到顶栏上。
+ */
+function slateTime(iso: string | null | undefined): string | undefined {
+  if (!iso) return undefined;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return undefined;
+  return at.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

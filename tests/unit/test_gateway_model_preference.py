@@ -238,9 +238,14 @@ async def test_reasoning_preference_dropped_for_no_reasoning_role(
 
 
 async def test_non_reasoning_preference_survives_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
-    """闸门只拦推理模型，不该顺手把所有偏好一起丢掉。"""
-    fast = FakeProvider(provider_id="p.deepseek", model_id="deepseek-chat")
-    other = FakeProvider(provider_id="p.deepseek", model_id="deepseek-lite")
+    """闸门只拦推理模型，不该顺手把所有偏好一起丢掉。
+
+    `deepseek-chat` 是目录里真有的模型，偏好会被反查到它所属的
+    `provider.deepseek` 并钉住那一家——假件的 provider_id 必须与目录一致，
+    否则钉住之后路由表里一条都不剩。
+    """
+    fast = FakeProvider(provider_id="provider.deepseek", model_id="deepseek-chat")
+    other = FakeProvider(provider_id="provider.deepseek", model_id="deepseek-lite")
     gw._registry = _registry_with(other, fast)
     await _reset(fast, other)
     _prefer(monkeypatch, "deepseek-chat")

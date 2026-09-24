@@ -1,160 +1,1277 @@
-/* Freeflow's shared visual language. All rules stay inside the studio. */
+/* Freeflow 的共享视觉语言。规则全部限定在工作台内。
+   调色板由 globals.css 的 .theme-reelflow 提供，这里不再定义颜色值，
+   只定义版式、密度和结构。 */
 .ff-studio,
 .ff-studio .theme-reelflow {
-  --rf-bg: #141618;
-  --rf-panel: #1b1e21;
-  --rf-dialog: #24282c;
-  --rf-elevated: #22262a;
-  --rf-line: #30353a;
-  --rf-line-strong: #48515a;
-  --rf-fg: #eef1f3;
-  --rf-muted: #b5bdc5;
-  --rf-subtle: #949fa9;
-  --rf-cyan: #91d9dc;
-  --rf-cyan-hover: #b5edef;
-  --rf-cyan-soft: #233b3f;
-  --rf-agent-soft: #332c43;
-  --rf-success-soft: #233b31;
-  --rf-warning-soft: #3b3323;
-  --rf-danger-soft: #412b2d;
-  --rf-card-shadow: 0 8px 24px rgb(0 0 0 / 0.15);
-  --rf-glow-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
-  --radius-sm: 6px;
+  --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
-  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.6;
   scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
 }
 
-.ff-studio button:not(:disabled), .ff-studio summary { cursor: pointer; }
-.ff-studio ::selection { background: var(--primary-soft); color: var(--primary); }
-.ff-studio .rf-panel-card { background: var(--surface); box-shadow: none; }
-.ff-studio .rf-grid-card { background: var(--surface-2); box-shadow: none; }
-.ff-studio .rf-grid-card:hover { background: var(--surface-3); }
-.ff-studio .rf-shot-placeholder {
-  background-color: var(--surface-2);
-  background-image: radial-gradient(ellipse at center, var(--surface-3), transparent 72%);
-  background-size: auto;
+.ff-studio button:not(:disabled),
+.ff-studio summary {
+  cursor: pointer;
 }
-.ff-studio .rf-empty-state { background: var(--surface); }
+.ff-studio ::selection {
+  background: color-mix(in srgb, var(--primary) 30%, transparent);
+  color: var(--fg);
+}
 
-.ff-global-nav { width: 216px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--surface); }
-.ff-brand { height: 76px; display: flex; align-items: center; gap: 11px; padding: 0 22px; }
-.ff-brand-mark { width: 34px; height: 34px; display: grid; place-items: center; flex-shrink: 0; border: 1px solid var(--border-strong); border-radius: 10px; color: var(--primary); background: var(--surface-2); }
-.ff-brand-name { font-size: 17px; font-weight: 650; letter-spacing: -.5px; white-space: nowrap; }
-.ff-nav-heading { padding: 28px 25px 12px; font-size: 11px; color: var(--fg-subtle); }
-.ff-nav-list { display: flex; flex-direction: column; gap: 6px; padding: 0 12px; }
-.ff-nav-link { display: flex; align-items: center; gap: 13px; min-height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: 8px; font-size: 14px; color: var(--fg-muted); transition: background .15s, color .15s; }
-.ff-nav-link:hover { background: var(--surface-2); color: var(--fg); }
-.ff-nav-link.is-active { color: var(--primary); border-color: color-mix(in srgb, var(--primary) 16%, transparent); background: var(--primary-soft); }
-.ff-nav-bottom { margin-top: auto; }
-.ff-studio-note { margin: 28px 24px; color: var(--fg-muted); font-size: 13px; }
-.ff-studio-note > span:last-child { display: block; margin-top: 6px; color: var(--fg-subtle); font-size: 11px; }
-.ff-note-line { display: block; width: 24px; height: 2px; background: var(--primary); margin-bottom: 16px; }
-.ff-profile { border-top: 1px solid var(--border); display: flex; gap: 11px; align-items: center; padding: 20px; }
-.ff-avatar { width: 34px; height: 34px; display: grid; place-items: center; flex-shrink: 0; background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: 50%; font-size: 12px; color: var(--fg-muted); }
-.ff-topbar { height: 76px; flex-shrink: 0; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--border); padding: 0 40px; }
-.ff-quiet-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; color: var(--fg-muted); transition: background .15s, border-color .15s; }
-.ff-quiet-button:hover { border-color: var(--border-strong); background: var(--surface-2); color: var(--fg); }
-.ff-primary-button { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: 8px; padding: 0 19px; font-size: 13px; font-weight: 600; color: var(--primary-fg); background: var(--primary); box-shadow: 0 2px 4px rgb(0 0 0 / .1); transition: background .15s, box-shadow .15s; }
-.ff-primary-button:hover { background: var(--primary-hover); box-shadow: 0 3px 12px rgb(0 0 0 / .2); }
+/* ------------------------------------------------------------
+   全局导航。品牌区高度与顶栏对齐，形成一条贯通的水平基线。
+   ------------------------------------------------------------ */
+.ff-global-nav {
+  display: flex;
+  width: 212px;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+.ff-brand {
+  display: flex;
+  height: 64px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+}
+.ff-brand-mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-frame);
+  background: var(--surface-2);
+  color: var(--primary);
+}
+.ff-brand-name {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+.ff-nav-heading {
+  padding: 22px 20px 8px;
+  font-size: 10px;
+  color: var(--fg-subtle);
+}
+.ff-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 10px;
+}
 
-.ff-lobby { width: 100%; max-width: 1500px; margin: 0 auto; padding: 44px 40px 24px; display: flex; flex-direction: column; gap: 32px; min-height: 100%; }
-.ff-lobby-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 4px 0 12px; }
-.ff-lobby-heading h1 { font-size: clamp(24px, 2.2vw, 32px); font-weight: 600; letter-spacing: -1px; line-height: 1.35; }
-.ff-lobby-heading p { margin-top: 12px; font-size: 13px; color: var(--fg-subtle); }
-.ff-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px; }
-.ff-section-heading h2 { font-size: 16px; font-weight: 600; }
-.ff-count { display: inline-grid; place-items: center; height: 23px; min-width: 25px; padding: 0 7px; border: 1px solid var(--border); border-radius: 6px; color: var(--fg-muted); font-size: 11px; }
-.ff-project-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
-.ff-project-card { overflow: hidden; min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); transition: border-color .18s, box-shadow .18s; }
-.ff-project-card:hover { border-color: var(--border-strong); box-shadow: var(--rf-card-shadow); }
-.ff-project-cover { position: relative; height: 164px; overflow: hidden; padding: 16px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
-.ff-cover-0 { --cover-tone: #38474b; }
-.ff-cover-1 { --cover-tone: #484350; }
-.ff-cover-2 { --cover-tone: #4b463e; }
-.ff-project-cover { background: linear-gradient(125deg, var(--cover-tone), var(--surface-2)); }
-.ff-cover-frame { position: absolute; inset: 30px 46px; display: flex; align-items: center; justify-content: center; gap: 22px; border: 1px solid color-mix(in srgb, var(--fg) 13%, transparent); border-radius: 4px; color: color-mix(in srgb, var(--fg) 35%, transparent); transform: rotate(-7deg); }
-.ff-cover-frame::before { content: ""; position: absolute; inset: 9px -14px; border: 1px solid color-mix(in srgb, var(--fg) 7%, transparent); border-radius: 4px; }
-.ff-cover-frame > span { font-size: 64px; line-height: 1; font-weight: 300; }
-.ff-cover-label { position: absolute; bottom: 14px; left: 16px; display: flex; gap: 6px; align-items: center; font-size: 10px; color: var(--fg-muted); }
-.ff-project-status { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 5px; padding: 3px 8px; font-size: 10px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--bg); }
-.ff-project-info { padding: 19px 18px 15px; }
-.ff-project-info h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; }
-.ff-project-info > p { margin-top: 6px; font-size: 11px; color: var(--fg-subtle); }
-.ff-project-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border); margin-top: 18px; padding-top: 12px; color: var(--fg-subtle); font-size: 11px; }
-.ff-project-meta > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ff-project-enter { display: flex; flex-shrink: 0; align-items: center; gap: 7px; color: var(--fg-muted); }
-.ff-project-card:hover .ff-project-enter { color: var(--primary); }
-.ff-new-project { display: flex; flex-direction: column; min-height: 310px; align-items: center; justify-content: center; border: 1px dashed var(--border-strong); border-radius: 12px; color: var(--fg-muted); transition: background .15s, border-color .15s; }
-.ff-new-project > span { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
-.ff-new-project strong { font-size: 14px; font-weight: 500; }
-.ff-new-project p { margin-top: 6px; font-size: 12px; color: var(--fg-subtle); }
-.ff-new-project:hover { border-color: var(--primary); background: var(--surface); color: var(--primary); }
-.ff-create-form { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 14px; padding: 24px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface); }
-.ff-attention { padding-top: 8px; }
-.ff-attention-item { display: flex; align-items: center; gap: 14px; padding: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; transition: border-color .15s; }
-.ff-attention-item:hover { border-color: var(--border-strong); }
-.ff-lobby-footer { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 22px; border-top: 1px solid var(--border); color: var(--fg-subtle); font-size: 11px; }
-.ff-project-skeleton { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); }
-.ff-lobby-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 390px; padding: 32px; border: 1px dashed var(--border-strong); border-radius: 14px; background: var(--surface); text-align: center; }
-.ff-empty-film { display: grid; place-items: center; width: 90px; height: 72px; margin-bottom: 28px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface-2); color: var(--primary); transform: rotate(-7deg); }
-.ff-lobby-empty h3 { font-size: 20px; font-weight: 550; }
-.ff-lobby-empty p { margin-top: 10px; font-size: 13px; color: var(--fg-subtle); }
+/* 选中态用左侧片门竖条，不用整块着色的胶囊。
+   竖条是「当前这一格」的同一套语言，和阶段条对得上。 */
+.ff-nav-link {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 11px;
+  border-radius: var(--radius-md);
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  transition: background 0.15s, color 0.15s;
+}
+.ff-nav-link:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.ff-nav-link.is-active {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--primary);
+  color: var(--fg);
+  font-weight: 550;
+}
+.ff-nav-link.is-active svg {
+  color: var(--primary);
+}
+.ff-nav-bottom {
+  margin-top: auto;
+}
+.ff-studio-note {
+  margin: 22px 20px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.ff-studio-note > span:last-child {
+  display: block;
+  margin-top: 5px;
+  color: var(--fg-subtle);
+  font-size: 11px;
+}
+.ff-note-line {
+  display: block;
+  width: 20px;
+  height: 2px;
+  margin-bottom: 12px;
+  background: var(--primary);
+}
+.ff-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding: 16px 18px;
+}
+.ff-avatar {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--fg-muted);
+  font-size: 11px;
+}
 
-/* Shared project shell: quiet chrome, generous navigation, legible metadata. */
-.ff-workbench-sidebar { background: var(--surface); }
-.ff-workbench-brand { min-height: 76px; border-bottom-color: transparent; }
-.ff-workbench-header { min-height: 76px; background: var(--bg); }
-.ff-workbench-content { padding: 8px; }
-.ff-context-aside { width: 288px; background: var(--bg); }
-.ff-studio .ff-workbench-sidebar nav > section { padding: 20px 12px; }
-.ff-studio .ff-workbench-sidebar nav > div { margin: 4px 12px 0; padding-top: 8px; border-top-color: var(--border); }
-.ff-studio .ff-workbench-sidebar nav > div > section { padding: 12px 0; }
-.ff-studio .ff-workbench-sidebar nav h2 { padding: 0 12px 14px; font-size: 11px; font-weight: 400; letter-spacing: .03em; }
-.ff-studio .ff-workbench-sidebar nav li > a { height: 44px; font-size: 13px; font-weight: 400; }
-.ff-studio .ff-workbench-sidebar nav ul { display: flex; flex-direction: column; gap: 4px; }
-.ff-studio .ff-workbench-sidebar nav a[aria-current="page"] { box-shadow: none; font-weight: 550; }
+.ff-topbar {
+  display: flex;
+  height: 64px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid var(--border);
+  padding: 0 32px;
+}
 
-@media (min-width: 1700px) {
-  .ff-project-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* ------------------------------------------------------------
+   控件。半径 8px——控件是控件，画框接近直角。
+   ------------------------------------------------------------ */
+.ff-quiet-button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0 13px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.ff-quiet-button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.ff-primary-button {
+  display: inline-flex;
+  min-height: 38px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 0 17px;
+  background: var(--primary);
+  color: var(--primary-fg);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+.ff-primary-button:hover {
+  background: var(--primary-hover);
+}
+
+/* ============================================================
+   首页：先「继续制作」，再「需要处理」，最后项目片单。
+   没有营销 hero——用户来这里是为了接着做上次没做完的东西。
+   ============================================================ */
+/* 全局层的页面留白。
+   `.ff-lobby` 自带（它还要管片单的节奏和 gap），其余全局页共用这一条。
+   之前 models / assets 两页的根元素只有 `mx-auto max-w-*`，一点内边距都没有：
+   桌面上标题贴着顶栏的分隔线，390 上账本边框直接顶到屏幕两侧。
+   留白是版式的一部分，不该由每个页面各自想起来写一遍。 */
+.ff-page {
+  width: 100%;
+  margin: 0 auto;
+  padding: 26px 32px 32px;
+}
+
+.ff-lobby {
+  display: flex;
+  width: 100%;
+  min-height: 100%;
+  max-width: 1440px;
+  flex-direction: column;
+  margin: 0 auto;
+  padding: 32px 32px 24px;
+  gap: 30px;
+}
+.ff-lobby-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+.ff-lobby-heading h1 {
+  max-width: 22ch;
+  font-size: clamp(22px, 2vw, 28px);
+  font-weight: 620;
+  line-height: 1.25;
+  letter-spacing: -0.03em;
+}
+.ff-lobby-heading p {
+  margin-top: 8px;
+  max-width: 46ch;
+  color: var(--fg-subtle);
+  font-size: 13px;
+}
+
+/* 第一屏两栏：制作中的大画幅 + 待处理清单。 */
+.ff-lobby-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+/* 继续制作：全页最大的一块画面，直接进上次停下的地方。 */
+.ff-continue {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-frame);
+  background: var(--surface);
+  transition: border-color 0.18s;
+}
+.ff-continue:hover {
+  border-color: var(--border-strong);
+}
+.ff-continue-frame {
+  position: relative;
+  display: grid;
+  aspect-ratio: 16 / 7;
+  place-items: center;
+  border-bottom: 1px solid var(--border);
+  background-color: var(--surface-2);
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 26px 26px, 26px 26px;
+  color: var(--fg-subtle);
+}
+.ff-continue-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ff-continue-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--radius-frame);
+  padding: 4px 9px;
+  background: color-mix(in srgb, var(--studio-black) 74%, transparent);
+  color: var(--fg);
+  font-size: 11px;
+}
+.ff-continue-body {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+}
+.ff-continue-body h3 {
+  font-size: 18px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+}
+
+/* 需要处理：账式行，不是卡片墙。 */
+.ff-attention {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-frame);
+  background: var(--surface);
+}
+.ff-attention-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding: 13px 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ff-attention-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid var(--border);
+  padding: 13px 16px;
+  transition: background 0.15s;
+}
+.ff-attention-item:last-child {
+  border-bottom: 0;
+}
+.ff-attention-item:hover {
+  background: var(--surface-2);
+}
+.ff-attention-empty {
+  padding: 22px 16px;
+  color: var(--fg-subtle);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------
+   项目片单：宽窄交错的 contact sheet。
+   每 5 格一个循环——3 格窄 + 2 格宽，两行刚好铺满 6 列。
+   交错是为了让一屏里出现不同尺寸的画面，而不是等大卡片墙。
+   ------------------------------------------------------------ */
+.ff-sheet {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 16px;
+}
+.ff-sheet > * {
+  grid-column: span 2;
+}
+.ff-sheet > *:nth-child(5n + 4),
+.ff-sheet > *:nth-child(5n + 5) {
+  grid-column: span 3;
+}
+
+.ff-project-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-frame);
+  background: var(--surface);
+  transition: border-color 0.18s;
+}
+.ff-project-card:hover {
+  border-color: var(--border-strong);
+}
+.ff-project-cover {
+  position: relative;
+  display: grid;
+  aspect-ratio: 16 / 9;
+  place-items: center;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background-color: var(--surface-2);
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 22px 22px, 22px 22px;
+  color: var(--fg-subtle);
+}
+.ff-project-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 片号烧在画框边上，像 contact sheet 的帧号。 */
+.ff-frame-no-burn {
+  position: absolute;
+  bottom: 7px;
+  left: 9px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--paper) 62%, transparent);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.65);
+}
+.ff-project-status {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: var(--radius-frame);
+  padding: 3px 7px;
+  background: color-mix(in srgb, var(--studio-black) 78%, transparent);
+  font-size: 10px;
+}
+.ff-project-info {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  padding: 12px 14px 13px;
+}
+.ff-project-info h3 {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ff-project-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  color: var(--fg-subtle);
+  font-size: 11px;
+}
+.ff-project-meta > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ff-new-project {
+  display: flex;
+  min-height: 150px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-frame);
+  color: var(--fg-muted);
+  transition: border-color 0.15s, color 0.15s;
+}
+.ff-new-project > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  margin-bottom: 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-frame);
+  background: var(--surface);
+}
+.ff-new-project strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+.ff-new-project p {
+  margin-top: 4px;
+  color: var(--fg-subtle);
+  font-size: 12px;
+}
+.ff-new-project:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.ff-create-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-frame);
+  padding: 18px;
+  background: var(--surface);
+}
+
+.ff-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.ff-section-heading h2 {
+  font-size: 14px;
+  font-weight: 620;
+  letter-spacing: -0.015em;
+}
+.ff-count {
+  display: inline-grid;
+  height: 19px;
+  min-width: 22px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-frame);
+  padding: 0 6px;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ff-project-skeleton {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-frame);
+  background: var(--surface);
+}
+.ff-lobby-empty {
+  display: flex;
+  min-height: 330px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-frame);
+  padding: 30px;
+  background: var(--surface);
+  text-align: center;
+}
+.ff-empty-film {
+  display: grid;
+  width: 76px;
+  height: 58px;
+  place-items: center;
+  margin-bottom: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-frame);
+  background: var(--surface-2);
+  color: var(--fg-muted);
+}
+.ff-lobby-empty h3 {
+  font-size: 18px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+}
+.ff-lobby-empty p {
+  margin-top: 8px;
+  max-width: 40ch;
+  color: var(--fg-subtle);
+  font-size: 13px;
+}
+.ff-lobby-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+  color: var(--fg-subtle);
+  font-size: 11px;
+}
+
+/* ============================================================
+   账式行 —— 概览台账、模型库、任务中心、项目设置共用。
+   这些页面是数据，不是画面，所以用行和分组，不用大卡片。
+   （`/freeflow/billing`、`/freeflow/settings` 仍是 GlobalPlaceholder
+   占位路由，没有内容可排，所以不套这层。）
+
+   一份账有三层：账本（.ff-ledger）、栏头（-head）、条目（-row）。
+   行内的列是 -key（定宽标签）/ -val（可伸缩内容）/ -num（右对齐等宽数字），
+   账最要紧的性质是同一列的值上下对得上。
+   ============================================================ */
+.ff-ledger {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-frame);
+  background: var(--surface);
+}
+.ff-ledger + .ff-ledger {
+  margin-top: 14px;
+}
+.ff-ledger-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 11px 16px;
+  background: var(--surface-2);
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ff-ledger-head h2,
+.ff-ledger-head h3 {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 620;
+  letter-spacing: -0.015em;
+}
+.ff-ledger-note {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.ff-ledger-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid var(--border);
+  padding: 11px 16px;
+  transition: background 0.15s;
+}
+.ff-ledger-row:last-child {
+  border-bottom: 0;
+}
+.ff-ledger-row:hover {
+  background: var(--surface-2);
+}
+/* 表单行比只读行高一档：控件本身要 32px，挤在 11px 内边距里会贴边。 */
+.ff-ledger-row[data-form="true"] {
+  align-items: flex-start;
+  padding-block: 13px;
+}
+.ff-ledger-row[data-form="true"]:hover {
+  background: transparent;
+}
+/* 需要处理的那一条压不住——左边一条主色竖边，和阶段条的片门同一套语言。 */
+.ff-ledger-row[data-flag="attention"] {
+  box-shadow: inset 2px 0 0 var(--running);
+}
+.ff-ledger-row[data-flag="danger"] {
+  box-shadow: inset 2px 0 0 var(--danger);
+}
+.ff-ledger-row[data-flag="review"] {
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+/* 行内的列。key 是固定宽的标签列，val 是可伸缩的内容列。 */
+.ff-ledger-key {
+  flex-shrink: 0;
+  width: 116px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.ff-ledger-val {
+  min-width: 0;
+  flex: 1;
+}
+.ff-ledger-num {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.ff-ledger-empty {
+  padding: 26px 16px;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 进度尺：方头槽，不用圆角胶囊。制作进度是「拍了多少格」，是计数不是百分比。 */
+.ff-meter {
+  display: block;
+  height: 4px;
+  overflow: hidden;
+  background: var(--surface-3);
+}
+.ff-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+.ff-meter[data-tone="running"] > span {
+  background: var(--running);
+}
+.ff-meter[data-tone="done"] > span {
+  background: var(--success);
+}
+.ff-meter[data-tone="danger"] > span {
+  background: var(--danger);
+}
+
+/* ============================================================
+   项目壳：安静的 chrome，让主创作面占住视线。
+   ============================================================ */
+.ff-workbench-sidebar {
+  background: var(--surface);
+}
+.ff-workbench-brand {
+  min-height: 64px;
+  border-bottom-color: var(--border);
+}
+.ff-workbench-header {
+  background: var(--bg);
+}
+.ff-workbench-content {
+  padding: 0;
+}
+.ff-context-aside {
+  width: 300px;
+  background: var(--bg);
+}
+
+/* ============================================================
+   镜头接触表 —— 分镜页的主结构。
+   画面、镜号、时长、状态先形成节奏，编辑字段退到选中镜头的工作区。
+   ============================================================ */
+.ff-contact-sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  gap: 14px;
+}
+.ff-shot-frame {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-frame);
+  background: var(--surface);
+  text-align: left;
+  transition: border-color 0.15s;
+}
+.ff-shot-frame:hover {
+  border-color: var(--border-strong);
+}
+.ff-shot-frame[data-selected="true"] {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.ff-shot-gate {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.ff-shot-gate img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ff-shot-no {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+}
+
+/* ============================================================
+   制作板（项目概览）—— 一块板子，不是一墙卡片。
+
+   板子回答四个问题，顺序就是读的顺序：
+   现在拍到哪 → 下一步做什么 → 谁在等我 → 手上有多少素材。
+   所以这四块的体量刻意不等：通告条最大，台账最长，
+   待办只在真的有事时出现。
+   ============================================================ */
+.ff-board {
+  display: flex;
+  width: 100%;
+  max-width: 1280px;
+  flex-direction: column;
+  margin: 0 auto;
+  padding: 22px 24px 28px;
+  gap: 18px;
+}
+
+/* 通告条：一条横贯的深色带，左边「现在拍到哪」，右边「下一个动作」。
+   全页只有这一条用这个体量，它是每次打开概览要先看的东西。 */
+.ff-board-call {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-frame);
+  padding: 18px 22px;
+  background: var(--surface);
+}
+.ff-board-now {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+.ff-board-now-key {
+  color: var(--fg-subtle);
+  font-size: 11px;
+}
+.ff-board-now-value {
+  font-size: clamp(22px, 2.2vw, 30px);
+  font-weight: 620;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+}
+/* 下一动作贴右，和当前阶段之间留一条真空——它们是一句话的主语和谓语。 */
+.ff-board-next {
+  display: flex;
+  min-width: 0;
+  max-width: 44ch;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+.ff-board-next-key {
+  color: var(--fg-subtle);
+  font-size: 11px;
+}
+.ff-board-next-detail {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* 两栏：左边待办（有事才出现），右边制作进度尺。 */
+.ff-board-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+/* 台账行的序号槽。01..06 是真实的生产序列，不是装饰编号。 */
+.ff-stage-no {
+  flex-shrink: 0;
+  width: 22px;
+  color: var(--fg-subtle);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+/* 并行的三段（角色 / 场景 / 剧本）在序号槽左侧共用一条竖线，
+   这是原来那三个 FlowArrow 表达的同一件事，占一列而不是三行高。 */
+.ff-stage-row[data-branch="true"] .ff-stage-no {
+  box-shadow: inset 2px 0 0 var(--border-strong);
+  padding-left: 9px;
+  width: 31px;
+}
+.ff-stage-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.ff-stage-desc {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ff-stage-facts {
+  display: flex;
+  flex-shrink: 0;
+  align-items: baseline;
+  gap: 14px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.ff-stage-facts b {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* ============================================================
+   光桌（素材库）—— dailies 摊在灯箱上。
+
+   三层，体量必须分得开：
+   1. 真实画面 .ff-plate —— 按原始宽高比铺满一行，最大，无卡片外壳
+   2. 文本档案 .ff-docket —— 索引卡，窄条，一眼看出「这是纸不是画面」
+   3. 空占位   .ff-plate[data-empty] —— 网格底纹，不给它和真图一样的体量
+   ============================================================ */
+.ff-lighttable {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+/* 两条一起用才是「对齐的一行」：flex-grow 按宽高比分配剩余宽度，
+   flex-basis 给一个同比例的起点，于是同一行里每张图高度相同、
+   宽度随画幅变化。横画幅因此真的比竖画幅宽。 */
+.ff-lighttable > * {
+  flex-grow: var(--ar, 1.78);
+  flex-basis: calc(var(--ar, 1.78) * 132px);
+  min-width: 120px;
+}
+/* 最后一行不要被拉伸成怪比例：补一个不可见的弹性尾块吃掉剩余宽度。 */
+.ff-lighttable::after {
+  content: "";
+  flex-grow: 999999;
+  flex-basis: 0;
+  min-width: 0;
+}
+
+.ff-plate {
+  position: relative;
+  display: block;
+  container: ff-plate / inline-size;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-frame);
+  background: var(--surface-2);
+  aspect-ratio: var(--ar, 1.78);
+  transition: border-color 0.15s;
+}
+.ff-plate:hover {
+  border-color: var(--border-strong);
+}
+.ff-plate img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* 还没签出链接、或根本没有图的位置：网格底纹 + 一个小图标，
+   明确是「这里没有画面」而不是「图还在加载」。 */
+.ff-plate[data-empty="true"] {
+  display: grid;
+  place-items: center;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 24px 24px, 24px 24px;
+  color: var(--fg-subtle);
+}
+/* 文件名与尺寸烧在画框下沿，压一层从下往上的渐隐，不另起一块白底。 */
+.ff-plate-burn {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px 9px 7px;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--studio-black) 88%, transparent),
+    transparent
+  );
+  color: color-mix(in srgb, var(--paper) 88%, transparent);
+  font-size: 11px;
+}
+/* 文件名是这张图的主语，任何宽度下都必须留得住。
+   之前尺寸那一格 `flex-shrink: 0`，竖画幅/方画幅的窄画框里文件名被挤到
+   零宽，只剩「1024×1024 2.1 MB」——最没用的那一半活了下来。
+   现在反过来：文件名占住至少 6 个字，尺寸先让位，让不开就整条撤掉。 */
+.ff-plate-burn > span:first-child {
+  min-width: 6ch;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ff-plate-burn > span:last-child {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.78;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+/* 画框窄到放不下两栏时只留文件名。容器查询问的是这一格自己有多宽，
+   不是屏幕有多宽——同一屏上横竖画幅的宽度本来就不一样。 */
+@container ff-plate (max-width: 190px) {
+  .ff-plate-burn > span:last-child {
+    display: none;
+  }
+}
+
+/* 档案不是画面，所以不进光桌，自己排一列索引卡：
+   左侧一条彩色书脊标明类别，右侧是文字。窄、扁、密。 */
+.ff-dockets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 8px;
+}
+.ff-docket {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-frame);
+  padding: 9px 11px;
+  background: var(--surface);
+  transition: border-color 0.15s;
+}
+.ff-docket:hover {
+  border-color: var(--border-strong);
+}
+.ff-docket[data-kind="character"] {
+  border-left-color: var(--primary);
+}
+.ff-docket[data-kind="scene"] {
+  border-left-color: var(--rf-agent);
+}
+.ff-docket[data-kind="skill"] {
+  border-left-color: var(--running);
+}
+.ff-docket-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--fg-subtle);
+}
+.ff-docket-body {
+  min-width: 0;
+  flex: 1;
+}
+.ff-docket-title {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ff-docket-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 3px;
+  color: var(--fg-subtle);
+  font-size: 11px;
+}
+.ff-docket-meta > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   右栏：一条连续的轨，不是三块等大面板。
+
+   三块内容的重要性本来就不一样——当前阶段要立刻看见，运行任务要扫，
+   一致性档案是查。给它们同样的边框和内边距是在说「一样重要」。
+   现在：阶段块贴顶无边框、任务是账式行、档案是一列勾选，
+   块与块之间只有一条分隔线。
+   ============================================================ */
+.ff-rail {
+  display: flex;
+  flex-direction: column;
+}
+.ff-rail-block + .ff-rail-block {
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+.ff-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 9px;
+  color: var(--fg-subtle);
+  font-size: 11px;
+}
+.ff-rail-head > span:last-child {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+/* 当前阶段：右栏里唯一有背景的一块，它是这条轨上的主语。 */
+.ff-rail-now {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-frame);
+  padding: 13px 14px;
+  background: var(--surface);
+}
+.ff-rail-now-stage {
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+}
+/* 任务与档案是清单，一行一条，靠分隔线而不是卡片分开。 */
+.ff-rail-list {
+  display: flex;
+  flex-direction: column;
+}
+.ff-rail-item {
+  border-top: 1px solid var(--border);
+  padding: 9px 0;
+}
+.ff-rail-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.ff-rail-empty {
+  color: var(--fg-subtle);
+  font-size: 12px;
+}
+
+/* ============================================================
+   响应式。桌面主创作区优先；窄屏把次要栏下移或收成图标条。
+   任何断点都不产生 body 横向滚动。
+   ============================================================ */
+@media (max-width: 1439px) {
+  .ff-sheet {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .ff-sheet > * {
+    grid-column: span 2;
+  }
+  .ff-sheet > *:nth-child(5n + 4),
+  .ff-sheet > *:nth-child(5n + 5) {
+    grid-column: span 2;
+  }
 }
 @media (max-width: 1199px) {
-  .ff-global-nav { width: 192px; }
-  .ff-brand { padding: 0 16px; }
-  .ff-brand-name { font-size: 15px; }
-  .ff-lobby { padding: 32px 28px 24px; }
-  .ff-topbar { padding: 0 28px; }
-  .ff-project-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ff-page {
+    padding: 22px 22px 26px;
+  }
+  .ff-global-nav {
+    width: 188px;
+  }
+  .ff-brand {
+    padding: 0 14px;
+  }
+  .ff-lobby {
+    padding: 26px 22px 22px;
+    gap: 26px;
+  }
+  .ff-topbar {
+    padding: 0 22px;
+  }
+  .ff-lobby-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ff-board {
+    padding: 18px 18px 24px;
+    gap: 16px;
+  }
+  .ff-board-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 899px) {
+  .ff-sheet {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ff-sheet > *,
+  .ff-sheet > *:nth-child(5n + 4),
+  .ff-sheet > *:nth-child(5n + 5) {
+    grid-column: span 1;
+  }
+  .ff-contact-sheet {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+  /* 窄屏一行放不下两张横画幅，放大基准让一行一张而不是挤成邮票。 */
+  .ff-lighttable > * {
+    flex-basis: calc(var(--ar, 1.78) * 112px);
+  }
 }
 @media (max-width: 767px) {
-  .ff-global-nav { width: 64px; }
-  .ff-brand { justify-content: center; height: 64px; padding: 0; }
-  .ff-brand-name, .ff-nav-label, .ff-nav-heading, .ff-studio-note { display: none; }
-  .ff-nav-list { margin-top: 20px; padding: 0 8px; gap: 10px; }
-  .ff-nav-link { padding: 0; justify-content: center; }
-  .ff-profile { justify-content: center; padding: 18px 0; }
-  .ff-topbar { height: 64px; padding: 0 20px; }
-  .ff-lobby { padding: 28px 20px 20px; gap: 28px; }
-  .ff-lobby-heading { align-items: flex-start; flex-direction: column; gap: 20px; }
-  .ff-lobby-heading p { line-height: 1.8; }
-  .ff-project-grid { gap: 16px; }
-  .ff-workbench-content { padding: 0; }
-  .ff-workbench-sidebar { width: 64px; }
-  .ff-studio .ff-workbench-sidebar nav > section { padding: 16px 8px; }
-  .ff-studio .ff-workbench-sidebar nav > div { margin: 4px 8px 0; }
-  .ff-workbench-brand { justify-content: center; padding-inline: 0; }
-  .ff-workbench-header > div:first-child { min-width: 0; flex-shrink: 1; flex: 1; }
+  .ff-page {
+    padding: 18px 16px 24px;
+  }
+  .ff-global-nav {
+    width: 60px;
+  }
+  .ff-brand {
+    height: 56px;
+    justify-content: center;
+    padding: 0;
+  }
+  .ff-brand-name,
+  .ff-nav-label,
+  .ff-nav-heading,
+  .ff-studio-note {
+    display: none;
+  }
+  .ff-nav-list {
+    margin-top: 14px;
+    padding: 0 8px;
+    gap: 6px;
+  }
+  .ff-nav-link {
+    justify-content: center;
+    padding: 0;
+  }
+  .ff-profile {
+    justify-content: center;
+    padding: 14px 0;
+  }
+  .ff-topbar {
+    height: 56px;
+    padding: 0 16px;
+  }
+  .ff-lobby {
+    padding: 22px 16px 18px;
+    gap: 22px;
+  }
+  .ff-lobby-heading {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .ff-continue-body {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .ff-workbench-sidebar {
+    width: 60px;
+  }
+  .ff-workbench-brand {
+    justify-content: center;
+    padding-inline: 0;
+  }
+  .ff-workbench-header > div:first-child {
+    min-width: 0;
+    flex: 1;
+    flex-shrink: 1;
+  }
 }
 @media (max-width: 599px) {
-  .ff-project-grid { grid-template-columns: minmax(0, 1fr); }
-  .ff-project-cover { height: 156px; }
-  .ff-new-project { min-height: 180px; }
-  .ff-create-form { grid-template-columns: minmax(0, 1fr); padding: 18px; }
-  .ff-lobby-empty { min-height: 350px; padding: 24px 16px; }
-  .ff-lobby-empty h3 { font-size: 17px; }
-  .ff-topbar .ff-quiet-button { padding: 0 10px; }
+  .ff-sheet {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ff-contact-sheet {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ff-create-form {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px;
+  }
+  .ff-lobby-empty {
+    min-height: 300px;
+    padding: 22px 14px;
+  }
+  .ff-lobby-empty h3 {
+    font-size: 16px;
+  }
+  .ff-slate {
+    gap: 0 16px;
+  }
+  .ff-board {
+    padding: 14px 14px 20px;
+  }
+  /* 通告条在手机上竖排：下一动作放到当前阶段下面，按钮撑满一行。 */
+  .ff-board-call {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 15px 16px;
+  }
+  .ff-board-next {
+    max-width: none;
+  }
+  .ff-ledger-row {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+  .ff-ledger-key {
+    width: 100%;
+  }
+  .ff-ledger-row[data-form="true"] {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ff-lighttable > * {
+    flex-basis: calc(var(--ar, 1.78) * 96px);
+  }
+  .ff-dockets {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

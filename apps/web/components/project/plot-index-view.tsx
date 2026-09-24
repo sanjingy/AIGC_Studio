@@ -23,5 +23,5 @@ export function PlotIndexView({ data }: { data: any }) {
 }
 
 export function plotIndexMeta(data: any): string {
-  return `${data.nodes?.length ?? 0} 个节点 · ${data.scene_count ?? 0} 场景 · 台词约 ${data.dialogue_chars ?? 0} 字`;
+  return `${data.nodes?.length ?? 0} 个节点，${data.scene_count ?? 0} 场景，台词约 ${data.dialogue_chars ?? 0} 字`;
 }

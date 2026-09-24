@@ -35,36 +35,36 @@ export function SidebarNavGroup({
   if (items.length === 0) return null;
 
   return (
-    <section aria-labelledby={headingId} className="px-2 py-3">
+    <section aria-labelledby={headingId} className="px-2.5 py-3.5 max-md:px-2 max-md:py-3">
       <h2
         id={headingId}
         className={cn(
-          "px-2 pb-2 text-[10px] font-semibold tracking-[0.18em] text-fg-subtle uppercase",
+          "px-2.5 pb-2 text-[10px] font-normal text-fg-subtle",
           collapsed && "sr-only",
           "max-md:sr-only",
         )}
       >
         {label}
       </h2>
-      <ul className="space-y-1">
+      <ul className="flex flex-col gap-0.5">
         {items.map((item) => {
           const Icon = item.icon;
           const active = !item.disabled && isCurrent(activeHref, item.href);
           const accessibleLabel =
             item.badge === undefined ? item.label : `${item.label}，${item.badge}`;
           const itemClassName = cn(
-            "relative flex h-10 w-full items-center gap-3 rounded-lg border px-3 text-left text-sm font-medium",
+            "relative flex h-[38px] w-full items-center gap-3 rounded-md border px-3 text-left text-[13px] font-normal",
             "transition-[color,background-color,border-color] duration-200 motion-reduce:transition-none",
             active
-              ? "border-primary/20 bg-primary-soft text-primary shadow-[inset_2px_0_0_var(--primary)]"
-              : "border-transparent text-fg-muted hover:border-border hover:bg-surface-2 hover:text-fg",
+              ? "border-transparent bg-surface-2 font-[550] text-fg shadow-[inset_2px_0_0_var(--primary)]"
+              : "border-transparent text-fg-muted hover:bg-surface-2 hover:text-fg",
             item.disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer",
             collapsed && "justify-center px-0",
             "max-md:justify-center max-md:px-0",
           );
           const content = (
             <>
-              <Icon aria-hidden className="size-4 shrink-0" />
+              <Icon aria-hidden className={cn("size-4 shrink-0", active && "text-primary")} />
               <span className={cn("min-w-0 flex-1 truncate", collapsed && "sr-only", "max-md:sr-only")}>
                 {item.label}
               </span>
@@ -72,8 +72,8 @@ export function SidebarNavGroup({
                 <span
                   aria-hidden
                   className={cn(
-                    "tnum shrink-0 rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] text-fg-muted",
-                    active && "bg-primary-soft text-primary",
+                    "code shrink-0 rounded-sm bg-surface-3 px-1.5 py-0.5 text-[10px] text-fg-muted",
+                    active && "text-primary",
                     collapsed && "hidden",
                     "max-md:hidden",
                   )}

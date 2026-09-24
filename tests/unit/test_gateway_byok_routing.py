@@ -82,14 +82,22 @@ def _isolate(monkeypatch: pytest.MonkeyPatch) -> Any:
     RecordingProvider.calls = []
     monkeypatch.setattr(catalog, "SPECS", (_FAKE_SPEC,))
     monkeypatch.setattr(catalog, "platform_key", lambda provider_id: PLATFORM_KEY)
+
+    # 组织默认：这组用例验的是"没有显式配置时的旧规则"，一律当没存过
+    async def _no_default(**_kw: Any) -> None:
+        return None
+
+    monkeypatch.setattr(gw, "_load_org_default", _no_default)
     gw.reset_registry()
     yield
     gw.reset_registry()
 
 
 def _stub_org_key(monkeypatch: pytest.MonkeyPatch, key: str | None) -> None:
-    async def _fake(*, org_id: uuid.UUID, capability: str) -> ResolvedKey | None:
-        del org_id
+    async def _fake(
+        *, org_id: uuid.UUID, capability: str, provider_id: str | None = None
+    ) -> ResolvedKey | None:
+        del org_id, provider_id
         if key is None:
             return None
         return ResolvedKey(provider_id=FAKE_PROVIDER, api_key=key, capability=capability)
@@ -294,8 +302,10 @@ async def test_retired_provider_does_not_silently_use_platform_key(
 ) -> None:
     """存了 Key 之后平台把这个能力改绑到别家——报错，不偷偷用平台 Key。"""
 
-    async def _fake(*, org_id: uuid.UUID, capability: str) -> ResolvedKey | None:
-        del org_id
+    async def _fake(
+        *, org_id: uuid.UUID, capability: str, provider_id: str | None = None
+    ) -> ResolvedKey | None:
+        del org_id, provider_id
         return ResolvedKey(provider_id="provider.retired", api_key=ORG_KEY, capability=capability)
 
     monkeypatch.setattr(gw, "_load_org_key", _fake)

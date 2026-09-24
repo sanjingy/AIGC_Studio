@@ -229,8 +229,22 @@ export function AssetLibraryGrid() {
 
   const total = files.length + characters.length + scenes.length + skillItems.length;
 
+  /*
+   * 分成两层：**有帧的进光桌，没帧的进档案列。**
+   *
+   * 上一版把六种东西全塞进同一张等宽网格，于是一份纯文本的角色档案和一张
+   * 真实分镜图占同样大的方块——那是「什么都一样重要」，也正是通用素材管理
+   * 后台的样子。现在图占它应得的宽度，档案只占一条。
+   *
+   * 视频和音频暂时也走档案列：这条链路上没有转码，拿不到封面帧，
+   * 硬给一个空画框就是在承诺一个还不存在的缩略图。
+   */
+  const plates = files.filter((a) => a.type === "image");
+  const otherFiles = files.filter((a) => a.type !== "image");
+  const dockets = otherFiles.length + characters.length + scenes.length + skillItems.length;
+
   return (
-    <div className="mx-auto flex max-w-[1200px] flex-col">
+    <div className="ff-page flex max-w-[1200px] flex-col">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h1 className="text-base font-semibold text-fg">我的素材</h1>
         {/* 技能 chip 下换成传 Skill：Skill 不进 `assets` 表，走的是 /skills
@@ -262,7 +276,7 @@ export function AssetLibraryGrid() {
             aria-pressed={kind === k}
             onClick={() => setKind(k)}
             className={cn(
-              "inline-flex h-7 cursor-pointer items-center rounded-full px-2.5 text-xs",
+              "inline-flex h-7 cursor-pointer items-center rounded-[2px] px-2.5 text-xs",
               "transition-colors duration-150",
               kind === k
                 ? "bg-primary font-medium text-primary-fg"
@@ -310,32 +324,48 @@ export function AssetLibraryGrid() {
               skillItems.length > 0 && `${skillItems.length} 份 Skill`,
             ]
               .filter(Boolean)
-              .join(" · ")}
+              .join("，")}
           </p>
           {kind === "skill" && skillItems.some((k) => !k.runtime_wired) && (
             // ADR-026 的验收标准：列 Skill 的地方必须照实说运行时没接线。
             // 判据取后端的 runtime_wired，不是前端写死一句话——真接上了
             // 这块自己就不显示了。
-            <p className="mb-2 rounded-md bg-surface-2 px-3 py-2 text-xs text-fg-subtle">
+            <p className="mb-2 rounded-[2px] bg-surface-2 px-3 py-2 text-xs text-fg-subtle">
               这些 Skill 已存入技能库，但
               <span className="text-fg-muted">运行时尚未接线</span>
               ——当前生产流程仍走内置阶段图，它们暂时不会生效。
             </p>
           )}
-          <div className="grid grid-cols-2 items-start gap-3 sm:grid-cols-3 xl:grid-cols-4">
-            {files.map((a) => (
-              <FileCard key={a.id} asset={a} />
-            ))}
-            {characters.map((c) => (
-              <CharacterCard key={c.id} entry={c} />
-            ))}
-            {scenes.map((p) => (
-              <SceneCard key={p.run_id} profile={p} />
-            ))}
-            {skillItems.map((k) => (
-              <SkillCard key={k.id} skill={k} />
-            ))}
-          </div>
+
+          {/* 光桌：有画面的素材铺在这里，按各自的宽高比占位。
+              横画幅真的比竖画幅宽，一行的高度对齐——这是 dailies 摊在
+              灯箱上的样子，不是一张张等宽的卡片。 */}
+          {plates.length > 0 && (
+            <div className="ff-lighttable">
+              {plates.map((a) => (
+                <FilePlate key={a.id} asset={a} />
+              ))}
+            </div>
+          )}
+
+          {/* 档案不是画面：没有可看的帧，就不给它画面的体量。
+              一列索引卡，左侧书脊的颜色标明是哪一类。 */}
+          {dockets > 0 && (
+            <div className={cn("ff-dockets", plates.length > 0 && "mt-4")}>
+              {otherFiles.map((a) => (
+                <FileDocket key={a.id} asset={a} />
+              ))}
+              {characters.map((c) => (
+                <CharacterDocket key={c.id} entry={c} />
+              ))}
+              {scenes.map((p) => (
+                <SceneDocket key={p.run_id} profile={p} />
+              ))}
+              {skillItems.map((k) => (
+                <SkillDocket key={k.id} skill={k} />
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -354,19 +384,19 @@ function UsageLine({ usage }: { usage: Library["usage"] }) {
   const nearFull = quota_bytes !== null && percent_used >= WARN_AT;
 
   return (
-    <div className="rounded-md border border-border bg-surface px-3 py-2">
+    <div className="rounded-[2px] border border-border bg-surface px-3 py-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs text-fg-muted">
           只有图片、视频这类文件占用容量；角色档案与场景档案不计入。
         </span>
         <span className="tnum text-xs text-fg-subtle">
           {quota_bytes === null
-            ? `${formatBytes(used_bytes)} · 未设上限`
-            : `${formatBytes(used_bytes)} / ${formatBytes(quota_bytes)} · ${percent_used}%`}
+            ? `${formatBytes(used_bytes)}，未设上限`
+            : `${formatBytes(used_bytes)} / ${formatBytes(quota_bytes)}，已用 ${percent_used}%`}
         </span>
       </div>
       {quota_bytes !== null && (
-        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-2">
+        <div className="ff-meter mt-1.5" data-tone={nearFull ? "danger" : undefined}>
           <div
             role="progressbar"
             aria-valuenow={percent_used}
@@ -424,7 +454,7 @@ function SecondaryFilters() {
 
 function EmptyState({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rf-empty-state mt-6 rounded-lg border border-dashed border-border-strong px-4 py-10 text-center">
+    <div className="rf-empty-state mt-6 rounded-[2px] border border-dashed border-border-strong px-4 py-10 text-center">
       <span className="rf-empty-icon"><AssetLibraryIcon aria-hidden className="size-6" /></span>
       <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-fg-subtle">{children}</p>
     </div>
@@ -433,16 +463,15 @@ function EmptyState({ children }: { children: React.ReactNode }) {
 
 function AssetSkeleton() {
   return (
-    <div role="status" aria-label="加载中" className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+    <div role="status" aria-label="加载中" className="ff-lighttable mt-6">
       <span className="sr-only">加载中…</span>
-      {[0, 1, 2, 3].map((item) => (
-        <div key={item} className="overflow-hidden rounded-lg border border-border bg-surface">
-          <div className="rf-skeleton aspect-square" />
-          <div className="space-y-2 p-2">
-            <span className="rf-skeleton block h-3 w-3/4 rounded-sm" />
-            <span className="rf-skeleton block h-2.5 w-1/2 rounded-sm" />
-          </div>
-        </div>
+      {/* 骨架也按不同宽高比排，免得内容到位时整片版式跳一次 */}
+      {[1.78, 0.75, 1.5, 1.78].map((ar, i) => (
+        <span
+          key={i}
+          className="rf-skeleton block"
+          style={{ ["--ar" as string]: String(ar), aspectRatio: String(ar) }}
+        />
       ))}
     </div>
   );
@@ -484,14 +513,18 @@ function SkillEmptyState({ onPick, busy }: { onPick: () => void; busy: boolean }
   );
 }
 
-function FileCard({ asset }: { asset: LibraryAsset }) {
+/**
+ * 光桌上的一格。**宽高比来自 `assets` 表的真实 width / height**，
+ * 所以一张 1024×576 的分镜图真的比 1024×1024 的立绘宽——用户扫一眼
+ * 就知道哪些是镜头、哪些是立绘，不必读文件名。
+ *
+ * 缩略图就是原图：真正的缩略图要走一条独立转码链路，现在没有。
+ * 链接是预签名的、有有效期，所以只在渲染时现签，不缓存进列表。
+ */
+function FilePlate({ asset }: { asset: LibraryAsset }) {
   const [url, setUrl] = useState<string | null>(null);
-  const Icon = TYPE_ICON[asset.type] ?? FileText;
 
-  // 缩略图就是原图：真正的缩略图要走一条独立转码链路，现在没有。
-  // 链接是预签名的、有有效期，所以只在渲染时现签，不缓存进列表。
   useEffect(() => {
-    if (asset.type !== "image") return;
     let alive = true;
     assetsApi
       .downloadUrl(asset.id)
@@ -500,98 +533,123 @@ function FileCard({ asset }: { asset: LibraryAsset }) {
     return () => {
       alive = false;
     };
-  }, [asset.id, asset.type]);
+  }, [asset.id]);
+
+  // 后端两列都可能是 null（没探到尺寸）。退回 16:9 而不是 1:1——
+  // 这个产品里绝大多数图是镜头画面。
+  const ratio =
+    asset.width && asset.height ? Math.max(0.4, Math.min(3, asset.width / asset.height)) : 16 / 9;
 
   return (
-    <div className="rf-grid-card group overflow-hidden rounded-lg border border-border transition-[border-color,box-shadow] duration-150 hover:border-border-strong hover:shadow-rf-card">
-      <div className="rf-shot-placeholder flex aspect-square items-center justify-center bg-surface-3">
-        {url ? (
-          // eslint-disable-next-line @next/next/no-img-element -- 预签名 URL 是运行时才知道的外部地址，用不了 next/image 的构建期优化
-          <img src={url} alt={asset.filename} className="size-full object-cover" />
-        ) : (
-          <Icon aria-hidden className="size-7 text-fg-subtle transition-colors duration-150 group-hover:text-primary" />
-        )}
-      </div>
-      <div className="px-2 py-1.5">
-        <p className="truncate text-xs text-fg" title={asset.filename}>
-          {asset.filename}
-        </p>
-        <p className="tnum mt-0.5 text-xs text-fg-subtle">
-          {asset.size_bytes === null ? "—" : formatBytes(asset.size_bytes)}
-          {" · "}
-          {new Date(asset.created_at).toLocaleDateString("zh-CN")}
-        </p>
-      </div>
-    </div>
+    <figure
+      className="ff-plate"
+      data-empty={url ? undefined : "true"}
+      style={{ ["--ar" as string]: String(ratio) }}
+    >
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element -- 预签名 URL 是运行时才知道的外部地址，用不了 next/image 的构建期优化
+        <img src={url} alt={asset.filename} loading="lazy" />
+      ) : (
+        <RenderImageIcon aria-hidden className="size-6" />
+      )}
+      <figcaption className="ff-plate-burn">
+        <span title={asset.filename}>{asset.filename}</span>
+        <span>
+          {asset.width && asset.height ? `${asset.width}×${asset.height}` : ""}
+          {asset.size_bytes === null ? "" : ` ${formatBytes(asset.size_bytes)}`}
+        </span>
+      </figcaption>
+    </figure>
   );
 }
 
-function SceneCard({ profile }: { profile: ProfileEntry }) {
+/** 档案列里的一条：书脊颜色标类别，右边是标题和一行元信息。 */
+function Docket({
+  kind,
+  icon: Icon,
+  title,
+  meta,
+  date,
+}: {
+  kind: "file" | "character" | "scene" | "skill";
+  icon: LucideIcon;
+  title: string;
+  meta: string;
+  date: string;
+}) {
   return (
-    <div className="rf-grid-card group overflow-hidden rounded-lg border border-border transition-[border-color,box-shadow] duration-150 hover:border-border-strong hover:shadow-rf-card">
-      {/* 场景档案同样是结构化文本。场景出图还没做（场景一致性未设计），
-          所以这里没有图可放，不摆一张别处的图冒充。 */}
-      <div className="rf-shot-placeholder flex aspect-square items-center justify-center bg-surface-3">
-        <SceneIcon aria-hidden className="size-7 text-fg-subtle transition-colors duration-150 group-hover:text-primary" />
-      </div>
-      <div className="px-2 py-1.5">
-        <p className="truncate text-xs text-fg" title={profile.project_title}>
-          {profile.project_title}
+    <article className="ff-docket" data-kind={kind}>
+      <Icon aria-hidden className="ff-docket-icon size-4" />
+      <div className="ff-docket-body">
+        <p className="ff-docket-title" title={title}>
+          {title}
         </p>
-        <p className="tnum mt-0.5 truncate text-xs text-fg-subtle">
-          {scenesMeta(profile.output)}
-          {" · "}
-          {new Date(profile.created_at).toLocaleDateString("zh-CN")}
+        <p className="ff-docket-meta">
+          <span title={meta}>{meta}</span>
+          <span className="code shrink-0">{new Date(date).toLocaleDateString("zh-CN")}</span>
         </p>
       </div>
-    </div>
+    </article>
   );
 }
 
-function SkillCard({ skill }: { skill: OrgSkill }) {
+/**
+ * 没有可看帧的文件：文档、音频、视频。
+ *
+ * 视频也在这里——这条链路上没有转码，拿不到封面帧。给它一个空画框
+ * 等于承诺一个还不存在的缩略图，不如照实说这是一个文件。
+ */
+function FileDocket({ asset }: { asset: LibraryAsset }) {
+  return (
+    <Docket
+      kind="file"
+      icon={TYPE_ICON[asset.type] ?? FileText}
+      title={asset.filename}
+      meta={asset.size_bytes === null ? "大小未知" : formatBytes(asset.size_bytes)}
+      date={asset.created_at}
+    />
+  );
+}
+
+function CharacterDocket({ entry }: { entry: CharacterEntry }) {
+  return (
+    <Docket
+      kind="character"
+      icon={CharacterIcon}
+      title={entry.title}
+      meta={charactersMeta(entry.output)}
+      date={entry.created_at}
+    />
+  );
+}
+
+function SceneDocket({ profile }: { profile: ProfileEntry }) {
+  return (
+    <Docket
+      kind="scene"
+      icon={SceneIcon}
+      title={profile.project_title}
+      meta={scenesMeta(profile.output)}
+      date={profile.created_at}
+    />
+  );
+}
+
+function SkillDocket({ skill }: { skill: OrgSkill }) {
   const invalid = skill.status !== "valid";
   return (
-    <div className="rf-grid-card group overflow-hidden rounded-lg border border-border transition-[border-color,box-shadow] duration-150 hover:border-border-strong hover:shadow-rf-card">
-      <div className="rf-shot-placeholder flex aspect-square items-center justify-center bg-surface-3">
-        <Puzzle aria-hidden className="size-6 text-fg-subtle" />
-      </div>
-      <div className="px-2 py-1.5">
-        <p className="truncate text-xs text-fg" title={skill.name}>
-          {skill.name}
-        </p>
-        <p className="tnum mt-0.5 truncate text-xs text-fg-subtle">
-          {/* 校验不过的照样入库（ADR-026），列表里就得看得出来是哪一份。
-              version 是 spec 里原样抄出来的字符串，作者写的一般就是
-              "v1"——别再拼一个 v 上去；没写的后端给占位 "-"。 */}
-          {skill.version === "-" ? "版本未知" : skill.version}
-          {" · "}
-          {invalid ? "校验未通过" : `${skill.stage_count} 个阶段`}
-          {" · "}
-          {new Date(skill.created_at).toLocaleDateString("zh-CN")}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function CharacterCard({ entry }: { entry: CharacterEntry }) {
-  return (
-    <div className="rf-grid-card group overflow-hidden rounded-lg border border-border transition-[border-color,box-shadow] duration-150 hover:border-border-strong hover:shadow-rf-card">
-      {/* 角色档案是结构化文本，没有图。放一个纯色块比放一张假立绘诚实 */}
-      <div className="rf-shot-placeholder flex aspect-square items-center justify-center bg-surface-3">
-        <CharacterIcon aria-hidden className="size-7 text-fg-subtle transition-colors duration-150 group-hover:text-primary" />
-      </div>
-      <div className="px-2 py-1.5">
-        <p className="truncate text-xs text-fg" title={entry.title}>
-          {entry.title}
-        </p>
-        <p className="tnum mt-0.5 text-xs text-fg-subtle">
-          {charactersMeta(entry.output)}
-          {" · "}
-          {new Date(entry.created_at).toLocaleDateString("zh-CN")}
-        </p>
-      </div>
-    </div>
+    <Docket
+      kind="skill"
+      icon={Puzzle}
+      title={skill.name}
+      /* 校验不过的照样入库（ADR-026），列表里就得看得出来是哪一份。
+         version 是 spec 里原样抄出来的字符串，作者写的一般就是 "v1"
+         ——别再拼一个 v 上去；没写的后端给占位 "-"。 */
+      meta={`${skill.version === "-" ? "版本未知" : skill.version}，${
+        invalid ? "校验未通过" : `${skill.stage_count} 个阶段`
+      }`}
+      date={skill.created_at}
+    />
   );
 }
 

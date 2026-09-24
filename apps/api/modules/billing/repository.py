@@ -162,17 +162,24 @@ async def get_rules(db: AsyncSession) -> dict[str, int]:
 
 
 async def get_credential(
-    db: AsyncSession, *, org_id: uuid.UUID, capability: str, include_deleted: bool = False
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    capability: str,
+    provider_id: str,
+    include_deleted: bool = False,
 ) -> ProviderCredential | None:
-    """取某个 org 某个能力的凭证。
+    """取某个 org 在某个能力上给**某一家**配的凭证。
 
-    `include_deleted` 只给 upsert 用：唯一约束 `(org_id, capability)`
+    同能力多 Provider 之后，唯一约束是 `(org_id, capability, provider_id)`：
+    一个能力下每家各一把。`include_deleted` 只给 upsert 用——唯一约束
     **不排除软删行**，所以"换 Key"必须找到那一行原地改，
     做成"软删旧的再插新的"会直接撞约束。
     """
     stmt = select(ProviderCredential).where(
         ProviderCredential.org_id == org_id,
         ProviderCredential.capability == capability,
+        ProviderCredential.provider_id == provider_id,
     )
     if not include_deleted:
         stmt = stmt.where(ProviderCredential.deleted_at.is_(None))
@@ -188,7 +195,7 @@ async def list_credentials(db: AsyncSession, *, org_id: uuid.UUID) -> list[Provi
                     ProviderCredential.org_id == org_id,
                     ProviderCredential.deleted_at.is_(None),
                 )
-                .order_by(ProviderCredential.capability)
+                .order_by(ProviderCredential.capability, ProviderCredential.provider_id)
             )
         ).scalars()
     )
@@ -204,7 +211,9 @@ async def upsert_credential(
     created_by: uuid.UUID,
 ) -> ProviderCredential:
     """写入或就地更新凭证。软删过的行会被复活，不是插新行。"""
-    row = await get_credential(db, org_id=org_id, capability=capability, include_deleted=True)
+    row = await get_credential(
+        db, org_id=org_id, capability=capability, provider_id=provider_id, include_deleted=True
+    )
     if row is None:
         row = ProviderCredential(
             org_id=org_id,
@@ -215,7 +224,6 @@ async def upsert_credential(
         )
         db.add(row)
     else:
-        row.provider_id = provider_id
         row.key_encrypted = key_encrypted
         row.created_by = created_by
         row.deleted_at = None

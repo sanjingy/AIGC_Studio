@@ -16,6 +16,7 @@ Key 能不能用"——Key 还没入库，也不该进任何注册表。
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -151,8 +152,35 @@ async def verify(*, provider_id: str, api_key: str) -> ProbeResult:
     不是接口调用失败。把它抛成 4xx 会让前端要在错误分支里区分
     "网络断了"和"Key 错了"，那本来就是这个接口该替它分好的。
     """
+    return await _conclude(
+        lambda: get_prober().probe(provider_id=provider_id, api_key=api_key),
+        provider_id=provider_id,
+        api_key=api_key,
+    )
+
+
+async def verify_with(verifier: KeyVerifier, *, provider_id: str, api_key: str) -> ProbeResult:
+    """用一个**已经构造好**的验证器测试连接（文本自定义端点用）。
+
+    自定义端点不在目录里，`_verifier()` 造不出它；而测试连接必须和正式调用是
+    同一个适配器、同一个地址。真探测时直接调它的 `verify_key()`，
+    `ENV=test` 时仍然走 Mock——测试环境不打任何用户填的地址。
+    """
+    prober = get_prober()
+
+    async def _call() -> str:
+        if isinstance(prober, LiveProber):
+            return await verifier.verify_key()
+        return await prober.probe(provider_id=provider_id, api_key=api_key)
+
+    return await _conclude(_call, provider_id=provider_id, api_key=api_key)
+
+
+async def _conclude(
+    call: Callable[[], Awaitable[str]], *, provider_id: str, api_key: str
+) -> ProbeResult:
     try:
-        message = await get_prober().probe(provider_id=provider_id, api_key=api_key)
+        message = await call()
     except AppError as exc:
         # 日志只记错误码：message 里可能带着上游回显的密钥材料
         log.info("probe.failed", provider=provider_id, code=exc.code)

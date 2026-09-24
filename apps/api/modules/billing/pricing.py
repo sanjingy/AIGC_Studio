@@ -16,10 +16,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from adapters.providers.base import KeySource
 from apps.api.core.logging import get_logger
-from apps.api.modules.billing import credentials
 from apps.api.modules.billing import service as billing_service
 from apps.api.modules.billing.models import ModelPricing
+from apps.api.modules.gateway import upstreams
+from apps.api.modules.project import service as project_service
 
 log = get_logger(__name__)
 
@@ -106,16 +108,35 @@ async def _platform_unit_price(db: AsyncSession, shape: _Shape, cfg: dict[str, i
 
 
 async def uses_own_key(
-    db: AsyncSession, *, org_id: uuid.UUID | None, capability: str | None
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID | None,
+    capability: str | None,
+    project_id: uuid.UUID | None = None,
 ) -> bool:
     """这次调用是不是走用户自己的 Key。
 
     org_id 缺省（内部估价、无租户上下文）时一律按平台档算——
     宁可估高，也不要在拿不准的时候给出折扣价。
+
+    判定与 Gateway 调用时是**同一个** `upstreams.decide`：组织默认显式选的
+    计费来源、项目覆盖选中的那家、没选过时"这家有没有 Key"。给了
+    `project_id` 就把项目这一层也算进去——项目把文本改到自定义端点、
+    组织默认却是平台额度时，两边各算各的就会一边按全价扣、一边用他的 Key。
     """
     if org_id is None or capability is None:
         return False
-    return await credentials.has_own_key(db, org_id=org_id, capability=capability)
+    preference = (
+        await project_service.get_model_preference(
+            db, org_id=org_id, project_id=project_id, capability=capability
+        )
+        if project_id is not None
+        else None
+    )
+    source = await upstreams.effective_key_source(
+        db, org_id=org_id, capability=capability, project_preference=preference
+    )
+    return source is KeySource.ORG
 
 
 async def estimate(
@@ -124,6 +145,7 @@ async def estimate(
     task_type: str,
     payload: dict[str, Any],
     org_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> int:
     """估算任务成本，返回 Credits。
 
@@ -139,7 +161,7 @@ async def estimate(
     """
     cfg = await billing_service.rules(db)
     shape = _shape(task_type, payload)
-    byok = await uses_own_key(db, org_id=org_id, capability=shape.capability)
+    byok = await uses_own_key(db, org_id=org_id, capability=shape.capability, project_id=project_id)
 
     unit = cfg["byok_unit_credits"] if byok else await _platform_unit_price(db, shape, cfg)
     base = unit * shape.units

@@ -11,6 +11,7 @@ import {
   type Render,
   type RenderSource,
   type TaskStatus,
+  stageError,
 } from "@/lib/api";
 import { preparedPromptRunId } from "@/lib/freeflow/prepared-prompts";
 import { useProjectEvents } from "@/lib/useProjectEvents";
@@ -85,7 +86,12 @@ export function useRenders(projectId: string | null) {
   const reload = useCallback(async () => {
     if (!projectId) return;
     try {
-      setRows(await projects.renders(projectId));
+      const got = await projects.renders(projectId);
+      // 接口按契约给数组。真给了别的（上游改形状、网关塞了个错误对象、
+      // 或者像验收 mock 那样对没有产出的项目回 `{}`），下面的
+      // `rows.some` / `for...of` 会直接把**整个分镜页**打成运行时白屏——
+      // 而这一页上还有确认门和出图入口。宁可当成"还没有出图记录"。
+      setRows(Array.isArray(got) ? got : []);
     } catch (e) {
       setError(e instanceof ApiRequestError ? e.error.user_message : "读取出图记录失败");
     }
@@ -300,9 +306,14 @@ export function useRenders(projectId: string | null) {
         key,
         async () => {
           const assetId = await assets.upload(file, projectId);
-          return subject.kind === "character"
-            ? projects.setCharacterPortrait(projectId, subject.ref, assetId)
-            : projects.setSceneReference(projectId, subject.ref, assetId);
+          try {
+            return await (subject.kind === "character"
+              ? projects.setCharacterPortrait(projectId, subject.ref, assetId)
+              : projects.setSceneReference(projectId, subject.ref, assetId));
+          } catch (e) {
+            // 图已经进了资产库，只是没钉上：说清楚，别让用户以为要重新上传
+            throw stageError(e, "bind");
+          }
         },
         "上传失败",
       );

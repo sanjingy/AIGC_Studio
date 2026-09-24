@@ -61,13 +61,51 @@ SPECS: tuple[ProviderSpec, ...] = (
 )
 
 
-def provider_of() -> dict[str, str]:
-    """能力 → 由哪家提供。
+# 文本能力的 OpenAI 兼容自定义端点（ADR-031 第 5 条的唯一例外，05_MODEL_GATEWAY.md §5.2）。
+#
+# **它不进 `SPECS`**：`SPECS` 是进程级常量，自定义端点是每个 org 一份、
+# 随时会改的数据（`org_text_endpoints`）。这里只给它一个固定的 id 和展示名，
+# 让目录 DTO、组织默认、项目偏好三处都能用同一个串指代它。
+# 能力写死成文本：视频和 TTS 没有"填个 URL 就能用"的事实标准，做了就是假入口。
+CUSTOM_TEXT_PROVIDER_ID = "provider.custom.text"
+CUSTOM_TEXT_CAPABILITY = "text_generation"
+CUSTOM_TEXT_LABEL = "OpenAI 兼容自定义端点"
 
-    一个能力目前只对一家：用户不需要在设置页选 Provider。多家并存要等
-    "同能力多 Provider 的 BYOK"，那时这里返回的就不再是单值了。
+
+def providers_for(capability: str) -> tuple[ProviderSpec, ...]:
+    """这个能力下所有**真有适配器**的 Provider，按 `SPECS` 里的书写顺序。
+
+    同一能力允许多家并存：设置页按这份列表给用户选上游，Gateway 按同一份
+    列表建路由。第一家是"组织和项目都没选时"的平台默认。
     """
-    return {spec.capability: spec.provider_id for spec in SPECS}
+    return tuple(spec for spec in SPECS if spec.capability == capability)
+
+
+def default_provider(capability: str) -> ProviderSpec | None:
+    specs = providers_for(capability)
+    return specs[0] if specs else None
+
+
+def provider_of() -> dict[str, str]:
+    """能力 → **平台默认**由哪家提供。
+
+    同能力多 Provider 之后这不再是"唯一的那一家"，只是"没人选时用哪家"。
+    `configurable_capabilities` 与旧的单 Provider 凭证接口仍然按它取默认值。
+    """
+    out: dict[str, str] = {}
+    for spec in SPECS:
+        out.setdefault(spec.capability, spec.provider_id)
+    return out
+
+
+def supports_custom_endpoint(capability: str) -> bool:
+    return capability == CUSTOM_TEXT_CAPABILITY
+
+
+def provider_label(provider_id: str) -> str:
+    if provider_id == CUSTOM_TEXT_PROVIDER_ID:
+        return CUSTOM_TEXT_LABEL
+    return labels().get(provider_id, provider_id)
 
 
 def labels() -> dict[str, str]:
@@ -125,18 +163,35 @@ MODEL_LABELS: dict[str, tuple[str, str]] = {
 
 
 def spec_for_capability(capability: str) -> ProviderSpec | None:
-    for spec in SPECS:
-        if spec.capability == capability:
-            return spec
-    return None
+    """平台默认那一家。保留这个名字给只关心"默认"的旧调用方。"""
+    return default_provider(capability)
 
 
-def model_ids(capability: str) -> tuple[str, ...]:
-    """这个能力下所有可选的模型 id，按优先级排好。
+def model_ids(capability: str, provider_id: str | None = None) -> tuple[str, ...]:
+    """这个能力下所有可选的模型 id，按 Provider 顺序、再按优先级排好。
 
     "用户能选哪些模型"和"Gateway 会试哪些模型"必须是同一份列表——
     分家的下场是设置页存下一个路由表里根本没有的 id，
     偏好静默失效而没有任何人知道。
+
+    给了 `provider_id` 就只列那一家的：组织默认要校验"这个模型属于你选的
+    这家"，不能拿 A 家的模型名配 B 家的 Key。
     """
-    spec = spec_for_capability(capability)
-    return tuple(model for model, _ in spec.models) if spec else ()
+    out: list[str] = []
+    for spec in providers_for(capability):
+        if provider_id is not None and spec.provider_id != provider_id:
+            continue
+        out.extend(model for model, _ in spec.models)
+    return tuple(out)
+
+
+def provider_for_model(capability: str, model_id: str) -> ProviderSpec | None:
+    """这个模型 id 属于哪一家。旧的项目偏好只存了模型 id，靠它反查 Provider。
+
+    目录里同一能力下的模型 id 不允许重名（`test_catalog_model_ids_unique`），
+    否则这里的答案就不唯一了。
+    """
+    for spec in providers_for(capability):
+        if any(model == model_id for model, _ in spec.models):
+            return spec
+    return None

@@ -17,18 +17,18 @@ export function ScreenplayView({
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <p className="text-sm text-fg-muted">{String(data.synopsis ?? "")}</p>
+      <p className="max-w-[68ch] text-sm leading-6 text-fg-muted">{String(data.synopsis ?? "")}</p>
       {episodes.map((ep: any) => (
         <div key={ep.index} className="flex flex-col gap-2">
           <div className="text-sm font-medium">
             第 {ep.index} 集 {ep.title}
           </div>
           {(ep.scenes ?? []).map((sc: any) => (
-            <div key={sc.id} className="rounded-md bg-surface-2 px-2.5 py-2">
+            <div key={sc.id} className="ff-paper-scene bg-surface-2 px-3 py-2.5">
               <div className="text-xs text-fg-subtle">
                 {sc.id}　【{sc.location} - {sc.time_mood}】
               </div>
-              <div className="mt-1 flex flex-col gap-0.5 text-xs">
+              <div className="mt-1.5 flex max-w-[68ch] flex-col gap-1 text-xs leading-6">
                 {(sc.beats ?? []).map((b: any, i: number) => (
                   <p key={i} className="text-fg-muted">
                     {b.kind === "action" && `△${b.text}`}
@@ -60,5 +60,5 @@ export function ScreenplayView({
 }
 
 export function screenplayMeta(data: any): string {
-  return `《${data.title ?? ""}》 · ${data.episodes?.length ?? 0} 集 · 覆盖 ${data.node_coverage?.length ?? 0} 个节点`;
+  return `《${data.title ?? ""}》，${data.episodes?.length ?? 0} 集，覆盖 ${data.node_coverage?.length ?? 0} 个节点`;
 }

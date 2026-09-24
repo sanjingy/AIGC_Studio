@@ -6,12 +6,16 @@ import { Loader2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ApiRequestError,
+  CUSTOM_TEXT_PROVIDER_ID,
   modelCatalog,
+  modelConfig,
+  type CapabilityConfig,
   projects,
   type CapabilityModels,
   type LockVariables,
   type LockVariablesPatch,
   type Project,
+  type StyleOption,
 } from "@/lib/api";
 import { useLockVariables } from "@/lib/freeflow/use-lock-variables";
 import { cn } from "@/lib/utils";
@@ -29,6 +33,11 @@ const ADAPTATION_LABEL: Record<string, string> = { adapt: "改编", rewrite: "�
 
 /**
  * 06 项目设置（需求文档「屏幕 07 分区表」）。
+ *
+ * **版式是账本，不是一叠卡片。** 设置页天然是「一栏名字、一栏当前值、
+ * 一栏能不能改」的三列结构——四个分组各自一本账（`.ff-ledger`），
+ * 一行一项。上一版把每组塞进一张同样大小的圆角卡片里，读的时候要在
+ * 四张长得一样的卡片之间数自己看到哪了。
  *
  * 这一页的关键不是把设计稿的表单画像，而是**别画出后端没有的东西**：
  * `projects` 表只有 title / route_type / status / budget_cap_credits /
@@ -49,8 +58,8 @@ const ADAPTATION_LABEL: Record<string, string> = { adapt: "改编", rewrite: "�
  *
  * 两处克制：
  * - **只按能力给下拉，不编"经济/标准/高质"三档。** ADR-024 说面向用户的
- *   应该是档位而不是模型 id，但"档位→模型"那张映射表还没建。每个能力现在
- *   只有两个真实模型，硬凑出一个不存在的"标准档"是往界面上加假东西。
+ *   应该是档位而不是模型 id，但"档位→模型"那张映射表还没建。硬凑出一个
+ *   不存在的"标准档"是往界面上加假东西。
  * - **没接入的能力（视频、语音）不给下拉框**，照实说未接入，原因由后端给。
  */
 
@@ -105,48 +114,40 @@ export function ProjectSettings({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[640px] flex-col gap-4 p-6">
-      <h1 className="text-sm font-semibold text-fg">项目设置</h1>
+    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 p-6">
+      <h1 className="text-lg font-semibold tracking-tight text-fg">项目设置</h1>
 
-      <RenameCard project={project} />
+      <ProjectFileCard project={project} />
 
       <LockVariablesCard projectId={projectId} />
 
-      <div className="grid gap-3 rounded-lg border border-border bg-surface p-4 sm:grid-cols-2">
-        <ReadOnlyField
-          label="项目类型"
-          value={project?.route_type ?? "未判定"}
-          hint="真实值，来自 projects.route_type（由 Router Agent 判定，不由用户选）。"
-        />
-        <ReadOnlyField
-          label="记录状态"
-          value={project?.status ?? "—"}
-          hint="真实值，来自 projects.status。注意编排器目前不推进这一列（决策记录 §11.5 裁决 1），生产阶段以概览页显示的为准。"
-        />
-      </div>
-
       <ModelPreferenceCard project={project} />
 
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/35 p-4">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-fg">删除项目</div>
-          <div className="mt-0.5 text-xs text-fg-subtle">
-            软删除：从列表中移除，产出数据不会立刻物理清除（跟 Skill 删除是同一套模式）
-          </div>
+      <section className="ff-ledger border-danger/35">
+        <div className="ff-ledger-head border-danger/25 bg-danger-soft text-danger">
+          <h2 className="text-danger">危险操作</h2>
         </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="border-danger text-danger"
-          onClick={() => {
-            setTyped("");
-            setDeleteError(null);
-            setConfirmDelete(true);
-          }}
-        >
-          删除项目
-        </Button>
-      </div>
+        <div className="ff-ledger-row">
+          <div className="ff-ledger-val">
+            <div className="text-sm font-medium text-fg">删除项目</div>
+            <div className="mt-0.5 text-xs text-fg-subtle">
+              软删除：从列表中移除，产出数据不会立刻物理清除（跟 Skill 删除是同一套模式）
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="shrink-0 border-danger text-danger"
+            onClick={() => {
+              setTyped("");
+              setDeleteError(null);
+              setConfirmDelete(true);
+            }}
+          >
+            删除项目
+          </Button>
+        </div>
+      </section>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -182,14 +183,37 @@ export function ProjectSettings({
   );
 }
 
+/** 账本里的一行：左边是项名，右边是值或控件。 */
+function LedgerRow({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="ff-ledger-row" data-form="true">
+      <div className="ff-ledger-key pt-1.5">{label}</div>
+      <div className="ff-ledger-val">
+        {children}
+        {hint && <p className="mt-1 text-xs leading-5 text-fg-subtle">{hint}</p>}
+      </div>
+    </div>
+  );
+}
+
 /**
- * 改项目名。`PATCH /projects/{id}` 一直都在，只是之前没封装出来，
- * 这一页就一直写着"重命名接口未接入"。
+ * 项目档案：能改的名字和两个只读真值放同一本账里。
+ *
+ * 之前是两块——一张"重命名"卡 + 一张两列的只读网格。它们说的是同一件事
+ * （这个项目是什么），分成两张卡只是因为一个有按钮、一个没有。
  *
  * 保存后**不做乐观更新**：拿后端返回的那一版覆盖本地输入框，
  * 服务端 trim 过的标题才是真值。
  */
-function RenameCard({ project }: { project: Project | null }) {
+function ProjectFileCard({ project }: { project: Project | null }) {
   const [title, setTitle] = useState(project?.title ?? "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -219,35 +243,49 @@ function RenameCard({ project }: { project: Project | null }) {
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-fg">项目名称</span>
-        <input
-          value={title}
-          maxLength={200}
-          disabled={!project || saving}
-          onChange={(e) => {
-            setTitle(e.target.value);
-            setSaved(false);
-          }}
-          className="h-8 rounded-md border border-border-strong bg-bg px-2.5 text-sm text-fg"
-        />
-      </label>
-      <div className="flex items-center gap-2">
-        <Button size="sm" variant="primary" disabled={!dirty || saving} onClick={() => void save()}>
-          {saving ? "保存中…" : "保存名称"}
-        </Button>
-        {saved && !dirty && <span className="text-xs text-success">已保存</span>}
+    <section className="ff-ledger">
+      <div className="ff-ledger-head">
+        <h2>项目档案</h2>
       </div>
-      {error && (
-        <p role="alert" className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
-          {error}
-        </p>
-      )}
-    </div>
+
+      <LedgerRow label="项目名称">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={title}
+            maxLength={200}
+            disabled={!project || saving}
+            aria-label="项目名称"
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setSaved(false);
+            }}
+            className="h-8 min-w-0 flex-1 rounded-md border border-border-strong bg-bg px-2.5 text-sm text-fg"
+          />
+          <Button size="sm" variant="primary" disabled={!dirty || saving} onClick={() => void save()}>
+            {saving ? "保存中…" : "保存名称"}
+          </Button>
+          {saved && !dirty && <span className="text-xs text-success">已保存</span>}
+        </div>
+        {error && (
+          <p role="alert" className="mt-1.5 rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
+            {error}
+          </p>
+        )}
+      </LedgerRow>
+
+      <ReadOnlyRow
+        label="项目类型"
+        value={project?.route_type ?? "未判定"}
+        hint="真实值，来自 projects.route_type（由 Router Agent 判定，不由用户选）。"
+      />
+      <ReadOnlyRow
+        label="记录状态"
+        value={project?.status ?? "—"}
+        hint="真实值，来自 projects.status。注意编排器目前不推进这一列（决策记录 §11.5 裁决 1），生产阶段以概览页显示的为准。"
+      />
+    </section>
   );
 }
-
 
 // ---------------------------------------------------------------- 锁定变量（ADR-037）
 
@@ -274,6 +312,21 @@ function LockVariablesCard({ projectId }: { projectId: string }) {
   const set = (field: LockField, value: string) =>
     setEdits((prev) => ({ ...prev, [field]: value }));
 
+  /*
+   * 两个目录字段都可能缺。
+   *
+   * 契约上它们是必填的，实际上不是：任何一个答了 200 但少给这两项的响应
+   * （代理、旧版本后端、被裁剪过的缓存）都会让 `saved.style_options.map`
+   * 抛 `Cannot read properties of undefined`，整页白屏——这就是
+   * UI_REDESIGN_0921 那条一直没定位的 pageerror。
+   *
+   * 兜底值与门① 一致（`plan-gate.tsx` 早就这么做了）：画风没目录就只留
+   * 「未选」，改编模式退回两个后端常量。宁可少一个下拉选项，也不能因为
+   * 少一个字段让整个设置页打不开——这一页上还有删除项目和改名。
+   */
+  const styleOptions: StyleOption[] = saved?.style_options ?? [];
+  const adaptationOptions: string[] = saved?.adaptation_options ?? ["adapt", "rewrite"];
+
   const patch: LockVariablesPatch = {};
   for (const field of LOCK_FIELDS) {
     const next = edits[field];
@@ -282,129 +335,137 @@ function LockVariablesCard({ projectId }: { projectId: string }) {
   const dirty = Object.keys(patch).length > 0;
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="text-sm font-medium text-fg">锁定变量</h2>
-          <p className="mt-0.5 text-xs leading-5 text-fg-subtle">
-            「开拍前确认」那道门定下的三件事。改动只影响还没跑的阶段，已经生成的内容不会变。
-          </p>
-        </div>
+    <section className="ff-ledger">
+      <div className="ff-ledger-head">
+        <h2>锁定变量</h2>
         <OriginBadge lock={saved} />
       </div>
+      <p className="ff-ledger-note">
+        「开拍前确认」那道门定下的几件事。改动只影响还没跑的阶段，已经生成的内容不会变。
+      </p>
 
-      {lock.loading && <div className="rf-skeleton h-24 rounded-md" />}
+      {lock.loading && (
+        <div className="px-4 py-4">
+          <div className="rf-skeleton h-24 rounded-[2px]" />
+        </div>
+      )}
 
       {lock.error && (
-        <p role="alert" className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
+        <p role="alert" className="mx-4 my-3 rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
           {lock.error}
         </p>
       )}
 
-      {saved?.legacy_unconfirmed && <LegacyNotice />}
+      {saved?.legacy_unconfirmed && (
+        <div className="px-4 pt-3">
+          <LegacyNotice />
+        </div>
+      )}
 
       {saved && !lock.loading && (
         <>
-          <div className="grid gap-2.5 sm:grid-cols-3">
-            <TextRow
-              label="时代背景"
-              value={valueOf("era")}
-              disabled={lock.saving}
-              onChange={(v) => set("era", v)}
-            />
-            <TextRow
-              label="国别 / 地区"
-              value={valueOf("region")}
-              disabled={lock.saving}
-              onChange={(v) => set("region", v)}
-            />
-            <TextRow
-              label="人种"
-              value={valueOf("ethnicity")}
-              disabled={lock.saving}
-              onChange={(v) => set("ethnicity", v)}
-            />
-          </div>
-          {saved.era_evidence && (
-            <p className="text-xs leading-5 text-fg-subtle">
-              判定依据（原文证据）：{saved.era_evidence}
-            </p>
-          )}
+          <LedgerRow
+            label="时代 / 地区 / 人种"
+            hint={saved.era_evidence ? `判定依据（原文证据）：${saved.era_evidence}` : undefined}
+          >
+            <div className="grid gap-2 sm:grid-cols-3">
+              <TextRow
+                label="时代背景"
+                value={valueOf("era")}
+                disabled={lock.saving}
+                onChange={(v) => set("era", v)}
+              />
+              <TextRow
+                label="国别 / 地区"
+                value={valueOf("region")}
+                disabled={lock.saving}
+                onChange={(v) => set("region", v)}
+              />
+              <TextRow
+                label="人种"
+                value={valueOf("ethnicity")}
+                disabled={lock.saving}
+                onChange={(v) => set("ethnicity", v)}
+              />
+            </div>
+          </LedgerRow>
 
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-fg">画风</span>
+          <LedgerRow
+            label="画风"
+            hint="第一张图生成之后画风就冻结了；那之后再改要重出全部已生成的画面，后端会拒绝。"
+          >
             <select
+              aria-label="画风"
               value={valueOf("style_key")}
               disabled={lock.saving}
               onChange={(e) => set("style_key", e.target.value)}
-              className="h-8 rounded-md border border-border-strong bg-bg px-2 text-sm text-fg"
+              className="h-8 w-full rounded-md border border-border-strong bg-bg px-2 text-sm text-fg"
             >
               <option value="">未选（按目录缺省）</option>
-              {saved.style_options.map((option) => (
+              {styleOptions.map((option) => (
                 <option key={option.key} value={option.key}>
                   {option.name}
                 </option>
               ))}
             </select>
-            <span className="text-xs leading-5 text-fg-subtle">
-              第一张图生成之后画风就冻结了；那之后再改要重出全部已生成的画面，后端会拒绝。
-            </span>
-          </label>
+          </LedgerRow>
 
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-fg">改编模式</span>
+          <LedgerRow
+            label="改编模式"
+            hint="只影响还没跑的剧本阶段。已经生成的剧本不会因为改这里而重写。"
+          >
             <select
+              aria-label="改编模式"
               value={valueOf("adaptation_mode")}
               disabled={lock.saving}
               onChange={(e) => set("adaptation_mode", e.target.value)}
-              className="h-8 rounded-md border border-border-strong bg-bg px-2 text-sm text-fg"
+              className="h-8 w-full rounded-md border border-border-strong bg-bg px-2 text-sm text-fg"
             >
-              {saved.adaptation_options.map((mode) => (
+              {adaptationOptions.map((mode) => (
                 <option key={mode} value={mode}>
                   {ADAPTATION_LABEL[mode] ?? mode}
                 </option>
               ))}
             </select>
-            <span className="text-xs leading-5 text-fg-subtle">
-              只影响还没跑的剧本阶段。已经生成的剧本不会因为改这里而重写。
-            </span>
-          </label>
+          </LedgerRow>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={!dirty || lock.saving}
-              onClick={() =>
-                void lock.save(patch).then((ok) => {
-                  if (ok) setEdits({});
-                })
-              }
-            >
-              {lock.saving && <Loader2 aria-hidden className="size-3.5 animate-spin" />}
-              保存锁定变量
-            </Button>
-            <span className="text-xs text-fg-subtle">
-              {saved.confirmed_at
-                ? `门① 确认于 ${new Date(saved.confirmed_at).toLocaleString("zh-CN")}`
-                : "门① 还没有确认过"}
-              {saved.anchors_confirmed_at
-                ? ` · 门③ 确认于 ${new Date(saved.anchors_confirmed_at).toLocaleString("zh-CN")}`
-                : ""}
-            </span>
+          <div className="ff-ledger-row" data-form="true">
+            <div className="ff-ledger-key pt-1.5" />
+            <div className="ff-ledger-val flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={!dirty || lock.saving}
+                onClick={() =>
+                  void lock.save(patch).then((ok) => {
+                    if (ok) setEdits({});
+                  })
+                }
+              >
+                {lock.saving && <Loader2 aria-hidden className="size-3.5 animate-spin" />}
+                保存锁定变量
+              </Button>
+              <span className="text-xs text-fg-subtle">
+                {saved.confirmed_at
+                  ? `门① 确认于 ${new Date(saved.confirmed_at).toLocaleString("zh-CN")}`
+                  : "门① 还没有确认过"}
+                {saved.anchors_confirmed_at
+                  ? `，门③ 确认于 ${new Date(saved.anchors_confirmed_at).toLocaleString("zh-CN")}`
+                  : ""}
+              </span>
+              {lock.saveError && (
+                <p
+                  role="alert"
+                  className="w-full rounded-md bg-danger-soft px-2.5 py-1.5 text-xs leading-5 text-danger"
+                >
+                  {lock.saveError}
+                </p>
+              )}
+            </div>
           </div>
-
-          {lock.saveError && (
-            <p
-              role="alert"
-              className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs leading-5 text-danger"
-            >
-              {lock.saveError}
-            </p>
-          )}
         </>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -412,13 +473,13 @@ function LockVariablesCard({ projectId }: { projectId: string }) {
 function OriginBadge({ lock }: { lock: LockVariables | null }) {
   if (!lock) return null;
   const copy: Record<string, { label: string; tone: string }> = {
-    detected: { label: "系统判定", tone: "bg-surface-2 text-fg-muted" },
+    detected: { label: "系统判定", tone: "bg-surface-3 text-fg-muted" },
     confirmed: { label: "你确认过", tone: "bg-success-soft text-success" },
     migrated: { label: "迁移补的", tone: "bg-rf-agent-soft text-rf-agent" },
   };
   const row = copy[lock.origin] ?? copy.detected!;
   return (
-    <span className={cn("shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold", row.tone)}>
+    <span className={cn("shrink-0 rounded-[2px] px-2 py-1 text-[10px] font-semibold", row.tone)}>
       {row.label}
     </span>
   );
@@ -437,7 +498,7 @@ function TextRow({
 }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-xs font-medium text-fg">{label}</span>
+      <span className="text-xs text-fg-subtle">{label}</span>
       <input
         value={value}
         disabled={disabled}
@@ -448,27 +509,21 @@ function TextRow({
   );
 }
 
-/** 只读字段。`mock` 那条分支已经删了——这一页不再有示例值。 */
-function ReadOnlyField({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-}) {
+/** 只读一行。`mock` 那条分支已经删了——这一页不再有示例值。 */
+function ReadOnlyRow({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="flex items-center gap-1 text-xs font-medium text-fg">
+    <div className="ff-ledger-row" data-form="true">
+      <div className="ff-ledger-key flex items-center gap-1 pt-1.5">
         {label}
         <Lock aria-hidden className="size-3 text-fg-subtle" />
         <span className="sr-only">（只读）</span>
-      </span>
-      <div className="flex h-8 items-center rounded-md border border-border bg-surface-2 px-2.5 text-sm text-fg-muted">
-        {value}
       </div>
-      {hint && <span className="text-xs text-fg-subtle">{hint}</span>}
+      <div className="ff-ledger-val">
+        <div className="flex h-8 items-center rounded-md border border-border bg-surface-2 px-2.5 text-sm text-fg-muted">
+          {value}
+        </div>
+        {hint && <p className="mt-1 text-xs leading-5 text-fg-subtle">{hint}</p>}
+      </div>
     </div>
   );
 }
@@ -488,12 +543,19 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  /** 组织层配置：用来写清"跟随组织默认"是谁，以及文本有没有自定义端点可选 */
+  const [org, setOrg] = useState<CapabilityConfig[]>([]);
 
   useEffect(() => {
     modelCatalog
       .list()
       .then((r) => setItems(r.items))
       .catch(() => setLoadFailed(true));
+    modelConfig
+      .get()
+      .then((r) => setOrg(r.items))
+      // 拿不到组织层只影响两句说明文字，选择本身仍然可用
+      .catch(() => setOrg([]));
   }, []);
 
   useEffect(() => {
@@ -522,80 +584,104 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
 
   if (loadFailed) {
     return (
-      <div className="rounded-lg border border-border bg-surface p-4">
-        <div className="text-sm font-medium text-fg">默认模型</div>
-        <p className="mt-1 text-xs text-fg-subtle">
+      <section className="ff-ledger">
+        <div className="ff-ledger-head">
+          <h2>默认模型</h2>
+        </div>
+        <p className="ff-ledger-empty">
           模型目录加载失败，暂时改不了。已经存下的偏好不受影响，生成仍按它执行。
         </p>
-      </div>
+      </section>
     );
   }
 
   return (
-    <div className="flex flex-col gap-3.5 rounded-lg border border-border bg-surface p-4">
-      <div>
-        <div className="text-sm font-medium text-fg">默认模型</div>
-        <p className="mt-1 text-xs leading-5 text-fg-subtle">
-          只对这个项目生效。不选就跟随系统默认档；选中的模型出故障时仍会自动
-          切到同能力的下一个，不会因为选过一次就把容错关掉。
-        </p>
+    <section className="ff-ledger">
+      <div className="ff-ledger-head">
+        <h2>默认模型</h2>
+        <span className="font-normal">只对这个项目生效</span>
       </div>
+      <p className="ff-ledger-note">
+        不选就跟随系统默认档；选中的模型出故障时仍会自动切到同能力的下一个，
+        不会因为选过一次就把容错关掉。
+      </p>
 
-      {!items && <p className="text-xs text-fg-subtle">加载中…</p>}
+      {!items && <p className="ff-ledger-empty">加载中…</p>}
 
-      {items?.map((item) =>
+      {(items ?? []).map((item) =>
         item.available ? (
-          <label key={item.capability} className="flex flex-col gap-1">
-            <span className="flex items-center gap-1.5 text-xs font-medium text-fg">
-              {item.label}
+          <LedgerRow
+            key={item.capability}
+            label={item.label}
+            hint={
+              // 档位说明只讲模型定位，不讲价格——价格在 model_pricing 表里，
+              // 写死在前端的"更便宜"等上游调价就变成谎话
+              (item.models ?? []).find((m) => m.model_id === preference[item.capability])?.note ??
+              `由 ${item.provider_label} 提供，共 ${(item.models ?? []).length} 档`
+            }
+          >
+            <div className="flex items-center gap-2">
+              <select
+                aria-label={`${item.label}使用的模型`}
+                value={preference[item.capability] ?? FOLLOW_DEFAULT}
+                disabled={!project || saving !== null}
+                onChange={(e) => void choose(item.capability, e.target.value)}
+                className={cn(
+                  "h-8 w-full cursor-pointer rounded-md border border-border-strong bg-surface px-2 text-sm text-fg",
+                  "transition-colors duration-150 hover:border-fg-subtle",
+                  "disabled:cursor-not-allowed disabled:opacity-45",
+                )}
+              >
+                <option value={FOLLOW_DEFAULT}>{followLabel(item, org)}</option>
+                {(item.models ?? []).map((m) => (
+                  <option key={m.model_id} value={m.model_id}>
+                    {m.label}　{m.model_id}
+                  </option>
+                ))}
+                {/* 自定义端点只在组织真的配了时出现：没配的选项选了只会在生成时报错 */}
+                {(() => {
+                  const ep = org.find((o) => o.capability === item.capability)?.custom_endpoint;
+                  return ep ? (
+                    <option value={CUSTOM_TEXT_PROVIDER_ID}>
+                      自定义端点　{ep.label} · {ep.model_id}
+                    </option>
+                  ) : null;
+                })()}
+              </select>
               {saving === item.capability && (
-                <Loader2 aria-hidden className="size-3 animate-spin text-fg-subtle" />
+                <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-fg-subtle" />
               )}
-            </span>
-            <select
-              value={preference[item.capability] ?? FOLLOW_DEFAULT}
-              disabled={!project || saving !== null}
-              onChange={(e) => void choose(item.capability, e.target.value)}
-              className={cn(
-                "h-8 w-full cursor-pointer rounded-md border border-border-strong bg-surface px-2 text-sm text-fg",
-                "transition-colors duration-150 hover:border-fg-subtle",
-                "disabled:cursor-not-allowed disabled:opacity-45",
-              )}
-            >
-              <option value={FOLLOW_DEFAULT}>
-                跟随系统默认
-                {item.default_model_id ? `（${item.default_model_id}）` : ""}
-              </option>
-              {item.models.map((m) => (
-                <option key={m.model_id} value={m.model_id}>
-                  {m.label} · {m.model_id}
-                </option>
-              ))}
-            </select>
-            {/* 档位说明只讲模型定位，不讲价格——价格在 model_pricing 表里，
-                写死在前端的"更便宜"等上游调价就变成谎话 */}
-            <span className="text-xs leading-5 text-fg-subtle">
-              {item.models.find((m) => m.model_id === preference[item.capability])?.note ??
-                `由 ${item.provider_label} 提供，共 ${item.models.length} 档`}
-            </span>
-          </label>
+            </div>
+          </LedgerRow>
         ) : (
-          <div key={item.capability} className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-fg-muted">{item.label}</span>
+          <LedgerRow key={item.capability} label={item.label} hint={item.unavailable_reason ?? undefined}>
             {/* 不给下拉框。选了不生效的控件比没有控件更糟。 */}
             <div className="flex h-8 items-center rounded-md border border-dashed border-border-strong bg-surface-2 px-2.5 text-sm text-fg-subtle">
               暂未接入
             </div>
-            <span className="text-xs leading-5 text-fg-subtle">{item.unavailable_reason}</span>
-          </div>
+          </LedgerRow>
         ),
       )}
 
       {error && (
-        <p role="alert" className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
+        <p role="alert" className="mx-4 my-3 rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
           {error}
         </p>
       )}
-    </div>
+    </section>
   );
+}
+
+/**
+ * "不单独设置"时实际会用谁。组织层保存过就写组织默认，没保存过写平台目录默认——
+ * 两者都来自后端，前端不猜。
+ */
+function followLabel(item: CapabilityModels, org: CapabilityConfig[]): string {
+  const cfg = org.find((o) => o.capability === item.capability);
+  const sel = cfg?.selection;
+  if (sel?.layer === "org") {
+    const provider = cfg?.providers.find((p) => p.provider_id === sel.provider_id);
+    return `跟随组织默认（${provider?.label ?? sel.provider_id} · ${sel.model_id ?? provider?.default_model_id ?? "目录顺序"}）`;
+  }
+  return `跟随系统默认${item.default_model_id ? `（${item.default_model_id}）` : ""}`;
 }

@@ -15,6 +15,11 @@ export interface StageState {
   key: StageKey;
   label: string;
   state: "locked" | "ready" | "approved" | "active" | "pending";
+  /**
+   * 点这一段去哪看它的内容。由项目工作台统一生成（`stage-links.ts::stageHref`），
+   * 组件和 CSS 不猜 project id。五段都有，锁定的也有——点击只是查看，不改生产状态。
+   */
+  href: string;
 }
 
 export interface NavItem {
@@ -41,11 +46,13 @@ const ASIDE_PINNED_QUERY = "(min-width: 80rem)";
  * 靠继承往下发，所以壳内的弹窗也不能 portal 到 body。
  */
 export function WorkbenchShell(props: {
-  project: { id: string; title: string; subtitle?: string; savedAgo?: string };
+  project: { id: string; title: string; subtitle?: string; savedAgo?: string; shots?: number };
   navigation: NavItem[];
   utilityNavigation: NavItem[];
   activeHref: string;
   stages: StageState[];
+  /** 正在查看的是哪一段（与生产状态无关），没有对应段时不传 */
+  viewingStage?: StageKey | null;
   primaryAction?: {
     label: string;
     onClick: () => void;
@@ -92,6 +99,7 @@ export function WorkbenchShell(props: {
         <WorkbenchHeader
           project={project}
           stages={stages}
+          viewingStage={props.viewingStage ?? null}
           primaryAction={primaryAction}
           asideToggle={
             aside

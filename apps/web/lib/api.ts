@@ -5,6 +5,8 @@
  * `credentials: "include"`，不做任何 token 存取。
  */
 
+import { UPLOAD_STAGE_CODES, uploadStageMessage, type UploadStage } from "./upload-stage";
+
 export type ApiError = {
   code: string;
   message: string;
@@ -1036,6 +1038,22 @@ export type Library = {
   folders: AssetFolder[];
 };
 
+/**
+ * 把上传某一段的失败包成带阶段码的 `ApiRequestError`。**不带上传地址或 Key**：
+ * `message` 只放阶段与状态码，`user_message` 是给人看的那句。
+ */
+export function stageError(cause: unknown, stage: UploadStage, status?: number): ApiRequestError {
+  const backend = cause instanceof ApiRequestError ? cause.error : null;
+  const httpStatus = cause instanceof ApiRequestError ? cause.status : (status ?? 0);
+  return new ApiRequestError(httpStatus, {
+    code: UPLOAD_STAGE_CODES[stage],
+    message: `upload stage ${stage} failed${status ? ` (HTTP ${status})` : ""}${backend ? ` [${backend.code}]` : ""}`,
+    user_message: uploadStageMessage({ stage, backendMessage: backend?.user_message, status }),
+    retryable: true,
+    trace_id: backend?.trace_id ?? "",
+  });
+}
+
 export const assets = {
   /**
    * 不带 folderId 是"全部"视图；带上就只列那个文件夹里的东西。
@@ -1078,7 +1096,18 @@ export const assets = {
    * Content-Type 必须和签发时用的完全一致，SigV4 把它算进签名了。
    */
   upload: async (file: File, projectId?: string): Promise<string> => {
-    const ticket = await assets.createUploadUrl(file, projectId);
+    // 每一段各报各的错（`upload-stage.ts`）：以前四种失败共用一句"文件上传失败"，
+    // 用户和我们都定位不到是哪一步。后端的 user_message 保留，只在前面标出阶段。
+    let ticket: UploadTicket;
+    try {
+      ticket = await assets.createUploadUrl(file, projectId);
+    } catch (e) {
+      throw stageError(e, "create");
+    }
+    if (!ticket?.upload_url || !ticket.asset?.id) {
+      // 后端（或本地预览的 mock）回了一个不完整的票据：不能拿 undefined 去 PUT
+      throw stageError(null, "create");
+    }
     let put: Response;
     try {
       put = await fetch(ticket.upload_url, {
@@ -1087,29 +1116,16 @@ export const assets = {
         headers: { "Content-Type": file.type },
       });
     } catch {
-      // 这一段**不经过我们的 API**，所以 fetch 直接抛 TypeError：预签名地址
-      // 的那个 host 连不上（本地开发少一条端口转发是最常见的原因）、或者被
-      // CORS 掐掉。原样往上抛的话，调用方拿到的是一个没有 `error` 字段的
-      // 裸异常，只能显示自己的兜底文案——出图位上会写成"出图请求失败"，
-      // 而用户明明是在传文件。所以在这里就把它翻译成一条说得清的错误。
-      throw new ApiRequestError(0, {
-        code: "asset.upload.storage_unreachable",
-        message: "PUT to object storage failed before any response",
-        user_message: "连不上对象存储，文件没有传上去",
-        retryable: true,
-        trace_id: "",
-      });
+      // 这一段**不经过我们的 API**，fetch 直接抛 TypeError：预签名地址的 host
+      // 连不上（本地开发少一条端口转发最常见）或被 CORS 掐掉。
+      throw stageError(null, "transfer", 0);
     }
-    if (!put.ok) {
-      throw new ApiRequestError(put.status, {
-        code: "asset.upload.put_failed",
-        message: `PUT ${put.status}`,
-        user_message: "文件上传失败，请重试",
-        retryable: true,
-        trace_id: "",
-      });
+    if (!put.ok) throw stageError(null, "transfer", put.status);
+    try {
+      await assets.completeUpload(ticket.asset.id);
+    } catch (e) {
+      throw stageError(e, "complete");
     }
-    await assets.completeUpload(ticket.asset.id);
     return ticket.asset.id;
   },
 
@@ -1187,23 +1203,35 @@ export type KeyTestResult = {
 export const providerCredentials = {
   list: () => apiFetch<{ items: ProviderCredential[] }>("/provider-credentials"),
 
-  /** 新增或更换。同一个能力只有一把 Key，PUT 就地覆盖。 */
-  put: (capability: string, apiKey: string) =>
-    apiFetch<ProviderCredential>(`/provider-credentials/${capability}`, {
+  /**
+   * 新增或更换。同一个能力下**每家各一把**，PUT 就地覆盖。
+   * 不传 providerId 就是这个能力的平台默认那家（旧语义）。
+   */
+  put: (capability: string, apiKey: string, providerId?: string) =>
+    apiFetch<ProviderCredential>(`/provider-credentials/${capability}${providerQuery(providerId)}`, {
       method: "PUT",
       body: JSON.stringify({ api_key: apiKey }),
     }),
 
-  remove: (capability: string) =>
-    apiFetch<void>(`/provider-credentials/${capability}`, { method: "DELETE" }),
+  remove: (capability: string, providerId?: string) =>
+    apiFetch<void>(`/provider-credentials/${capability}${providerQuery(providerId)}`, {
+      method: "DELETE",
+    }),
 
   /** 不传 apiKey 就测已保存的那把——明文前端拿不到，只能让后端自己解。 */
-  test: (capability: string, apiKey?: string) =>
-    apiFetch<KeyTestResult>(`/provider-credentials/${capability}/test`, {
-      method: "POST",
-      body: JSON.stringify(apiKey ? { api_key: apiKey } : {}),
-    }),
+  test: (capability: string, apiKey?: string, providerId?: string) =>
+    apiFetch<KeyTestResult>(
+      `/provider-credentials/${capability}/test${providerQuery(providerId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(apiKey ? { api_key: apiKey } : {}),
+      },
+    ),
 };
+
+function providerQuery(providerId?: string): string {
+  return providerId ? `?provider_id=${encodeURIComponent(providerId)}` : "";
+}
 
 // ---------------------------------------------------------------- 模型目录（ADR-024）
 
@@ -1237,6 +1265,98 @@ export type CapabilityModels = {
 export const modelCatalog = {
   /** 有哪些能力、每个能力能选哪几个模型。只读，选择动作落在项目上。 */
   list: () => apiFetch<{ items: CapabilityModels[] }>("/model-catalog"),
+};
+
+// ---------------------------------------------------------------- 模型上游配置（组织层）
+
+/** 文本能力的 OpenAI 兼容自定义端点的固定 id。项目偏好里存这个值表示"走组织的自定义端点"。 */
+export const CUSTOM_TEXT_PROVIDER_ID = "provider.custom.text";
+
+export type ProviderOption = {
+  provider_id: string;
+  label: string;
+  /** catalog = 目录里真有适配器的一家；custom = 组织自己填的 OpenAI 兼容端点 */
+  kind: "catalog" | "custom";
+  /** false 时不能被选（自定义端点还没填），原因在 unavailable_reason */
+  available: boolean;
+  models: ModelOption[];
+  default_model_id: string | null;
+  /** 能不能用平台额度计费。自定义端点永远不能 */
+  supports_platform_key: boolean;
+  unavailable_reason: string | null;
+};
+
+export type UpstreamSelection = {
+  provider_id: string | null;
+  /** null = 这家的目录默认顺序 */
+  model_id: string | null;
+  key_source: "platform" | "org";
+  /** org = 组织显式保存过；platform = 没存过，值是平台目录默认 */
+  layer: "org" | "platform";
+  updated_at: string | null;
+};
+
+export type CredentialStatus = {
+  provider_id: string;
+  configured: boolean;
+  /** 只有尾号。完整 Key 服务端永远不返回 */
+  masked_key: string | null;
+  updated_at: string | null;
+};
+
+export type CustomEndpoint = {
+  label: string;
+  base_url: string;
+  model_id: string;
+  masked_key: string | null;
+  updated_at: string;
+};
+
+export type CapabilityConfig = {
+  capability: string;
+  label: string;
+  available: boolean;
+  configurable: boolean;
+  providers: ProviderOption[];
+  selection: UpstreamSelection | null;
+  credentials: CredentialStatus[];
+  custom_endpoint: CustomEndpoint | null;
+  supports_custom_endpoint: boolean;
+  unavailable_reason: string | null;
+};
+
+export type ModelConfig = { items: CapabilityConfig[] };
+
+export const modelConfig = {
+  /** 每个能力：可选上游与模型（后端目录）、组织当前选择、各家 Key 状态、自定义端点 */
+  get: () => apiFetch<ModelConfig>("/model-config"),
+
+  /** 保存组织默认。Provider 与模型不匹配、选自有计费却没存 Key，后端直接拒绝 */
+  putSelection: (
+    capability: string,
+    body: { provider_id: string; model_id: string | null; key_source: "platform" | "org" },
+  ) =>
+    apiFetch<ModelConfig>(`/model-config/${capability}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  /** 已有端点时 api_key 可以不传，沿用原来那把 */
+  putEndpoint: (body: { label: string; base_url: string; model_id: string; api_key?: string }) =>
+    apiFetch<ModelConfig>("/model-config/text_generation/custom-endpoint", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  deleteEndpoint: () =>
+    apiFetch<void>("/model-config/text_generation/custom-endpoint", { method: "DELETE" }),
+
+  /** 字段都可省：没给的用已保存的值 */
+  testEndpoint: (body: { base_url?: string; model_id?: string; api_key?: string }) =>
+    apiFetch<KeyTestResult>("/model-config/text_generation/custom-endpoint/test", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };
 
 // ---------------------------------------------------------------- Skill（ADR-026）

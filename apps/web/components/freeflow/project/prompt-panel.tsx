@@ -41,7 +41,7 @@ export function PromptText({ label, text }: { label: string; text: string | null
           catch { setNotice("复制失败，请选中文本手动复制"); }
         }}><Copy aria-hidden className="size-3.5" />复制全文</Button>}
       </div>
-      {text ? <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-border bg-surface-2 p-4 font-sans text-sm leading-7 text-fg selection:bg-primary-soft">{text}</pre>
+      {text ? <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-[2px] border border-border bg-surface-2 p-4 font-sans text-sm leading-7 text-fg selection:bg-primary-soft">{text}</pre>
         : <p className="rounded-lg bg-surface-2 p-3 text-xs text-fg-subtle">未记录或未返回</p>}
       <p role="status" className="text-xs text-fg-muted">{notice}</p>
     </section>
@@ -132,7 +132,7 @@ export function PromptPanel({ projectId, kind, subjectKey, disabled = false, dis
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
         {loading && <p role="status" className="flex items-center gap-2 text-sm text-fg-muted"><Loader2 className="size-4 animate-spin" />读取已保存的提示词…</p>}
         {error && <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg bg-danger-soft p-3 text-sm text-danger">{error}<Button size="sm" variant="ghost" disabled={preparing} onClick={() => setRefresh((n) => n + 1)}>重新读取</Button></div>}
-        {!loading && !error && !draft && <div className="rounded-xl border border-dashed border-border p-6 text-sm leading-6 text-fg-muted">还没有准备提示词。系统会根据已保存的档案、镜头要求与项目画风生成，打开此面板不会调用模型。</div>}
+        {!loading && !error && !draft && <div className="rounded-[2px] border border-dashed border-border p-6 text-sm leading-6 text-fg-muted">还没有准备提示词。系统会根据已保存的档案、镜头要求与项目画风生成，打开此面板不会调用模型。</div>}
         {draft && <>
           {draft.stale && <p role="status" className="rounded-lg bg-rf-warning/10 p-3 text-sm leading-6 text-fg">档案或镜头已修改，这份提示词已过期，不会被用于出图。请重新准备；已有图片会保留。</p>}
           {placeholder && <p role="status" className="rounded-lg bg-rf-warning/10 p-3 text-sm leading-6 text-fg"><strong className="font-medium">{PLACEHOLDER_LABEL}：</strong>这份词由占位模型产生，不是真实模型的输出。配置好文本模型后重新准备即可得到可用的提示词。</p>}
@@ -150,7 +150,7 @@ export function PromptPanel({ projectId, kind, subjectKey, disabled = false, dis
           <label htmlFor={`${titleId}-instruction`} className="text-sm font-medium text-fg">补充画面要求</label>
           <textarea id={`${titleId}-instruction`} value={instruction} onChange={(e) => setInstruction(e.target.value)}
             maxLength={2000} disabled={preparing} rows={3} placeholder="例如：保留角色手中的钥匙，背景不要出现其他人物。"
-            className="w-full resize-y rounded-xl border border-border bg-bg p-3 text-sm text-fg outline-none focus:border-primary" />
+            className="w-full resize-y rounded-[2px] border border-border bg-bg p-3 text-sm text-fg outline-none focus:border-primary" />
           <p className="text-xs leading-5 text-fg-subtle">准备提示词会调用文本模型，使用当前项目的模型与计费规则。画风与角色身份沿用已确认的设定。{AFTER[kind]}</p>
         </div>
       </div>

@@ -127,7 +127,7 @@ export function PlanGate({ projectId, state }: { projectId: string; state: Proje
           <p className="text-xs leading-5 text-fg-muted">
             {summary.logline ||
               String(state.output.plot_index?.logline ?? "（情节目录还没有一句话梗概）")}
-            {summary.genre ? ` · ${summary.genre}` : ""}
+            {summary.genre ? `，${summary.genre}` : ""}
           </p>
           <p className="mt-1.5 text-xs leading-5 text-fg-subtle">
             全部 {gateNodes} 条就在这一页下面的
@@ -298,7 +298,7 @@ function Step({
   return (
     <section
       className={cn(
-        "rf-panel-card rounded-xl border p-3",
+        "rf-panel-card rounded-[2px] border p-3",
         tone === "emphasis" ? "border-rf-warning/35" : "border-border",
       )}
     >
