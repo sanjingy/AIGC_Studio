@@ -136,8 +136,9 @@ export function ShotGrid(props: {
 
   return (
     <ul aria-label="镜头接触表" className="ff-contact-sheet list-none">
+      {/* key 用列表位置：Agent 不保证镜号唯一，镜号重复时按镜号当 key 会让 React 把两张卡认成一张 */}
       {shots.map((shot, index) => (
-        <li key={`${shot.code}-${shot.index}`}>
+        <li key={index}>
           <ShotCard
             shot={shot}
             selected={selectedIndex === index}

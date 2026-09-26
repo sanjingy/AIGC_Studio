@@ -8,7 +8,6 @@ import { StaleIcon } from "@/components/icons/studio-icons";
 import { cn } from "@/lib/utils";
 
 import type { ShotCardData } from "./shot-card";
-import { ShotImage } from "./shot-image";
 
 /**
  * 单镜详情**兼编辑面板**（ADR-029 / FR-WEB-004）。
@@ -124,7 +123,7 @@ export type ShotOptions = {
   defaultLighting: Record<string, string>;
 };
 
-const labelClass = "text-[10px] text-fg-subtle";
+const labelClass = "text-xs text-fg-muted";
 const inputClass =
   "w-full rounded-md border border-border-strong bg-bg px-2 py-1.5 text-sm text-fg " +
   "transition-colors duration-150 focus:border-primary focus:outline-none " +
@@ -163,7 +162,7 @@ function FieldLabel({
       <DirtyDot on={dirty} />
       {limit !== undefined && count !== undefined && (
         <span
-          className={cn("tnum ml-auto text-[10px]", over ? "text-danger" : "text-fg-subtle")}
+          className={cn("tnum ml-auto text-[11px]", over ? "text-danger" : "text-fg-subtle")}
         >
           {count} / {limit}
         </span>
@@ -443,8 +442,11 @@ export function ShotDetail(props: {
   options: ShotOptions;
   disabled: boolean;
   onChange: <K extends ShotFieldKey>(field: K, value: ShotDraft[K]) => void;
-  /** 出图这类会花钱的动作，由页面注入 */
-  actions: React.ReactNode;
+  /**
+   * 左列：画面预览、出图动作、历史。由页面注入——出图是会花钱的动作，
+   * 和字段编辑（不花钱）分开装配。
+   */
+  media: React.ReactNode;
   /** 保存 / 放弃那一条，以及未保存提示 */
   footer?: React.ReactNode;
   /** 这一镜的图比最后一次改动旧时的提示 */
@@ -454,133 +456,116 @@ export function ShotDetail(props: {
   const sceneName = options.scenes.find((s) => s.ref === draft.scene_ref)?.name;
 
   return (
-    <article className="overflow-hidden rounded-[2px] border border-border bg-surface shadow-rf-card">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="shrink-0 code text-xs text-primary">{shot.code}</span>
-          <h2 className="truncate text-sm font-semibold text-fg">{shot.title}</h2>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">{props.actions}</div>
-      </header>
-
-      {/* gap-px + 底色 = 一条分隔线，同时在单列断点下自动消失 */}
-      <div className="grid gap-px bg-border lg:grid-cols-[minmax(0,1.15fr)_minmax(16rem,0.85fr)]">
-        <div className="min-w-0 bg-surface p-5">
-          <div className="relative mb-4 aspect-video overflow-hidden rounded-[2px] border border-border bg-bg">
-            <ShotImage
-              src={shot.imageUrl}
-              alt={`${shot.code} ${shot.title}`}
-              iconClassName="size-10"
-            />
-          </div>
-
+    <article className="flex min-w-0 flex-col">
+      {/* 画面占大头：预览是这一页的主体，字段是它的注释 */}
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(19rem,0.75fr)]">
+        <div className="flex min-w-0 flex-col gap-3">
+          {props.media}
           {props.outdatedNotice}
-
-          <div className="mt-4 flex flex-col gap-4">
-            <TextField
-              label="画面内容"
-              field="content"
-              multiline
-              rows={4}
-              value={draft.content}
-              dirty={dirty.has("content")}
-              disabled={disabled}
-              placeholder="这一镜画面上发生了什么。不要写风格词——风格由一致性引擎统一注入"
-              onChange={(v) => onChange("content", v)}
-            />
-
-            <RefListField
-              value={draft.character_refs}
-              options={options.characters}
-              dirty={dirty.has("character_refs")}
-              disabled={disabled}
-              onChange={(v) => onChange("character_refs", v)}
-            />
-
-            <div>
-              <TextField
-                label="场景"
-                field="scene_ref"
-                value={draft.scene_ref}
-                dirty={dirty.has("scene_ref")}
-                disabled={disabled}
-                suggestions={options.scenes}
-                placeholder="场景 ref"
-                onChange={(v) => onChange("scene_ref", v)}
-              />
-              {sceneName && (
-                <p className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-fg-muted">
-                  <MapPin aria-hidden className="size-3 shrink-0 text-primary" />
-                  {sceneName}
-                </p>
-              )}
-            </div>
-          </div>
         </div>
 
-        <div className="min-w-0 bg-surface p-5">
-          <div className="flex items-center gap-2 text-[11px] font-semibold text-fg-muted">
-            <Camera aria-hidden className="size-3.5 text-primary" />
-            镜头参数
+        <div className="flex min-w-0 flex-col gap-4">
+          <TextField
+            label="画面内容"
+            field="content"
+            multiline
+            rows={4}
+            value={draft.content}
+            dirty={dirty.has("content")}
+            disabled={disabled}
+            placeholder="这一镜画面上发生了什么。不要写风格词——风格由一致性引擎统一注入"
+            onChange={(v) => onChange("content", v)}
+          />
+
+          <RefListField
+            value={draft.character_refs}
+            options={options.characters}
+            dirty={dirty.has("character_refs")}
+            disabled={disabled}
+            onChange={(v) => onChange("character_refs", v)}
+          />
+
+          <div>
+            <TextField
+              label="场景"
+              field="scene_ref"
+              value={draft.scene_ref}
+              dirty={dirty.has("scene_ref")}
+              disabled={disabled}
+              suggestions={options.scenes}
+              placeholder="场景 ref"
+              onChange={(v) => onChange("scene_ref", v)}
+            />
+            {sceneName && (
+              <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-fg-muted">
+                <MapPin aria-hidden className="size-3 shrink-0 text-primary" />
+                {sceneName}
+              </p>
+            )}
           </div>
 
-          <dl className="mt-4 grid grid-cols-2 gap-x-5 gap-y-4">
-            <SpecItem
-              label="镜号"
-              value={shot.index}
-              hint="镜号是出图记录的关联键，改它会让已出的图挂到别的镜上，只能重跑分镜"
-            />
-            <SpecItem
-              label="节点"
-              value={shot.nodeIndex}
-              hint="分镜节点的覆盖核验依据，同样只能重跑分镜"
-            />
-          </dl>
+          <section aria-label="镜头参数" className="border-t border-border pt-4">
+            <p className="flex items-center gap-2 text-xs font-semibold text-fg-muted">
+              <Camera aria-hidden className="size-3.5 text-primary" />
+              镜头参数
+            </p>
+            <dl className="mt-3 grid grid-cols-2 gap-x-5 gap-y-3">
+              <SpecItem
+                label="镜号"
+                value={shot.index}
+                hint="镜号是出图记录的关联键，改它会让已出的图挂到别的镜上，只能重跑分镜"
+              />
+              <SpecItem
+                label="节点"
+                value={shot.nodeIndex}
+                hint="分镜节点的覆盖核验依据，同样只能重跑分镜"
+              />
+            </dl>
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <TextField
+                label="景别"
+                field="shot_size"
+                value={draft.shot_size}
+                dirty={dirty.has("shot_size")}
+                disabled={disabled}
+                suggestions={SHOT_SIZE_SUGGESTIONS}
+                onChange={(v) => onChange("shot_size", v)}
+              />
+              <TextField
+                label="角度"
+                field="angle"
+                value={draft.angle}
+                dirty={dirty.has("angle")}
+                disabled={disabled}
+                placeholder="正面平视居中可留空"
+                onChange={(v) => onChange("angle", v)}
+              />
+              <TextField
+                label="运镜"
+                field="camera_move"
+                value={draft.camera_move}
+                dirty={dirty.has("camera_move")}
+                disabled={disabled}
+                onChange={(v) => onChange("camera_move", v)}
+              />
+              <LightingField
+                value={draft.lighting_ref}
+                options={options.lighting[draft.scene_ref] ?? []}
+                defaultName={options.defaultLighting[draft.scene_ref] ?? ""}
+                hasScene={Boolean(options.lighting[draft.scene_ref])}
+                dirty={dirty.has("lighting_ref")}
+                disabled={disabled}
+                onChange={(v) => onChange("lighting_ref", v)}
+              />
+            </div>
+          </section>
 
-          <div className="mt-4 flex flex-col gap-4">
-            <TextField
-              label="景别"
-              field="shot_size"
-              value={draft.shot_size}
-              dirty={dirty.has("shot_size")}
-              disabled={disabled}
-              suggestions={SHOT_SIZE_SUGGESTIONS}
-              onChange={(v) => onChange("shot_size", v)}
-            />
-            <TextField
-              label="角度"
-              field="angle"
-              value={draft.angle}
-              dirty={dirty.has("angle")}
-              disabled={disabled}
-              placeholder="正面平视居中可留空"
-              onChange={(v) => onChange("angle", v)}
-            />
-            <TextField
-              label="运镜"
-              field="camera_move"
-              value={draft.camera_move}
-              dirty={dirty.has("camera_move")}
-              disabled={disabled}
-              onChange={(v) => onChange("camera_move", v)}
-            />
-            <LightingField
-              value={draft.lighting_ref}
-              options={options.lighting[draft.scene_ref] ?? []}
-              defaultName={options.defaultLighting[draft.scene_ref] ?? ""}
-              hasScene={Boolean(options.lighting[draft.scene_ref])}
-              dirty={dirty.has("lighting_ref")}
-              disabled={disabled}
-              onChange={(v) => onChange("lighting_ref", v)}
-            />
-          </div>
-
-          <div className="mt-6 border-t border-border pt-5">
-            <p className="flex items-center gap-2 text-[11px] font-semibold text-fg-muted">
+          <section aria-label="台词与声音" className="border-t border-border pt-4">
+            <p className="flex items-center gap-2 text-xs font-semibold text-fg-muted">
               <MessageSquare aria-hidden className="size-3.5 text-rf-agent" />
               台词与声音
             </p>
-            <div className="mt-4 flex flex-col gap-4">
+            <div className="mt-3 flex flex-col gap-4">
               <TextField
                 label="说话人"
                 field="speaker_ref"
@@ -610,7 +595,7 @@ export function ShotDetail(props: {
                 onChange={(v) => onChange("sfx", v)}
               />
             </div>
-          </div>
+          </section>
         </div>
       </div>
 

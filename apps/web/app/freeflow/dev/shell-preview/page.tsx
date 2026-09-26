@@ -231,8 +231,8 @@ export default function ShellPreviewPage() {
             options={{ scenes: [], characters: [], lighting: {}, defaultLighting: {} }}
             disabled={false}
             onChange={(field, value) => setDraft((prev) => ({ ...prev, [field]: value }))}
-            actions={
-              <>
+            media={
+              <div className="flex flex-wrap gap-2">
                 <Button variant="ghost" size="sm" className="border border-border">
                   <RefreshCw aria-hidden className="size-3.5" />
                   重做
@@ -241,7 +241,7 @@ export default function ShellPreviewPage() {
                   <Wand2 aria-hidden className="size-3.5" />
                   单镜出图
                 </Button>
-              </>
+              </div>
             }
           />
         </div>

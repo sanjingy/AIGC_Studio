@@ -21,6 +21,7 @@ import {
 import {
   WorkbenchShell,
   type NavItem,
+  type ProductionStatus,
   type StageState,
 } from "@/components/freeflow/shell/workbench-shell";
 import type { Images, RenderSubject } from "@/lib/freeflow/use-images";
@@ -41,11 +42,11 @@ import { taskTitle, type TasksState } from "@/lib/freeflow/use-tasks";
 /** 制作流程。顺序就是生产顺序，和阶段条对得上。 */
 function navigationOf(base: string): NavItem[] {
   return [
-    { id: "overview", label: "项目总览", href: `${base}/overview`, icon: ProjectOverviewIcon },
-    { id: "story", label: "故事与剧本", href: `${base}/story`, icon: StoryIcon },
-    { id: "characters", label: "角色设定", href: `${base}/characters`, icon: CharacterIcon },
-    { id: "scenes", label: "世界美术", href: `${base}/scenes`, icon: SceneIcon },
-    { id: "storyboard", label: "镜头工作台", href: `${base}/storyboard`, icon: StoryboardIcon },
+    { id: "overview", label: "项目总览", shortLabel: "概览", href: `${base}/overview`, icon: ProjectOverviewIcon },
+    { id: "story", label: "故事与剧本", shortLabel: "剧本", href: `${base}/story`, icon: StoryIcon },
+    { id: "characters", label: "角色设定", shortLabel: "角色", href: `${base}/characters`, icon: CharacterIcon },
+    { id: "scenes", label: "世界美术", shortLabel: "美术", href: `${base}/scenes`, icon: SceneIcon },
+    { id: "storyboard", label: "分镜工作台", shortLabel: "分镜", href: `${base}/storyboard`, icon: StoryboardIcon },
   ];
 }
 
@@ -66,13 +67,14 @@ function utilityNavigationOf(base: string, runningTasks: number): NavItem[] {
     {
       id: "tasks",
       label: "生成记录",
+      shortLabel: "任务",
       href: `${base}/tasks`,
       icon: QueueIcon,
       // 0 不显示徽标：一个写着 0 的红点只是噪音
       badge: runningTasks > 0 ? runningTasks : undefined,
     },
-    { id: "assets", label: "资产库", href: `${base}/assets`, icon: AssetLibraryIcon },
-    { id: "settings", label: "项目设置", href: `${base}/settings`, icon: SettingsIcon },
+    { id: "assets", label: "资产库", shortLabel: "资产", href: `${base}/assets`, icon: AssetLibraryIcon },
+    { id: "settings", label: "项目设置", shortLabel: "设置", href: `${base}/settings`, icon: SettingsIcon },
   ];
 }
 
@@ -113,6 +115,8 @@ export function ProjectWorkbench({
   images,
   activeHref,
   primaryAction,
+  showAside = true,
+  showStageRail = true,
   children,
 }: {
   /**
@@ -128,6 +132,13 @@ export function ProjectWorkbench({
   activeHref: string;
   /** 顶栏右上角那颗主按钮。不传就不画——没有动作的页面不该有一颗按钮。 */
   primaryAction?: { label: string; onClick: () => void; disabled?: boolean; loading?: boolean };
+  /**
+   * 右栏（阶段 + 门、运行任务、一致性）。分镜页关掉：它把门、运行数与出图覆盖
+   * 放进了主区，右栏再占 300px 只会挤掉画面。
+   */
+  showAside?: boolean;
+  /** 胶片阶段带。分镜页关掉，改看顶栏的生产状态胶囊。 */
+  showStageRail?: boolean;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -201,6 +212,21 @@ export function ProjectWorkbench({
 
   const gateStatus = gateStatusOf(state.stage, state.approvals);
 
+  const navigation = navigationOf(base);
+  const utilityNavigation = utilityNavigationOf(base, running.length);
+  const section = [...navigation, ...utilityNavigation].find(
+    (item) => activeHref === item.href || activeHref.startsWith(`${item.href}/`),
+  )?.label;
+
+  /** 顶栏胶囊：只说生产走到哪、门开没开。和模块栏的"正在查看"分开。 */
+  const production: ProductionStatus | null = !state.stage
+    ? null
+    : state.stage === "done"
+      ? { label: "生产：文本链路已走完", tone: "done" }
+      : state.pendingGate
+        ? { label: `生产：${activeStage?.label ?? ""} · 待你确认`, tone: "attention" }
+        : { label: `生产：${activeStage?.label ?? ""}`, tone: "neutral" };
+
   const aside = (
     <div className="ff-rail">
       {activeStage && (
@@ -242,13 +268,16 @@ export function ProjectWorkbench({
         shots: arrayOf(state.output.storyboard?.shots).length || undefined,
         savedAgo: slateTime(state.snapshot?.updated_at),
       }}
-      navigation={navigationOf(base)}
-      utilityNavigation={utilityNavigationOf(base, running.length)}
+      navigation={navigation}
+      utilityNavigation={utilityNavigation}
       activeHref={activeHref}
       stages={stages}
       viewingStage={viewing}
+      showStageRail={showStageRail}
+      section={section}
+      production={production}
       primaryAction={primaryAction}
-      aside={aside}
+      aside={showAside ? aside : undefined}
     >
       {children}
     </WorkbenchShell>

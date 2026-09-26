@@ -1,27 +1,35 @@
 "use client";
 
-import { Loader2, PanelRightOpen, Wand2 } from "lucide-react";
+import { ChevronRight, Loader2, PanelRightOpen, Wand2 } from "lucide-react";
 
+import { GateApprovedIcon, GatePendingIcon, StudioMarkIcon } from "@/components/icons/studio-icons";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 import { StageRail } from "./stage-rail";
-import type { StageKey, StageState } from "./workbench-shell";
+import type { ProductionStatus, StageKey, StageState } from "./workbench-shell";
 
-type SlateField = { key: string; value: string; numeric?: boolean };
+const TONE: Record<ProductionStatus["tone"], { className: string; icon: typeof StudioMarkIcon }> = {
+  neutral: { className: "border-border text-fg-muted", icon: StudioMarkIcon },
+  attention: { className: "border-running/40 bg-running-soft text-running", icon: GatePendingIcon },
+  done: { className: "border-success/30 bg-success-soft text-success", icon: GateApprovedIcon },
+};
 
 /**
- * 工作台顶栏 = 场记板 + 胶片连续带。
+ * 工作台顶栏：一行 48px。
  *
- * 上半是场记板字段组：项目身份用「字段名 / 值」表达，而不是面包屑。
- * 没有值的字段整条不渲染，不留空槽——场记板上没写的东西就是还没定。
+ * 左边是位置（项目 › 当前模块），中间是生产状态胶囊，右边是动作。
+ * 位置和生产状态分开写：模块栏高亮的是"你在看哪一块"，胶囊说的是
+ * "后端生产走到哪一步、门开着没有"——两者经常不同（看角色时生产可能在分镜门）。
  *
- * 下半是阶段连续带，横贯整个内容区。它在所有断点都在：这是"我现在在哪
- * 一步"的唯一提示，窄屏更需要它，带子自己横向滚动，不撑宽页面。
+ * 胶片阶段带仍由页面决定要不要（`stages` 为空就不画）。
  */
 export function WorkbenchHeader({
   project,
   stages,
   viewingStage,
+  section,
+  production,
   primaryAction,
   asideToggle,
 }: {
@@ -34,6 +42,8 @@ export function WorkbenchHeader({
   };
   stages: StageState[];
   viewingStage?: StageKey | null;
+  section?: string;
+  production?: ProductionStatus | null;
   primaryAction?: {
     label: string;
     onClick: () => void;
@@ -43,32 +53,43 @@ export function WorkbenchHeader({
   /** 右栏在窄屏下的开关；不需要右栏时页面不传，这里就不占位 */
   asideToggle?: { controls: string; open: boolean; onOpen: () => void };
 }) {
-  const fields: SlateField[] = [{ key: "项目", value: project.title }];
-  if (project.subtitle) fields.push({ key: "路线", value: project.subtitle });
-  if (project.shots && project.shots > 0) {
-    fields.push({ key: "镜头", value: String(project.shots), numeric: true });
-  }
-  if (project.savedAgo) {
-    fields.push({ key: "更新", value: project.savedAgo, numeric: true });
-  }
+  const tone = production ? TONE[production.tone] : null;
+  const ToneIcon = tone?.icon;
 
   return (
     <header className="ff-workbench-header z-30 shrink-0 border-b border-border bg-bg">
-      <div className="flex min-h-16 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 lg:px-6">
-        <div className="ff-slate min-w-0 flex-1">
-          {fields.map((field) => (
-            <div key={field.key} className="ff-slate-field">
-              <span className="ff-slate-key">{field.key}</span>
-              <span
-                className="ff-slate-value"
-                data-numeric={field.numeric ? "true" : undefined}
-                title={field.value}
-              >
-                {field.value}
+      <div className="flex h-12 items-center gap-3 px-3 sm:px-4">
+        <nav aria-label="位置" className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
+          <span className="min-w-0 truncate font-semibold text-fg" title={project.title}>
+            {project.title}
+          </span>
+          {section && (
+            <>
+              <ChevronRight aria-hidden className="size-3.5 shrink-0 text-fg-subtle" />
+              <span aria-current="page" className="shrink-0 text-fg-muted">
+                {section}
               </span>
-            </div>
-          ))}
-        </div>
+            </>
+          )}
+          {project.savedAgo && (
+            <span className="tnum ml-2 hidden shrink-0 text-xs text-fg-subtle lg:inline">
+              更新于 {project.savedAgo}
+            </span>
+          )}
+        </nav>
+
+        {production && tone && ToneIcon && (
+          <p
+            className={cn(
+              "hidden shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs sm:inline-flex",
+              tone.className,
+            )}
+          >
+            <ToneIcon aria-hidden className="size-3.5 shrink-0" />
+            <span className="sr-only">生产状态：</span>
+            {production.label}
+          </p>
+        )}
 
         <div className="flex shrink-0 items-center gap-2">
           {asideToggle && (
@@ -88,7 +109,7 @@ export function WorkbenchHeader({
           {primaryAction && (
             <Button
               variant="primary"
-              size="md"
+              size="sm"
               aria-busy={primaryAction.loading || undefined}
               disabled={primaryAction.disabled || primaryAction.loading}
               onClick={primaryAction.onClick}

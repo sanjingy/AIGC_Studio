@@ -27,6 +27,8 @@ export interface NavItem {
   label: string;
   href: string;
   icon: LucideIcon;
+  /** 模块栏上的两字标签；不给就用 `label` */
+  shortLabel?: string;
   badge?: string | number;
   disabled?: boolean;
   disabledReason?: string;
@@ -35,10 +37,16 @@ export interface NavItem {
 /** 右栏从这个宽度起常驻，与下面的 `xl:` 类必须是同一个值 */
 const ASIDE_PINNED_QUERY = "(min-width: 80rem)";
 
+/** 顶栏上的生产状态胶囊：后端阶段 + 门状态，和"正在查看哪一块"分开编码。 */
+export interface ProductionStatus {
+  label: string;
+  tone: "neutral" | "attention" | "done";
+}
+
 /**
- * 工作台外壳：左导航 + 顶栏 + 主内容 + 右栏。
+ * 工作台外壳：模块栏 + 紧凑顶栏 + 主内容 + 右栏。
  *
- * 壳只管版式和两个纯 UI 状态（侧栏折没折、窄屏抽屉开没开）。阶段、任务、
+ * 壳只管版式和一个纯 UI 状态（窄屏抽屉开没开）。阶段、任务、
  * 一致性这些内容一律由页面通过 `aside` 传进来——执行状态的唯一真相在
  * `tasks` 上（ADR-008），壳里再存一份必然会和它对不上。
  *
@@ -53,6 +61,14 @@ export function WorkbenchShell(props: {
   stages: StageState[];
   /** 正在查看的是哪一段（与生产状态无关），没有对应段时不传 */
   viewingStage?: StageKey | null;
+  /**
+   * 胶片阶段带要不要画。默认画；分镜页改用模块栏 + 生产状态胶囊，
+   * 不再用一条占高的阶段带（Reelbench P1）。其余页面在 P2 逐页替换。
+   */
+  showStageRail?: boolean;
+  /** 顶栏面包屑的第二段：当前模块名 */
+  section?: string;
+  production?: ProductionStatus | null;
   primaryAction?: {
     label: string;
     onClick: () => void;
@@ -69,7 +85,6 @@ export function WorkbenchShell(props: {
   const utilityNavigation = props.utilityNavigation ?? [];
   const stages = props.stages ?? [];
 
-  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
   const [asideOpen, setAsideOpen] = React.useState(false);
   const asideId = React.useId();
 
@@ -91,15 +106,15 @@ export function WorkbenchShell(props: {
         navigation={navigation}
         utilityNavigation={utilityNavigation}
         activeHref={activeHref}
-        collapsed={sidebarCollapsed}
-        onCollapsedChange={setSidebarCollapsed}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <WorkbenchHeader
           project={project}
-          stages={stages}
+          stages={props.showStageRail === false ? [] : stages}
           viewingStage={props.viewingStage ?? null}
+          section={props.section}
+          production={props.production ?? null}
           primaryAction={primaryAction}
           asideToggle={
             aside

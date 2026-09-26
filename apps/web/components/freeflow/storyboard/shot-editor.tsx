@@ -6,6 +6,7 @@ import { Loader2, Save, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PatchOp } from "@/lib/api";
 import type { ContentEdit } from "@/lib/freeflow/use-content-edit";
+import { shotPointer } from "@/lib/freeflow/storyboard-scope";
 import { cn } from "@/lib/utils";
 
 import type { ShotCardData } from "./shot-card";
@@ -113,7 +114,7 @@ export function ShotEditor({
   card,
   options,
   edit,
-  actions,
+  media,
   imageCreatedAt,
   onDirtyChange,
 }: {
@@ -128,7 +129,8 @@ export function ShotEditor({
   card: ShotCardData;
   options: ShotOptions;
   edit: ContentEdit;
-  actions: React.ReactNode;
+  /** 左列的画面、出图动作与历史，见 `ShotDetail.media` */
+  media: React.ReactNode;
   /** 这一镜当前那张图是什么时候出的。没有图就是 null。 */
   imageCreatedAt: string | null;
   onDirtyChange: (dirty: boolean) => void;
@@ -167,7 +169,7 @@ export function ShotEditor({
 
   const save = async () => {
     const patches: PatchOp[] = [...dirty].map((field) => ({
-      path: `/shots/${shotAt}/${field}`,
+      path: shotPointer(shotAt, field),
       value: draft[field],
     }));
     if (patches.length === 0) return;
@@ -188,13 +190,17 @@ export function ShotEditor({
       options={options}
       disabled={edit.saving}
       onChange={change}
-      actions={actions}
+      media={media}
       outdatedNotice={outdated && editedAt !== null ? <OutdatedNotice editedAt={editedAt} /> : null}
       footer={
         <div
           className={cn(
-            "flex flex-wrap items-center gap-2 border-t px-5 py-3",
-            hasChanges ? "border-rf-warning/40 bg-rf-warning/10" : "border-border bg-surface-2",
+            // 贴在主区底部：长字段滚下去以后保存仍然够得着（390 屏尤其如此）
+            "sticky bottom-0 z-10 -mx-4 mt-5 flex flex-wrap items-center gap-2 border-t px-4 py-3 lg:-mx-6 lg:px-6",
+            // 贴底的条必须不透明，否则滚动的字段会从下面透上来
+            hasChanges
+              ? "border-rf-warning/50 bg-rf-warning-soft"
+              : "border-border bg-bg",
           )}
         >
           <span

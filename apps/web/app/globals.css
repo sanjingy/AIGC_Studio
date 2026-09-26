@@ -195,21 +195,23 @@
    ============================================================ */
 .theme-reelflow {
   color-scheme: dark;
-  --rf-bg: var(--studio-black);
-  --rf-panel: var(--graphite);
-  --rf-dialog: var(--slate-card);
-  --rf-elevated: var(--slate-raised);
-  --rf-overlay: rgb(8 9 11 / 0.74);
-  --rf-line: #2c3038;
-  --rf-line-strong: #3d424c;
-  --rf-fg: var(--paper);
-  --rf-muted: var(--ink-muted);
-  --rf-subtle: var(--ink-subtle);
+  /* 暖黑 + 克制金色（Reelbench 参考方向，计划 2026-09-25）。
+     值只在这里定义一次；组件读语义槽，不写色值。 */
+  --rf-bg: #151514;
+  --rf-panel: #1d1d1a;
+  --rf-dialog: #262621;
+  --rf-elevated: #2e2e28;
+  --rf-overlay: rgb(10 10 8 / 0.74);
+  --rf-line: #36362d;
+  --rf-line-strong: #4a4a3e;
+  --rf-fg: #eeece4;
+  --rf-muted: #bdb8a8;
+  --rf-subtle: #9e9989;
 
-  /* rf-cyan 是历史槽名，现在承载 ultramarine。组件不必改名。 */
-  --rf-cyan: var(--ultramarine);
-  --rf-cyan-hover: #9aabff;
-  --rf-cyan-soft: #1e2133;
+  /* rf-cyan 是历史槽名，现在承载金色主色。组件不必改名。 */
+  --rf-cyan: #c9ad70;
+  --rf-cyan-hover: #dac28e;
+  --rf-cyan-soft: #2c2719;
 
   /* 参考/派生资产标记。与主色拉开色相，避免被读成可点击。 */
   --rf-agent: #b9a6f0;
@@ -217,8 +219,10 @@
 
   --rf-success: var(--studio-success);
   --rf-success-soft: #16281f;
-  --rf-warning: var(--safety-amber);
-  --rf-warning-soft: #2e2719;
+  /* 生成中 / 待确认用橙，不用琥珀：琥珀和金色主色太近，
+     "生成中"会被读成"已选中"。 */
+  --rf-warning: #e39456;
+  --rf-warning-soft: #2f2217;
   --rf-danger: var(--studio-danger);
   --rf-danger-soft: #2e1c1c;
 

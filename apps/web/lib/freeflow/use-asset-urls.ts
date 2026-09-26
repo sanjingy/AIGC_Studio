@@ -36,7 +36,9 @@ export function useAssetUrls(assetIds: readonly (string | null | undefined)[]) {
     const missing = ids.filter((id) => !requested.current.has(id));
     if (missing.length === 0) return;
 
-    let alive = true;
+    // 不用 alive 标记丢弃结果：`requested` 在发请求时就记上了，key 一变
+    // （出图列表刷新、历史多了一张）effect 重跑，旧请求的结果被丢掉而 id
+    // 仍标着"已请求"，那几张图就永远不显示。组件卸载后 setState 是无害的空操作。
     for (const id of missing) requested.current.add(id);
 
     void Promise.all(
@@ -49,7 +51,6 @@ export function useAssetUrls(assetIds: readonly (string | null | undefined)[]) {
         }
       }),
     ).then((pairs) => {
-      if (!alive) return;
       const ok = pairs.filter((p): p is readonly [string, string] => p !== null);
       if (ok.length === 0) return;
       setUrls((prev) => {
@@ -58,10 +59,6 @@ export function useAssetUrls(assetIds: readonly (string | null | undefined)[]) {
         return next;
       });
     });
-
-    return () => {
-      alive = false;
-    };
   }, [key]);
 
   return (assetId: string | null | undefined) => (assetId ? urls.get(assetId) : undefined);

@@ -59,6 +59,14 @@ export function BatchRenderDialog(props: {
   runnerLabel?: string | null;
   estimateCredits?: number;
   estimateRange?: { low: number; high: number };
+  /** 这一批的范围，例如「全部镜头」「节点 3 · 渡口夜雾」，筛选时带上筛选名 */
+  scopeLabel?: string;
+  /** 范围内已有图、被跳过的镜头数（批量补图从不覆盖已有图） */
+  skippedHasImage?: number;
+  /** 范围内正在排队 / 生成、被跳过的镜头数（不重复提交） */
+  skippedInFlight?: number;
+  /** 提交集中上次失败、这次重新提交的镜头数 */
+  retryingFailed?: number;
   onConfirm: () => Promise<void>;
 }) {
   const {
@@ -69,6 +77,10 @@ export function BatchRenderDialog(props: {
     runnerLabel,
     estimateCredits,
     estimateRange,
+    scopeLabel,
+    skippedHasImage = 0,
+    skippedInFlight = 0,
+    retryingFailed = 0,
     onConfirm,
   } = props;
   const isLocal = imageSource === "local";
@@ -142,10 +154,34 @@ export function BatchRenderDialog(props: {
         </section>
 
         <dl className="divide-y divide-border rounded-[2px] border border-border bg-surface-2 px-4">
+          {scopeLabel && (
+            <div className="flex items-center justify-between gap-4 py-3 text-xs">
+              <dt className="text-fg-muted">范围</dt>
+              <dd className="min-w-0 truncate text-right font-semibold text-fg" title={scopeLabel}>
+                {scopeLabel}
+              </dd>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-4 py-3 text-xs">
-            <dt className="text-fg-muted">镜头数</dt>
-            <dd className="tnum font-semibold text-fg">{shotCount}</dd>
+            <dt className="text-fg-muted">提交镜头数</dt>
+            <dd className="tnum font-semibold text-fg">
+              {shotCount}
+              {retryingFailed > 0 && <span className="ml-1 font-normal text-fg-muted">（含上次失败 {retryingFailed}）</span>}
+            </dd>
           </div>
+          {(skippedHasImage > 0 || skippedInFlight > 0) && (
+            <div className="flex items-center justify-between gap-4 py-3 text-xs">
+              <dt className="text-fg-muted">跳过</dt>
+              <dd className="tnum text-right text-fg-muted">
+                {[
+                  skippedHasImage > 0 ? `已有图 ${skippedHasImage}` : "",
+                  skippedInFlight > 0 ? `生成中 ${skippedInFlight}` : "",
+                ]
+                  .filter(Boolean)
+                  .join("，")}
+              </dd>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-4 py-3 text-xs">
             <dt className="flex items-center gap-1.5 text-fg-muted">
               {isLocal && <Laptop aria-hidden className="size-3.5" />}
@@ -169,7 +205,7 @@ export function BatchRenderDialog(props: {
 
         {submitFailed && (
           <p role="alert" className="text-xs text-danger">
-            未能提交，请重试。
+            有镜头未能提交，已提交的会照常生成。可以关掉弹窗后再次补图，已提交的不会重复。
           </p>
         )}
       </div>

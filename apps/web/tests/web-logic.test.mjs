@@ -160,3 +160,109 @@ test("票据不完整（没有 upload_url）：不拿 undefined 去 PUT", async 
   assert.equal(error.error.code, "asset.upload.create_failed");
   assert.equal(calls.length, 1);
 });
+
+// ---------------------------------------------------------------- 分镜目录与补图范围（REELBENCH_P1）
+
+const scope = await jiti.import("../lib/freeflow/storyboard-scope.ts");
+
+// 镜号不连续、节点 7 不存在、镜号 5 重复——都是 Agent 实际可能给出的形状
+const SB_NODES = [
+  { index: 1, summary: "渡口夜雾", scene_ref: "ferry" },
+  { index: 2, summary: "茶棚", scene_ref: "tea" },
+  { index: 3, summary: "空节点", scene_ref: "none" },
+];
+const SB_SHOTS = [
+  { index: 1, node_index: 1, scene_ref: "ferry", content: "船夫撑篙", dialogue: "" },
+  { index: 5, node_index: 1, scene_ref: "ferry", content: "雾里有灯", dialogue: "谁在那边" },
+  { index: 9, node_index: 2, scene_ref: "tea", content: "茶客低语", dialogue: "" },
+  { index: 12, node_index: 7, scene_ref: "tea", content: "归属不明的一镜", dialogue: "" },
+  { index: 5, node_index: 2, scene_ref: "tea", content: "镜号重复", dialogue: "" },
+];
+const fact = (o = {}) => ({ hasImage: false, status: null, pending: false, outdated: false, ...o });
+const SB_FACTS = [
+  fact({ hasImage: true, status: "succeeded" }),
+  fact({ status: "running" }),
+  fact({ status: "failed" }),
+  fact(),
+  fact({ hasImage: true, status: "succeeded", outdated: true }),
+];
+
+test("目录按真实节点分组，未知 node_index 进未归属组，空节点保留", () => {
+  const groups = scope.buildDirectory(SB_SHOTS, SB_NODES);
+  assert.deepEqual(
+    groups.map((g) => [g.nodeIndex, g.positions]),
+    [
+      [1, [0, 1]],
+      [2, [2, 4]],
+      [3, []],
+      [null, [3]],
+    ],
+  );
+  assert.equal(scope.groupKey(null), "orphan");
+  assert.equal(scope.groupKey(2), "n2");
+});
+
+test("非连续镜号：JSON Pointer 用数组位置，不用镜号", () => {
+  // S05 在数组第 1 位；按镜号算会写到 /shots/5（越界或别的镜）
+  const at = SB_SHOTS.findIndex((s) => s.index === 5);
+  assert.equal(scope.shotPointer(at, "content"), "/shots/1/content");
+  assert.equal(scope.shotPointer(3, "dialogue"), "/shots/3/dialogue");
+});
+
+test("筛选后编辑：可见列表只是原数组位置的子集，身份不变", () => {
+  const missing = scope.visiblePositions(SB_SHOTS, SB_FACTS, { query: "", filter: "missing" });
+  assert.deepEqual(missing, [1, 2, 3]);
+  // 在筛选结果里点第 3 行，拿到的是原数组位置 3，指针也按它算
+  const picked = missing[2];
+  assert.equal(picked, 3);
+  assert.equal(SB_SHOTS[picked].content, "归属不明的一镜");
+  assert.equal(scope.shotPointer(picked, "content"), "/shots/3/content");
+});
+
+test("搜索：镜号、画面、台词、场景名都能找到；未归属镜头也能找到", () => {
+  const names = (ref) => ({ ferry: "渡口", tea: "茶棚" })[ref];
+  const q = (query) => scope.visiblePositions(SB_SHOTS, SB_FACTS, { query, filter: "all", sceneName: names });
+  assert.deepEqual(q("S12"), [3]);
+  assert.deepEqual(q("12"), [3]);
+  assert.deepEqual(q("s05"), [1, 4]);
+  assert.deepEqual(q("谁在那边"), [1]);
+  assert.deepEqual(q("茶棚"), [2, 3, 4]);
+  assert.deepEqual(q("   "), [0, 1, 2, 3, 4]);
+});
+
+test("状态筛选与统计", () => {
+  const f = (filter) => scope.visiblePositions(SB_SHOTS, SB_FACTS, { query: "", filter });
+  assert.deepEqual(f("failed"), [2]);
+  assert.deepEqual(f("running"), [1]);
+  assert.deepEqual(f("outdated"), [4]);
+  assert.deepEqual(scope.tally([0, 1, 2, 3, 4], SB_FACTS), {
+    total: 5, withImage: 2, missing: 3, failed: 1, running: 1, outdated: 1,
+  });
+});
+
+test("当前节点补图：只提交缺图且不在运行中的，已有图与运行中跳过", () => {
+  const groups = scope.buildDirectory(SB_SHOTS, SB_NODES);
+  const node1 = groups.find((g) => g.nodeIndex === 1);
+  const plan1 = scope.planBatch(node1.positions, SB_FACTS);
+  assert.deepEqual(plan1.submit, []);
+  assert.equal(plan1.skippedHasImage, 1);
+  assert.equal(plan1.skippedInFlight, 1);
+
+  const node2 = groups.find((g) => g.nodeIndex === 2);
+  const plan2 = scope.planBatch(node2.positions, SB_FACTS);
+  assert.deepEqual(plan2.submit, [2]); // 失败的那镜重新提交，已有图的 S05(重复) 跳过
+  assert.equal(plan2.retryingFailed, 1);
+  assert.deepEqual(scope.submitIndexes(plan2.submit, SB_SHOTS), [9]);
+});
+
+test("本页刚提交、请求还没回来的镜头也不重复提交", () => {
+  const facts = [fact({ pending: true }), fact()];
+  const plan = scope.planBatch([0, 1], facts);
+  assert.deepEqual(plan.submit, [1]);
+  assert.equal(plan.skippedInFlight, 1);
+});
+
+test("镜号重复的两条只提交一次", () => {
+  const shots = [{ index: 5 }, { index: 5 }, { index: 6 }];
+  assert.deepEqual(scope.submitIndexes([0, 1, 2], shots), [5, 6]);
+});

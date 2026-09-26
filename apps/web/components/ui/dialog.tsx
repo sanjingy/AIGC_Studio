@@ -39,8 +39,8 @@ export function Dialog({
   /** 标题元素 id；面板本身不渲染标题，由调用方决定版式 */
   labelledBy?: string;
   describedBy?: string;
-  /** center = 居中弹窗，right = 从右侧贴边的抽屉 */
-  placement?: "center" | "right";
+  /** center = 居中弹窗，right / left = 贴边的抽屉 */
+  placement?: "center" | "right" | "left";
   dismissible?: boolean;
   overlayClassName?: string;
   className?: string;
@@ -100,7 +100,11 @@ export function Dialog({
     <div
       className={cn(
         "fixed inset-0 z-70 flex",
-        placement === "center" ? "items-center justify-center p-4" : "justify-end",
+        placement === "center"
+          ? "items-center justify-center p-4"
+          : placement === "left"
+            ? "justify-start"
+            : "justify-end",
       )}
     >
       {/* 遮罩不进可访问性树：关闭有 Esc 和显式的关闭按钮两条路，

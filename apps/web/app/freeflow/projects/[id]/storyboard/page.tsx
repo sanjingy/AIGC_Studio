@@ -34,6 +34,8 @@ export default function FreeflowStoryboardPage({ params }: { params: Promise<{ i
       images={images}
       activeHref={pathname}
       primaryAction={advancePrimaryAction(state)}
+      showAside={false}
+      showStageRail={false}
     >
       {state.error && (
         <p role="alert" className="m-4 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">

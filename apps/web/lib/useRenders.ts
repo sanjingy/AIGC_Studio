@@ -117,13 +117,16 @@ export function useRenders(projectId: string | null) {
     if (stale) void reload();
   }, [stale, reload]);
 
-  const byKey = useMemo(() => {
-    const out = new Map<string, RenderView>();
+  /**
+   * 每个 subject 的全部出图记录（新在前）。第一条就是当前这一版；
+   * 其余是历史，分镜编辑视图里只读展示——没有"设为当前"的后端能力。
+   */
+  const historyByKey = useMemo(() => {
+    const out = new Map<string, RenderView[]>();
     for (const r of rows) {
       const key = keyOfRender(r);
-      if (out.has(key)) continue; // 列表最新在前，第一条就是当前这一版
       const t = r.task_id === null ? undefined : live.get(r.task_id);
-      out.set(key, {
+      const view: RenderView = {
         taskId: r.task_id,
         status: t?.status ?? r.status,
         progress: t?.progress ?? r.progress,
@@ -132,10 +135,20 @@ export function useRenders(projectId: string | null) {
         source: r.source,
         imageSource: r.image_source,
         createdAt: r.created_at,
-      });
+      };
+      const list = out.get(key);
+      if (list) list.push(view);
+      else out.set(key, [view]);
     }
     return out;
   }, [rows, live]);
+
+  const byKey = useMemo(() => {
+    const out = new Map<string, RenderView>();
+    // 列表最新在前，第一条就是当前这一版
+    for (const [key, list] of historyByKey) if (list[0]) out.set(key, list[0]);
+    return out;
+  }, [historyByKey]);
 
   const setKeyError = useCallback((key: string, message: string | null) => {
     setErrors((prev) => {
@@ -334,6 +347,8 @@ export function useRenders(projectId: string | null) {
     /** 当前项目 id。出图位要靠它判断"本机来源"在不在白名单里。 */
     projectId,
     renderOf: (subject: RenderSubject) => byKey.get(subjectKey(subject)) ?? null,
+    /** 这个 subject 的全部出图记录，新在前；第一条等于 `renderOf` */
+    historyOf: (subject: RenderSubject) => historyByKey.get(subjectKey(subject)) ?? [],
     isPending: (subject: RenderSubject) => pending.has(subjectKey(subject)),
     /** 这个出图位自己的错误。抽屉里看不到中栏那条横幅，见 `errors` 的说明。 */
     errorOf: (subject: RenderSubject) => errors.get(subjectKey(subject)) ?? null,
