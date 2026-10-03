@@ -22,10 +22,18 @@ export function RevisePanel({
   state,
   target,
   className,
+  disabledReason,
 }: {
   state: ProjectState;
   target: ReviseTarget;
   className?: string;
+  /**
+   * 有值 = 现在还不能提交返工，这句话就是原因。
+   *
+   * 页面上同时开着字段级编辑时用它：返工会重跑整个 Agent 并整块换掉产出，
+   * 手上那份没保存的草稿会跟着消失，而用户看不出这两件事的关系。
+   */
+  disabledReason?: string | null;
 }) {
   const [instruction, setInstruction] = useState("");
   const messages = state.conversation.filter((m) => m.target_role === target);
@@ -62,11 +70,12 @@ export function RevisePanel({
         />
       </label>
 
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <Button
           size="sm"
           variant="primary"
-          disabled={working || !instruction.trim()}
+          disabled={working || !instruction.trim() || Boolean(disabledReason)}
+          title={disabledReason ?? undefined}
           onClick={() =>
             void state.revise(target, instruction.trim()).then((ok) => ok && setInstruction(""))
           }
@@ -81,6 +90,7 @@ export function RevisePanel({
         <span className="text-xs text-fg-subtle">
           会重跑这一阶段的 Agent 并扣 Credits；下游产出会被标记为过期。
         </span>
+        {disabledReason && <span className="text-xs text-rf-warning">{disabledReason}</span>}
       </div>
 
       {state.actionError && state.busy === null && (

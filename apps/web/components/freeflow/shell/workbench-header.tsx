@@ -49,6 +49,8 @@ export function WorkbenchHeader({
     onClick: () => void;
     disabled?: boolean;
     loading?: boolean;
+    /** 悬停说明。禁用时用来说清为什么点不了——一颗灰按钮本身不解释自己 */
+    title?: string;
   };
   /** 右栏在窄屏下的开关；不需要右栏时页面不传，这里就不占位 */
   asideToggle?: { controls: string; open: boolean; onOpen: () => void };
@@ -112,6 +114,7 @@ export function WorkbenchHeader({
               size="sm"
               aria-busy={primaryAction.loading || undefined}
               disabled={primaryAction.disabled || primaryAction.loading}
+              title={primaryAction.title}
               onClick={primaryAction.onClick}
             >
               {primaryAction.loading ? (

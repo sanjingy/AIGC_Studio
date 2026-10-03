@@ -42,6 +42,9 @@ export function ShotStage({
   urlOf,
   actions,
   status,
+  frameClassName = "aspect-video",
+  fit = "cover",
+  noun,
 }: {
   code: string;
   title: string;
@@ -53,6 +56,12 @@ export function ShotStage({
   actions: React.ReactNode;
   /** 动作下方的状态与错误行 */
   status?: React.ReactNode;
+  /** 大图框的比例与尺寸。角色立绘、场景四视图要换成自己的比例（P2B） */
+  frameClassName?: string;
+  /** 四视图、立绘要完整看到，传 `contain`；分镜首帧默认 `cover` */
+  fit?: "cover" | "contain";
+  /** 空图占位的读屏名词，透传给 `ShotImage`；不传保持「镜头图像」 */
+  noun?: string;
 }) {
   const [peek, setPeek] = React.useState<string | null>(null);
   const peeked = peek ? history.find((h) => h.assetId === peek) ?? null : null;
@@ -65,8 +74,14 @@ export function ShotStage({
 
   return (
     <section aria-label={`${code} 画面`} className="flex min-w-0 flex-col gap-3">
-      <div className="relative aspect-video w-full overflow-hidden rounded-md border border-border bg-surface">
-        <ShotImage src={urlOf(shown?.assetId)} alt={`${code} ${title}`} iconClassName="size-10" />
+      <div className={cn("relative w-full overflow-hidden rounded-md border border-border bg-surface", frameClassName)}>
+        <ShotImage
+          src={urlOf(shown?.assetId)}
+          alt={`${code} ${title}`}
+          iconClassName="size-10"
+          className={fit === "contain" ? "object-contain" : undefined}
+          noun={noun}
+        />
         {shown && (
           <span className="absolute top-2 left-2 rounded-sm bg-bg/85 px-1.5 py-0.5 text-xs text-fg-muted">
             {peeked ? `历史版本 · ${when(shown.createdAt)}` : `当前版 · ${when(shown.createdAt)}`}
@@ -114,7 +129,7 @@ export function ShotStage({
                     )}
                   >
                     <span className="block aspect-video bg-surface-2">
-                      <ShotImage src={urlOf(h.assetId)} alt="" iconClassName="size-5" />
+                      <ShotImage src={urlOf(h.assetId)} alt="" iconClassName="size-5" noun={noun} />
                     </span>
                     <span className="flex items-center gap-1 px-1.5 py-1 text-[11px] leading-4 text-fg-muted">
                       {h.imageSource === "local" && <Laptop aria-hidden className="size-3 shrink-0" />}

@@ -298,6 +298,7 @@ export function BaseImageActions({
   renders,
   pickerTitle,
   disabled,
+  disabledReason,
   triggerClassName,
 }: {
   /** 只有角色和场景有基准图；分镜传进来也没有意义，调用方自己判断 */
@@ -305,6 +306,8 @@ export function BaseImageActions({
   renders: Renders;
   pickerTitle: string;
   disabled: boolean;
+  /** 禁用时按钮上说明原因（P2B：档案有未保存改动时不能换图）。不传保持原提示 */
+  disabledReason?: string | null;
   triggerClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -380,7 +383,7 @@ export function BaseImageActions({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        title="用一张已有的图，不调用模型，不扣 Credits"
+        title={(disabled && disabledReason) || "用一张已有的图，不调用模型，不扣 Credits"}
       >
         用已有图
         <ChevronDown aria-hidden className="size-3" />

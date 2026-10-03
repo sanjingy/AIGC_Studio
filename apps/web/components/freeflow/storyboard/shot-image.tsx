@@ -19,11 +19,14 @@ export function ShotImage({
   alt,
   className,
   iconClassName = "size-9",
+  noun = "镜头图像",
 }: {
   src?: string;
   alt: string;
   className?: string;
   iconClassName?: string;
+  /** 占位块读屏说明里的名词；角色 / 场景页换成「立绘」「四视图」（P2B） */
+  noun?: string;
 }) {
   const [failed, setFailed] = React.useState(false);
 
@@ -48,7 +51,7 @@ export function ShotImage({
   return (
     <div className="rf-shot-placeholder grid size-full place-items-center">
       <RenderImageIcon aria-hidden className={cn("text-fg-subtle", iconClassName)} />
-      <span className="sr-only">{failed ? "镜头图像加载失败" : "暂无镜头图像"}</span>
+      <span className="sr-only">{failed ? `${noun}加载失败` : `暂无${noun}`}</span>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-# Reelbench 参考工作台实施计划
+﻿# Reelbench 参考工作台实施计划
 
 2026-09-25 · Lead 负责计划、契约与验收；Opus 串行实施。
 
@@ -20,9 +20,9 @@
 
 | 阶段 | 可验收结果 | 依赖与边界 | 状态 |
 |---|---|---|---|
-| P1 分镜工作台样板 | 模块栏、真实节点/镜头目录、分镜总览、筛选、编辑预览、当前范围补图、历史与审核 | 复用现有 nodes/index/node_index；不伪造集归属、时长、视频 | 已派发，待验收 |
-| P2 剧本/角色/场景 | 同一壳内按实际集/场、角色、地点选择；主区编辑+图；上传/选资产/生成闭环 | P1 验收；复用内容补丁、提示词、基准图接口 | 待实施 |
-| P3 首页/资产/任务/设置 | 参考创意输入首页、近期项目；资产检索与使用；任务范围/失败恢复；清楚的上游模型控制 | P1 壳稳定；只提供可持久化且实际消费的选项 | 待实施 |
+| P1 分镜工作台样板 | 模块栏、真实节点/镜头目录、分镜总览、筛选、编辑预览、当前范围补图、历史与审核 | 复用现有 nodes/index/node_index；不伪造集归属、时长、视频 | 已完成，f512af0 已部署，用户确认效果 |
+| P2 剧本/角色/场景 | 同一壳内按实际集/场、角色、地点选择；主区编辑+图；上传/选资产/生成闭环 | P1 验收；复用内容补丁、提示词、基准图接口 | 已验收（Mock；真实后端闭环留 P4） |
+| P3 首页/资产/任务/设置 | 参考创意输入首页、近期项目；资产检索与使用；任务范围/失败恢复；清楚的上游模型控制 | P1 壳稳定；只提供可持久化且实际消费的选项 | 实施中：P3A 首页/资产 |
 | P4 整体验收与交付 | 桌面/窄屏、真实 API 闭环、回归、文档、提交推送与服务器更新 | P1–P3 Lead 验收；部署前验证差异与健康检查 | 待实施 |
 
 依赖顺序 P1 → P2 → P3 → P4；每次仅一个实施 Worker，失败返工通过后才推进。每个阶段另建有明确允许文件范围与测试要求的任务书。
@@ -48,3 +48,13 @@
 - P1 Task：`task_4894245495d2`；Dispatch：`ctx_c5443c3397f9`；Worker：`term_167b8c19-5a46-48ba-b6d2-e66c93c6d2b8`，终端已显示 Opus 5 / 1M / high，不能据此宣称为 5.5。
 - 旧二次美化任务继续保持停止，新参考任务从基线开始。
 - 2026-09-26 恢复：原 Worker 终端丢失，旧 Dispatch 已失败；任务被恢复为 ready。接回原 Run，启动新 Dispatch `ctx_bbf87bd0f6ca` / Worker `term_b77844de-7563-4a80-89dc-8c9f281e6aa6`。启动时任务输入未实际到达，经补送任务说明后，Worker 已核实身份并开始读取资料；以更新后的 ack、设计稿、代码与验收报告判断实际进度。
+- 2026-09-27 接续 P2A：task_e299df6b71d2 / ctx_76833509f154 / term_778c9f49-090e-426b-ac26-5580094c158a。上轮菜单字符 2 被误读为新需求而停顿；已澄清并恢复原任务。P2B 与 P3 范围草案已准备，等待前置验收。
+- 2026-09-27 用户指定详细实现交 Opus 5.5：在现有 P2A 会话内切换为 claude-opus-5-5[1m]，CLI 确认 Opus 5.5（1M context）。保留代码与上下文，继续修复审阅 A–E 并完成测试；Lead 负责范围与验收。
+- 2026-09-28 接续浏览器验收：旧会话上下文触顶，ctx_76833509f154 已撤销执行权并保留交接；新 Task task_abbfd6b35180 / Dispatch ctx_b987f1558305 / Terminal term_30cd684a-5db4-4dd0-abbf-40c7fa3c63dd，启动参数确认 claude-opus-5-5[1m] high。仅接续 P2A 剩余验证与修复，尚未验收交付。
+- 启动器首次未送达任务（把启动参数当输入），已撤销 ctx_b987f1558305 并复用就绪会话重新派发，当前有效 Dispatch 为 ctx_a8dcf408b027。
+
+- 2026-10-03 Lead 交接：原 Codex Lead（term_92a57f07）不再运行，Run 改由 Claude Lead `term_e9912ee2-c109-4152-8859-64b4613fddb5` 绑定（`run-use`）。P2B 首个 Task `task_2778f2ae7332` 因上下文触顶交接为 failed：代码、逻辑测试、typecheck 已完成，浏览器从未运行。续做 Task `task_45ab2bea6be8` / Dispatch `ctx_85db5feeb3e6` / Terminal `term_b997f2dc-8c46-4fdd-a501-21342121788d`，启动参数 `claude-opus-5-5[1m] high`，任务书 `orca/tasks/REELBENCH_P2B_FINISH.md`。
+- 2026-10-03 P2B 验收通过（Lead 复核）：Mock 浏览器验收 129/129，P2A 回归 96/96 + 导航 19/19，P1 回归 50/50，逻辑测试 37/37、typecheck、独立 build 通过；Lead 重跑逻辑测试/typecheck/`git diff --check` 并抽看截图。证据 `orca/tasks/REELBENCH_P2B.report.md`。仅 Mock，未做真实后端/Provider 闭环，出图完成路径未覆盖。
+- 同日返工 P2A：Worker 发现撤销后表单仍保留旧草稿（再保存会把撤销的改动写回），P2B 已修，P2A 的 `fields-editor` / `scene-editor` 同样写法，Lead 读码确认。Task `task_c7357e072ea9` / Dispatch `ctx_bb5269cfaee2`，派回同一终端。修完后进入 P3。
+- 2026-10-03 P2A 撤销刷新返工验收通过：Worker 先在浏览器复现（剧本字段与场编辑器各一次），修法是把 `rebaseDraft` 抽到 `lib/freeflow/draft-rebase.ts` 共用；逻辑测试 38/38、P2A accept 98/98（新增 2 条表单断言）、导航 19/19、P2B 129/129。Lead 重跑逻辑测试、typecheck、独立 build（exit 0）与 `git diff --check`。Worker 终端 `term_b997f2dc` 已回收。P2 阶段完成，下一步 P3。
+- 2026-10-03 P3A 首页与资产派发：Task `task_640de70d611c` / Dispatch `ctx_31d285fb7b7d` / Terminal `term_28df7646-71f5-4ebb-ac99-c81b4522533c`，`claude-opus-5-5[1m] high`，任务书 `orca/tasks/REELBENCH_P3A.md`。不改后端；需要后端的点只记录。P3B 任务与设置排在 P3A 验收之后。

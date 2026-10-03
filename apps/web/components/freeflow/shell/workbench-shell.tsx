@@ -74,6 +74,8 @@ export function WorkbenchShell(props: {
     onClick: () => void;
     disabled?: boolean;
     loading?: boolean;
+    /** 悬停说明，禁用时说清原因 */
+    title?: string;
   };
   aside?: React.ReactNode;
   children: React.ReactNode;

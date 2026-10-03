@@ -45,6 +45,7 @@ export function GateActions({
   children,
   beforeApprove,
   approveBlockedReason,
+  blockedReason,
 }: {
   state: ProjectState;
   gate: GateName;
@@ -64,6 +65,14 @@ export function GateActions({
   beforeApprove?: () => Promise<boolean>;
   /** 有值 = 还不能确认通过，这句话就是原因。打回重做不受影响。 */
   approveBlockedReason?: string | null;
+  /**
+   * 有值 = 确认与打回**都**暂停，这句话就是原因。
+   *
+   * 和上一项不是一回事：那一项说的是"这道门的正文还没填完"，打回照样可以；
+   * 这一项说的是"页面上有别的东西没收尾"（例如未保存的字段编辑）——
+   * 过门与打回都会重载产出，手上的草稿会跟着消失。
+   */
+  blockedReason?: string | null;
 }) {
   const [comment, setComment] = useState("");
   const open = state.pendingGate === gate;
@@ -109,19 +118,24 @@ export function GateActions({
         <Button
           size="sm"
           variant="primary"
-          disabled={working || Boolean(approveBlockedReason)}
-          title={approveBlockedReason ?? "确认通过，编排器进入下一阶段"}
+          disabled={working || Boolean(blockedReason) || Boolean(approveBlockedReason)}
+          title={blockedReason ?? approveBlockedReason ?? "确认通过，编排器进入下一阶段"}
           onClick={() => void act(state.approve)}
         >
           {busyIcon(state.busy === "approve") ?? <Check aria-hidden className="size-3.5" />}
           确认通过
         </Button>
-        <Button size="sm" disabled={working} onClick={() => void act(state.reject)}>
+        <Button
+          size="sm"
+          disabled={working || Boolean(blockedReason)}
+          title={blockedReason ?? undefined}
+          onClick={() => void act(state.reject)}
+        >
           {busyIcon(state.busy === "reject") ?? <Undo2 aria-hidden className="size-3.5" />}
           打回重做
         </Button>
-        {approveBlockedReason && (
-          <span className="text-xs text-rf-warning">{approveBlockedReason}</span>
+        {(blockedReason ?? approveBlockedReason) && (
+          <span className="text-xs text-rf-warning">{blockedReason ?? approveBlockedReason}</span>
         )}
       </div>
       {state.actionError && (

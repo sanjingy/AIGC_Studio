@@ -30,7 +30,14 @@ import { GateActions } from "./production-actions";
  * 光照没有挂在锚点卡里，是有意的：挂进去的话，走内联描述的场景永远没人
  * 确认过它的光——而它们照样要出图。
  */
-export function AnchorsGate({ state }: { state: ProjectState }) {
+export function AnchorsGate({
+  state,
+  blockedReason,
+}: {
+  state: ProjectState;
+  /** 页面有未保存改动或正在写库时，确认与打回都禁用（P2B） */
+  blockedReason?: string | null;
+}) {
   const summary = (state.pendingApproval?.payload_json?.summary ?? {}) as AnchorsGateSummary;
 
   const cards = summary.cards ?? [];
@@ -60,7 +67,7 @@ export function AnchorsGate({ state }: { state: ProjectState }) {
   const cardRefs = useMemo(() => new Set(cards.map((c) => c.ref)), [cards]);
 
   return (
-    <GateActions state={state} gate="anchors">
+    <GateActions state={state} gate="anchors" blockedReason={blockedReason}>
       <div className="mt-3 flex flex-col gap-3">
         {incomplete.size > 0 && (
           <p

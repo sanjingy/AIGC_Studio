@@ -605,12 +605,21 @@ export function ShotDetail(props: {
 }
 
 /** 图比最后一次改动旧时的提示。**只标记，不自动重出**（ADR-033 第 4 条）。 */
-export function OutdatedNotice({ editedAt }: { editedAt: number }) {
+export function OutdatedNotice({
+  editedAt,
+  changed = "分镜改动",
+  content = "当前镜头内容",
+}: {
+  editedAt: number;
+  /** 角色 / 场景页复用时换成「档案改动」「当前档案」 */
+  changed?: string;
+  content?: string;
+}) {
   return (
     <p className="flex items-start gap-2 rounded-md border border-rf-agent/25 bg-rf-agent-soft px-3 py-2 text-xs leading-5 text-rf-agent">
       <StaleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
       <span>
-        这张图出在 {new Date(editedAt).toLocaleString("zh-CN")} 的分镜改动之前，可能与当前镜头内容不符。
+        这张图出在 {new Date(editedAt).toLocaleString("zh-CN")} 的{changed}之前，可能与{content}不符。
         要不要重出由你决定——系统不会自动重跑，也不会删掉现有的图。
       </span>
     </p>

@@ -46,12 +46,15 @@ function BatchCard({
   me,
   describePath,
   busy,
+  blockedReason,
   onUndo,
 }: {
   batch: RevisionBatch;
   me: User | null;
   describePath: (path: string) => string;
   busy: boolean;
+  /** 有值 = 现在不能撤销，这句话就是原因（例如手上有未保存的草稿） */
+  blockedReason?: string | null;
   onUndo: () => void;
 }) {
   const undone = batch.undone_by_batch_id !== null;
@@ -84,8 +87,14 @@ function BatchCard({
           className="ml-auto"
           // 已经撤过的批再撤一次后端一定 409，所以在这里就禁掉，
           // 不让用户点下去吃一个错误。
-          disabled={undone || busy}
-          title={undone ? "这一批已经撤销过了" : "把这一批改动整批退回去"}
+          disabled={undone || busy || Boolean(blockedReason)}
+          title={
+            blockedReason
+              ? blockedReason
+              : undone
+                ? "这一批已经撤销过了"
+                : "把这一批改动整批退回去"
+          }
           onClick={onUndo}
         >
           {busy ? (
@@ -131,12 +140,21 @@ export function RevisionHistoryDrawer({
   edit,
   title,
   describePath,
+  emptyText,
+  undoBlockedReason,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   edit: ContentEdit;
   title: string;
   describePath: (path: string) => string;
+  /** 还没有任何改动时说什么。不传用分镜的措辞（这个抽屉最早只给分镜用）。 */
+  emptyText?: string;
+  /**
+   * 有值 = 现在不能撤销，这句话就是原因。撤销会整块换掉产出，
+   * 手上那份没保存的草稿会跟着消失。
+   */
+  undoBlockedReason?: string | null;
 }) {
   const [me, setMe] = React.useState<User | null>(null);
   const headingId = React.useId();
@@ -185,7 +203,10 @@ export function RevisionHistoryDrawer({
 
         {edit.batches.length === 0 ? (
           <p className="rounded-[2px] border border-dashed border-border px-4 py-10 text-center text-xs leading-5 text-fg-subtle">
-            {edit.loading ? "加载中…" : "还没有字段级改动。在镜头上改一个字段并保存，这里就会留下一条记录。"}
+            {edit.loading
+              ? "加载中…"
+              : (emptyText ??
+                "还没有字段级改动。在镜头上改一个字段并保存，这里就会留下一条记录。")}
           </p>
         ) : (
           <ol className="flex flex-col gap-2.5">
@@ -196,6 +217,7 @@ export function RevisionHistoryDrawer({
                 me={me}
                 describePath={describePath}
                 busy={edit.busy === "undo"}
+                blockedReason={undoBlockedReason}
                 onUndo={() => void edit.undo(batch.batch_id)}
               />
             ))}

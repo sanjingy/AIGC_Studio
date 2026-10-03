@@ -131,7 +131,14 @@ export function ProjectWorkbench({
   /** 当前路由，用来在侧栏里高亮。传完整 pathname。 */
   activeHref: string;
   /** 顶栏右上角那颗主按钮。不传就不画——没有动作的页面不该有一颗按钮。 */
-  primaryAction?: { label: string; onClick: () => void; disabled?: boolean; loading?: boolean };
+  primaryAction?: {
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+    loading?: boolean;
+    /** 悬停说明。页面禁用它时（例如有未保存的草稿）必须说清原因 */
+    title?: string;
+  };
   /**
    * 右栏（阶段 + 门、运行任务、一致性）。分镜页关掉：它把门、运行数与出图覆盖
    * 放进了主区，右栏再占 300px 只会挤掉画面。
