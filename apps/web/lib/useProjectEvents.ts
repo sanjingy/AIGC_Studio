@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { realtime, tasks as tasksApi, type Task, type TaskStatus } from "@/lib/api";
+import { normalizeTaskPage } from "@/lib/freeflow/task-scope";
 
 /**
  * SSE 事件里的任务快照。字段是 `tasks` 表的一个子集——
@@ -19,6 +20,13 @@ export type TaskSnapshot = {
   attempt: number;
   error_code: string | null;
   actual_cost: number;
+  /**
+   * 本地收到的先后（通道内单调递增，不是服务端字段）。快照按请求**发出**时的序号记，
+   * 事件按到达时记。`useTasks` 拿它判断一条快照比自己刚重拉的列表新还是旧——
+   * 旧的不能盖在新列表上（比如 SSE 断着时点了重试，重拉的列表已是排队中，
+   * 通道里还留着那条失败快照）。
+   */
+  seq?: number;
 };
 
 type Envelope = { type: string; project_id: string; ts: string; data: TaskSnapshot };
@@ -57,6 +65,14 @@ type Channel = {
   timer: ReturnType<typeof setTimeout> | null;
   retry: number;
   closed: boolean;
+  /** 连上过一次之后的每次 open 都是重连，要补一次快照 */
+  opened: boolean;
+  /** 快照请求在途时到达的事件。快照落地后按序重放：它们比快照新 */
+  buffer: TaskSnapshot[] | null;
+  /** 重连后补过几次快照。`useTasks` 据此重拉完整行（新任务、成本不在事件里） */
+  resyncs: number;
+  /** 见 `TaskSnapshot.seq` */
+  seq: number;
 };
 
 /**
@@ -72,11 +88,37 @@ function emit(ch: Channel) {
   for (const notify of ch.listeners) notify();
 }
 
+/**
+ * 全量重取快照。
+ *
+ * 在途期间到达的事件先缓冲、落地后重放：快照请求发出之后才产生的事件，
+ * 内容一定比快照新，直接被快照覆盖掉就会回退成旧状态。
+ */
 async function loadSnapshot(projectId: string, ch: Channel) {
-  const page = await tasksApi.list({ projectId, limit: 100 }).catch(() => null);
-  if (!page || ch.closed) return;
-  ch.tasks = Object.fromEntries(page.items.map((t) => [t.id, snapshotOf(t)]));
+  ch.buffer = ch.buffer ?? [];
+  ch.seq += 1;
+  const at = ch.seq;
+  const raw = await tasksApi.list({ projectId, limit: 100 }).catch(() => null);
+  const pending = ch.buffer ?? [];
+  ch.buffer = null;
+  if (ch.closed) return;
+  if (raw) {
+    const page = normalizeTaskPage(raw);
+    ch.tasks = Object.fromEntries(page.items.map((t) => [t.id, { ...snapshotOf(t), seq: at }]));
+  }
+  for (const snap of pending) ch.tasks = { ...ch.tasks, [snap.task_id]: snap };
   emit(ch);
+}
+
+/** 解析一条任务事件。坏数据跳过，不让一条事件把整个通道打断。 */
+function parseTaskEvent(raw: string): TaskSnapshot | null {
+  try {
+    const env = JSON.parse(raw) as Partial<Envelope>;
+    const data = env?.data;
+    return data && typeof data.task_id === "string" ? data : null;
+  } catch {
+    return null;
+  }
 }
 
 async function connect(projectId: string, ch: Channel) {
@@ -92,12 +134,24 @@ async function connect(projectId: string, ch: Channel) {
       ch.retry = 0;
       ch.state = "live";
       emit(ch);
+      // 每次重连都是新 EventSource + 新票据，浏览器不会带上次的 Last-Event-ID，
+      // 服务端也就不会补发、更不会发 sync.required——断线期间的事件全丢了。
+      // 所以重连成功后自己补一次全量快照，不假装无缝续上。
+      if (ch.opened) {
+        ch.resyncs += 1;
+        void loadSnapshot(projectId, ch);
+      }
+      ch.opened = true;
     };
 
     const onTask = (e: MessageEvent<string>) => {
-      const env = JSON.parse(e.data) as Envelope;
+      const parsed = parseTaskEvent(e.data);
+      if (!parsed) return;
+      ch.seq += 1;
+      const snap = { ...parsed, seq: ch.seq };
       // 整份快照覆盖，不做增量合并：重连必然重放事件，增量会错乱
-      ch.tasks = { ...ch.tasks, [env.data.task_id]: env.data };
+      if (ch.buffer) ch.buffer.push(snap);
+      ch.tasks = { ...ch.tasks, [snap.task_id]: snap };
       emit(ch);
     };
 
@@ -139,6 +193,10 @@ function acquire(projectId: string): Channel {
     timer: null,
     retry: 0,
     closed: false,
+    opened: false,
+    buffer: null,
+    resyncs: 0,
+    seq: 0,
   };
   channels.set(projectId, ch);
   void loadSnapshot(projectId, ch).then(() => connect(projectId, ch as Channel));
@@ -164,19 +222,25 @@ function release(projectId: string, ch: Channel) {
  * 2. 收到 sync.required 说明断线太久、中间有缺口，必须全量拉取，
  *    不能假装无缝续上。
  */
+/** 通道当前的序号。`useTasks` 在发起列表请求前取一次，作为「比列表新」的分界线。 */
+export function currentSeq(projectId: string | null): number {
+  return (projectId && channels.get(projectId)?.seq) || 0;
+}
+
 export function useProjectEvents(projectId: string | null) {
-  const [snapshot, setSnapshot] = useState<{ tasks: TaskSnapshot[]; state: ConnectionState }>({
+  const [snapshot, setSnapshot] = useState<{ tasks: TaskSnapshot[]; state: ConnectionState; resyncs: number }>({
     tasks: [],
     state: "connecting",
+    resyncs: 0,
   });
 
   useEffect(() => {
     if (!projectId) {
-      setSnapshot({ tasks: [], state: "closed" });
+      setSnapshot({ tasks: [], state: "closed", resyncs: 0 });
       return;
     }
     const ch = acquire(projectId);
-    const notify = () => setSnapshot({ tasks: Object.values(ch.tasks), state: ch.state });
+    const notify = () => setSnapshot({ tasks: Object.values(ch.tasks), state: ch.state, resyncs: ch.resyncs });
     ch.listeners.add(notify);
     notify();
     return () => {

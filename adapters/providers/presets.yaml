@@ -1,0 +1,126 @@
+# 组织供应商预设（ADR-039 第 3 条）。
+#
+# **只写事实**：名称、协议、Base URL、推荐模型、文档与取 Key 链接、图标键。
+# **不写价格**——价格在 `model_pricing` / `pricing_rules`，自带 Key 的调用一律按
+# `byok_unit_credits` 收平台服务费，不为用户自带模型录单价。
+#
+# 每条 Base URL 与模型 id 以厂商官方文档为准（核对于 2026-10-05，来源即 docs_url，
+# 明细见 orca/tasks/MULTI_PROVIDER_A1.design.md §4）。查不到官方来源的条目不放；
+# 取 Key 页面没在官方文档里核到的，`key_url` 留 null。
+#
+# 选预设 = 把这里的模板拷进一行连接，用户只填 Key。Base URL 可改（地域节点、
+# 工作区域名），改了一样过 `endpoint_url` 校验。厂商改版后这里会过时：错了只影响
+# 默认值，用户可以手改。
+#
+# 加载时严格校验（`adapters/providers/presets.py`）：未知字段、白名单外协议、
+# 非 https / 私网 Base URL、重复 preset_id 都会让进程起不来，而不是带病运行。
+
+presets:
+  # ---------------------------------------------------------------- 文本
+  - preset_id: deepseek
+    label: DeepSeek
+    base_url: https://api.deepseek.com
+    docs_url: https://api-docs.deepseek.com/
+    key_url: null
+    icon: deepseek
+    models:
+      - {model_id: deepseek-flash, protocol: openai_chat}
+      # 与 `adapters/providers/deepseek.py::_REASONING_MODELS` 一致：v4-pro 带思考过程
+      - {model_id: deepseek-v4-pro, protocol: openai_chat, reasoning: true}
+
+  - preset_id: moonshot
+    label: Kimi（月之暗面）
+    base_url: https://api.moonshot.cn/v1
+    docs_url: https://platform.kimi.com/docs/guide/start-using-kimi-api
+    key_url: https://platform.kimi.com/console/api-keys
+    icon: kimi
+    models:
+      - {model_id: kimi-k3, protocol: openai_chat}
+      - {model_id: kimi-k2.6, protocol: openai_chat}
+
+  - preset_id: zhipu
+    label: 智谱 GLM
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    docs_url: https://docs.bigmodel.cn/cn/guide/develop/openai/introduction
+    key_url: https://bigmodel.cn/usercenter/proj-mgmt/apikeys
+    icon: zhipu
+    models:
+      - {model_id: glm-5.3, protocol: openai_chat}
+      - {model_id: glm-5.2, protocol: openai_chat}
+
+  - preset_id: qwen
+    label: 通义千问（百炼 compatible-mode）
+    # 官方推荐工作区域名 https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1，
+    # 文档同时说明旧域名仍可用；预设给旧域名，用户可改成自己的工作区地址。
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    docs_url: https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope
+    key_url: null
+    icon: qwen
+    models:
+      - {model_id: qwen3.8-max, protocol: openai_chat}
+      - {model_id: qwen-plus, protocol: openai_chat}
+
+  - preset_id: volcengine_ark
+    label: 豆包（火山方舟）
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    docs_url: https://docs.volcengine.com/docs/ark/chat-api
+    key_url: https://ark.volcengine.com/region:cn-beijing/apikey
+    icon: doubao
+    models:
+      - {model_id: doubao-seed-2-1-pro-260628, protocol: openai_chat}
+      - {model_id: doubao-seed-2-0-lite-260428, protocol: openai_chat}
+
+  - preset_id: openrouter
+    label: OpenRouter
+    base_url: https://openrouter.ai/api/v1
+    docs_url: https://openrouter.ai/docs/quickstart
+    key_url: null
+    icon: openrouter
+    models:
+      - {model_id: "~openai/gpt-sol-latest", protocol: openai_chat}
+
+  - preset_id: siliconflow
+    label: 硅基流动
+    base_url: https://api.siliconflow.cn/v1
+    docs_url: https://docs.siliconflow.cn/cn/userguide/quickstart
+    key_url: https://cloud.siliconflow.cn/account/ak
+    icon: siliconflow
+    models:
+      # R1 是推理模型（思考 token 计入输出预算）
+      - {model_id: Pro/deepseek-ai/DeepSeek-R1, protocol: openai_chat, reasoning: true}
+
+  # ---------------------------------------------------------------- 出图
+  - preset_id: volcengine_seedream
+    label: 火山方舟 Seedream
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    docs_url: https://docs.volcengine.com/docs/82379/1541523
+    key_url: https://ark.volcengine.com/region:cn-beijing/apikey
+    icon: doubao
+    models:
+      # 官方页只给出了 5.0 pro 的完整 id；4.0 / 4.5 / 5.0 lite 的 id 只在第三方仓库里见到，不放。
+      - {model_id: doubao-seedream-5-0-pro-260628, protocol: openai_images}
+    request_overrides:
+      # 官方默认 true（右下角"AI 生成"）。平台在渲染管线里自己打 AIGC 标识。
+      watermark: false
+
+  - preset_id: zhipu_cogview
+    label: 智谱 CogView
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    docs_url: https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E5%9B%BE%E5%83%8F%E7%94%9F%E6%88%90
+    key_url: https://bigmodel.cn/usercenter/proj-mgmt/apikeys
+    icon: zhipu
+    models:
+      # 不覆盖 watermark_enabled：官方说明关水印要先签免责声明，未签时传 false 会被拒
+      - {model_id: cogview-4-250304, protocol: openai_images}
+      - {model_id: cogview-4, protocol: openai_images}
+      - {model_id: cogview-3-flash, protocol: openai_images}
+
+  - preset_id: openai_images_relay
+    label: OpenAI 图片兼容中转（自定义）
+    # 中转地址与模型由用户自己填：这一条只给协议与文档。
+    base_url: ""
+    docs_url: https://developers.openai.com/api/reference/resources/images/methods/generate
+    key_url: null
+    icon: openai
+    protocols: [openai_images]
+    models: []

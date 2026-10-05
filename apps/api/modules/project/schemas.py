@@ -53,7 +53,8 @@ class ProjectModelPreferenceIn(BaseModel):
     """
 
     capability: str = Field(min_length=1, max_length=64)
-    model_id: str | None = Field(default=None, max_length=128)
+    #: 目录里的模型 id，或 `provider.org:<连接 id>[:<模型 id>]`（49 + 1 + 128 字符）
+    model_id: str | None = Field(default=None, max_length=192)
 
     @field_validator("model_id")
     @classmethod

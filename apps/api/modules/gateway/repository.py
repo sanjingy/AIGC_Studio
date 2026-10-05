@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.modules.gateway.models import OrgModelDefault, OrgTextEndpoint
+from apps.api.modules.gateway.models import OrgModelDefault, OrgProviderConnection
 
 # ------------------------------------------------------------ 组织默认
 
@@ -80,60 +81,97 @@ async def soft_delete_default(db: AsyncSession, *, row: OrgModelDefault) -> None
     await db.flush()
 
 
-# ------------------------------------------------------------ 自定义端点
+# ------------------------------------------------------------ 供应商连接
 
 
-async def get_endpoint(db: AsyncSession, *, org_id: uuid.UUID) -> OrgTextEndpoint | None:
+async def get_connection(
+    db: AsyncSession, *, org_id: uuid.UUID, connection_id: uuid.UUID
+) -> OrgProviderConnection | None:
+    """按 id 取本 org 的连接。别的 org 的同一个 id 查不到（调用方据此返 404）。"""
     return (
         await db.execute(
-            select(OrgTextEndpoint).where(
-                OrgTextEndpoint.org_id == org_id,
-                OrgTextEndpoint.deleted_at.is_(None),
+            select(OrgProviderConnection).where(
+                OrgProviderConnection.id == connection_id,
+                OrgProviderConnection.org_id == org_id,
+                OrgProviderConnection.deleted_at.is_(None),
             )
         )
     ).scalar_one_or_none()
 
 
-async def save_endpoint(
+async def list_connections(db: AsyncSession, *, org_id: uuid.UUID) -> list[OrgProviderConnection]:
+    return list(
+        (
+            await db.execute(
+                select(OrgProviderConnection)
+                .where(
+                    OrgProviderConnection.org_id == org_id,
+                    OrgProviderConnection.deleted_at.is_(None),
+                )
+                .order_by(OrgProviderConnection.created_at, OrgProviderConnection.id)
+            )
+        ).scalars()
+    )
+
+
+async def count_connections(db: AsyncSession, *, org_id: uuid.UUID) -> int:
+    return int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(OrgProviderConnection)
+                .where(
+                    OrgProviderConnection.org_id == org_id,
+                    OrgProviderConnection.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one()
+    )
+
+
+async def create_connection(
     db: AsyncSession,
     *,
     org_id: uuid.UUID,
     label: str,
+    preset_id: str | None,
     base_url: str,
-    model_id: str,
-    key_encrypted: str | None,
+    key_encrypted: str,
+    models: list[dict[str, Any]],
+    enabled: bool,
     created_by: uuid.UUID,
-) -> OrgTextEndpoint:
-    """新建或就地更新。`key_encrypted=None` 表示"Key 不变"，只改地址或模型。"""
-    row = await get_endpoint(db, org_id=org_id)
-    if row is None:
-        if key_encrypted is None:
-            raise ValueError("new endpoint requires a key")
-        row = OrgTextEndpoint(
-            org_id=org_id,
-            label=label,
-            base_url=base_url,
-            model_id=model_id,
-            key_encrypted=key_encrypted,
-            created_by=created_by,
-        )
-        db.add(row)
-        await db.flush()
-        await db.refresh(row)
-        return row
-    row.label = label
-    row.base_url = base_url
-    row.model_id = model_id
-    if key_encrypted is not None:
-        row.key_encrypted = key_encrypted
-    row.created_by = created_by
+) -> OrgProviderConnection:
+    row = OrgProviderConnection(
+        org_id=org_id,
+        label=label,
+        preset_id=preset_id,
+        base_url=base_url,
+        key_encrypted=key_encrypted,
+        models=models,
+        enabled=enabled,
+        created_by=created_by,
+    )
+    db.add(row)
     await db.flush()
     await db.refresh(row)
     return row
 
 
-async def soft_delete_endpoint(db: AsyncSession, *, row: OrgTextEndpoint) -> None:
+async def update_connection(
+    db: AsyncSession, *, row: OrgProviderConnection, changes: dict[str, Any]
+) -> OrgProviderConnection:
+    """就地改。`changes` 只含要改的列；JSONB 要整个换成新 list 才会被标脏。"""
+    for column, value in changes.items():
+        setattr(row, column, value)
+    await db.flush()
+    # `updated_at` 是服务端 onupdate，不 refresh 的话读它会触发同步 IO
+    await db.refresh(row)
+    return row
+
+
+async def soft_delete_connection(db: AsyncSession, *, row: OrgProviderConnection) -> None:
     """软删。密文一并清空，理由同 `billing.repository.soft_delete_credential`。"""
     row.deleted_at = datetime.now(UTC)
     row.key_encrypted = ""
+    row.secret_encrypted = None
     await db.flush()

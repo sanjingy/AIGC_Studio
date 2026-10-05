@@ -616,3 +616,412 @@ test("剧本字段 / 场编辑的草稿跟库值：撤销后没动过的换新�
   const beatNext = { ...beat, emotion: "急" };
   assert.deepEqual(rebaseDraft(beat, beatNext, { ...beat, text: "快上船" }, false), { ...beatNext, text: "快上船" });
 });
+
+// ---------------------------------------------------------------- P3A 首页与资产
+
+const recency = await jiti.import("../lib/freeflow/project-recency.ts");
+const homeStart = await jiti.import("../lib/freeflow/home-start.ts");
+const assetScope = await jiti.import("../lib/freeflow/asset-scope.ts");
+
+test("近期项目按 updated_at 倒序，不拿 created_at 兜底；坏时间排最后；不改入参", () => {
+  const rows = [
+    { id: "a", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z" },
+    { id: "b", created_at: "2026-09-01T00:00:00Z", updated_at: "2026-10-03T08:00:00Z" },
+    { id: "c", created_at: "2026-10-02T00:00:00Z", updated_at: "not-a-date" },
+    { id: "d", created_at: "2026-09-20T00:00:00Z", updated_at: "2026-10-01T00:00:00Z" },
+  ];
+  const before = rows.map((r) => r.id).join();
+  assert.deepEqual(recency.sortByRecentEdit(rows).map((r) => r.id), ["b", "a", "d", "c"]);
+  assert.equal(rows.map((r) => r.id).join(), before);
+});
+
+test("最近编辑时间文案：今天 / 昨天 / 同年 / 跨年 / 坏数据", () => {
+  const now = new Date(2026, 9, 3, 18, 0);
+  assert.equal(recency.formatEditedAt(new Date(2026, 9, 3, 9, 5).toISOString(), now), "今天 09:05");
+  assert.equal(recency.formatEditedAt(new Date(2026, 9, 2, 23, 59).toISOString(), now), "昨天 23:59");
+  assert.equal(recency.formatEditedAt(new Date(2026, 8, 28, 14, 5).toISOString(), now), "09-28 14:05");
+  assert.equal(recency.formatEditedAt(new Date(2025, 8, 28, 14, 5).toISOString(), now), "2025-09-28");
+  assert.equal(recency.formatEditedAt("garbage", now), "时间未知");
+});
+
+test("首页两个动作：只创建只要项目名；开始生产要项目名和原文；上限按码点数", () => {
+  const base = { title: "", source: "", createdId: null, phase: "idle" };
+  let a = homeStart.startAvailability(base);
+  assert.equal(a.createOnly.enabled, false);
+  assert.equal(a.createOnly.reason, "先填项目名");
+  assert.equal(a.start.enabled, false);
+
+  a = homeStart.startAvailability({ ...base, title: "第七夜" });
+  assert.equal(a.createOnly.enabled, true);
+  assert.equal(a.start.enabled, false);
+  assert.match(a.start.reason, /原文/);
+
+  a = homeStart.startAvailability({ ...base, title: "第七夜", source: "雨夜渡口" });
+  assert.equal(a.start.enabled, true);
+
+  // 20000 个 emoji 是 40000 个 UTF-16 单元，但按字符算正好在上限内
+  const emoji = "😀".repeat(homeStart.SOURCE_MAX);
+  assert.equal(homeStart.charCount(emoji), homeStart.SOURCE_MAX);
+  assert.equal(homeStart.startAvailability({ ...base, title: "t", source: emoji }).start.enabled, true);
+  a = homeStart.startAvailability({ ...base, title: "t", source: emoji + "x" });
+  assert.equal(a.start.enabled, false);
+  assert.match(a.start.reason, /超过/);
+
+  a = homeStart.startAvailability({ ...base, title: "t", source: "s", phase: "advancing" });
+  assert.equal(a.createOnly.enabled, false);
+  assert.equal(a.start.enabled, false);
+});
+
+test("开始生产失败后重试：只发 advance，不再建项目；项目名不再参与校验", () => {
+  assert.deepEqual(homeStart.startPlan({ createdId: null }), { create: true, advance: true });
+  assert.deepEqual(homeStart.startPlan({ createdId: "p1" }), { create: false, advance: true });
+  const a = homeStart.startAvailability({ title: "", source: "原文", createdId: "p1", phase: "idle" });
+  assert.equal(a.createOnly.enabled, false);
+  assert.equal(a.start.enabled, true);
+  assert.equal(homeStart.createOnlyWarning("  "), null);
+  assert.match(homeStart.createOnlyWarning("一段原文"), /不会随项目保存/);
+});
+
+test("资产类型筛选与后端 mime.py 一致，text 有入口；项目范围没有 Skill", () => {
+  const mime = readFileSync(new URL("../../api/modules/asset/mime.py", import.meta.url), "utf8");
+  const backendTypes = new Set([...mime.matchAll(/"[a-z]+\/[a-z0-9.+-]+": "([a-z]+)"/g)].map((m) => m[1]));
+  const fileFilters = assetScope.filtersFor("global").filter((f) => assetScope.serverType(f) !== undefined);
+  assert.deepEqual([...backendTypes].sort(), [...fileFilters].sort());
+  assert.equal(assetScope.serverType("text"), "text");
+  assert.equal(assetScope.FILTER_LABEL.text, "文本");
+  assert.equal(assetScope.serverType("character"), undefined);
+  assert.equal(assetScope.serverType("all"), undefined);
+  assert.ok(assetScope.filtersFor("global").includes("skill"));
+  assert.ok(!assetScope.filtersFor("project").includes("skill"));
+  assert.ok(assetScope.filtersFor("project").includes("text"));
+  assert.ok(assetScope.showsFiles("text") && !assetScope.showsFiles("scene"));
+  assert.ok(assetScope.showsCharacters("all") && assetScope.showsScenes("scene") && !assetScope.showsScenes("character"));
+});
+
+test("资产搜索：多词都要命中、不分大小写；档案按对象名能搜到；来源只认真实项目", () => {
+  assert.equal(assetScope.matchesQuery("", "x"), true);
+  assert.equal(assetScope.matchesQuery("Ferry 雨", "ferry_night.PNG", "雨夜"), true);
+  assert.equal(assetScope.matchesQuery("ferry 晴", "ferry_night.png", "雨夜"), false);
+  assert.deepEqual(assetScope.profileNames({ characters: [{ name: "船夫" }, { ref: "x" }, null] }, "characters"), ["船夫"]);
+  assert.deepEqual(assetScope.profileNames({ scenes: "bad" }, "scenes"), []);
+  const titles = new Map([["p1", "渡口"]]);
+  assert.equal(assetScope.sourceLabel(null, titles), "未挂项目");
+  assert.equal(assetScope.sourceLabel("p1", titles), "渡口");
+  assert.equal(assetScope.sourceLabel("p9", titles), "不在项目列表中");
+});
+
+test("预览方式：图/视频/音频直出，文本有大小上限并截断，其余只给下载；翻页去重", () => {
+  assert.equal(assetScope.previewKind({ type: "image", size_bytes: 1 }), "image");
+  assert.equal(assetScope.previewKind({ type: "text", size_bytes: 10 }), "text");
+  assert.equal(assetScope.previewKind({ type: "text", size_bytes: null }), "text");
+  assert.equal(assetScope.previewKind({ type: "text", size_bytes: assetScope.TEXT_PREVIEW_MAX_BYTES + 1 }), "none");
+  assert.equal(assetScope.previewKind({ type: "document", size_bytes: 1 }), "none");
+  assert.equal(assetScope.previewKind({ type: "workflow", size_bytes: 1 }), "none");
+  const long = "字".repeat(assetScope.TEXT_PREVIEW_CHARS + 5);
+  const clipped = assetScope.clipText(long);
+  assert.equal(clipped.clipped, true);
+  assert.equal(Array.from(clipped.text).length, assetScope.TEXT_PREVIEW_CHARS);
+  assert.deepEqual(assetScope.clipText("短").clipped, false);
+  assert.deepEqual(
+    assetScope.appendPage([{ id: "a" }, { id: "b" }], [{ id: "b" }, { id: "c" }]).map((x) => x.id),
+    ["a", "b", "c"],
+  );
+});
+
+test("资产库响应缺列表字段时当空列表、容量为 null；完整响应原样保留", () => {
+  const empty = assetScope.normalizeLibrary({ items: [], next_cursor: null });
+  assert.deepEqual(empty, {
+    usage: null,
+    assets: [],
+    next_cursor: null,
+    profiles: [],
+    characters: [],
+    folders: [],
+  });
+  assert.deepEqual(assetScope.normalizeLibrary(null).assets, []);
+  const usage = { used_bytes: 1, quota_bytes: null, free_bytes: null, percent_used: 0 };
+  const full = { usage, assets: [{ id: "a" }], next_cursor: "c1", profiles: [{ kind: "scenes" }], characters: [], folders: [] };
+  assert.deepEqual(assetScope.normalizeLibrary(full), full);
+});
+
+// ------------------------------------------------------------ P3B 任务
+const taskScope = await jiti.import("../lib/freeflow/task-scope.ts");
+const recordScope = await jiti.import("../lib/freeflow/record-scope.ts");
+
+const T = (over = {}) => ({
+  id: "t1", project_id: "p1", type: "image.generate", status: "failed", progress: 0, attempt: 1, max_attempts: 3,
+  error_code: null, estimated_cost: 120, actual_cost: 0, counts_as_waste: false, output_json: null,
+  created_at: "2026-10-01T10:00:00+00:00", started_at: null, finished_at: null, ...over,
+});
+
+test("任务行缺字段：数字当 0、时间当 null、未知状态原样保留、没 id 的丢掉", () => {
+  const t = taskScope.normalizeTask({ id: "x", status: "paused" });
+  assert.equal(t.status, "paused");
+  assert.equal(t.type, "unknown");
+  assert.equal(t.progress, 0);
+  assert.equal(t.estimated_cost, 0);
+  assert.equal(t.created_at, null);
+  assert.equal(t.error_code, null);
+  assert.equal(taskScope.normalizeTask({ status: "queued" }), null);
+  assert.equal(taskScope.normalizeTask(null), null);
+  assert.equal(taskScope.normalizeTask({ id: "y", progress: 250 }).progress, 100);
+  assert.deepEqual(taskScope.normalizeTaskPage({ items: "坏", next_cursor: 3 }), { items: [], next_cursor: null });
+  assert.deepEqual(taskScope.normalizeTaskPage(undefined), { items: [], next_cursor: null });
+  const page = taskScope.normalizeTaskPage({ items: [T(), null, { nope: 1 }], next_cursor: "2026-10-01" });
+  assert.equal(page.items.length, 1);
+  assert.equal(page.next_cursor, "2026-10-01");
+  assert.equal(taskScope.isKnownStatus("paused"), false);
+  assert.equal(taskScope.isKnownStatus("cancelled"), true);
+});
+
+test("筛选分栏：失败与取消分开，进行中 = 排队 + 生成中", () => {
+  const b = (s) => taskScope.TASK_BUCKETS.filter((x) => taskScope.inBucket(s, x.key)).map((x) => x.key);
+  assert.deepEqual(b("queued"), ["all", "active"]);
+  assert.deepEqual(b("running"), ["all", "active"]);
+  assert.deepEqual(b("succeeded"), ["all", "succeeded"]);
+  assert.deepEqual(b("failed"), ["all", "failed"]);
+  assert.deepEqual(b("cancelled"), ["all", "cancelled"]);
+  assert.deepEqual(b("paused"), ["all"]);
+});
+
+test("取消只给 queued / running；重试只给 failed 且错误码可重试（空码、未登记的码放行）", () => {
+  for (const s of ["queued", "running"]) assert.equal(taskScope.canCancel({ status: s }), true, s);
+  for (const s of ["succeeded", "failed", "cancelled"]) assert.equal(taskScope.canCancel({ status: s }), false, s);
+  assert.equal(taskScope.canRetry({ status: "failed", error_code: null }), true);
+  assert.equal(taskScope.canRetry({ status: "failed", error_code: "provider.transient.timeout" }), true);
+  assert.equal(taskScope.canRetry({ status: "failed", error_code: "x.never.registered" }), true);
+  assert.equal(taskScope.canRetry({ status: "failed", error_code: "billing.credit.insufficient" }), false);
+  assert.equal(taskScope.canRetry({ status: "failed", error_code: "prompt.run.stale" }), false);
+  for (const s of ["queued", "running", "succeeded", "cancelled"]) {
+    assert.equal(taskScope.canRetry({ status: s, error_code: null }), false, s);
+  }
+});
+
+test("不可重试码表与 core/errors.py 逐项一致（后端加码不同步这里就红）", () => {
+  const src = readFileSync(new URL("../../api/core/errors.py", import.meta.url), "utf8");
+  const body = src.slice(src.indexOf("ERRORS: dict[str, ErrorSpec] = {"), src.indexOf("\nclass AppError"));
+  const keys = [...body.matchAll(/^ {4}"([a-z_]+(?:\.[a-z_]+)+)": ErrorSpec\(/gm)];
+  assert.ok(keys.length > 30, `只解析到 ${keys.length} 个错误码`);
+  const nonRetryable = [];
+  keys.forEach((m, i) => {
+    const block = body.slice(m.index, i + 1 < keys.length ? keys[i + 1].index : body.length);
+    if (!block.includes("retryable=True")) nonRetryable.push(m[1]);
+  });
+  assert.deepEqual([...taskScope.NON_RETRYABLE_ERRORS].sort(), nonRetryable.sort());
+});
+
+test("重试说明写出预扣数字、沿用当时输入；取消说明写明不能再重试", () => {
+  const lines = taskScope.retryNotice({ estimated_cost: 1200 });
+  assert.match(lines[0], /重新预扣 1,200 Credits/);
+  assert.ok(lines.some((l) => l.includes("沿用这条任务当时的输入")));
+  assert.match(taskScope.retryNotice({ estimated_cost: 0 })[0], /预估费用/);
+  assert.ok(taskScope.CANCEL_NOTICE.some((l) => l.includes("不能再重试")));
+});
+
+test("失败原因：空码不编原因，未登记的码说未归类", () => {
+  assert.equal(taskScope.failReason(null), "没有记录失败原因");
+  assert.equal(taskScope.failReason("x.y.z"), "未归类的失败");
+  assert.match(taskScope.failReason("billing.credit.insufficient"), /余额不足/);
+});
+
+test("对象定位：角色/场景走 ?ref=，镜头走 ?shot=，缺 ref 落到列表页", () => {
+  const base = "/freeflow/projects/p1";
+  assert.deepEqual(taskScope.subjectOf({ subject_kind: "character", subject_ref: "chuan fu", shot_index: null }, "p1"), {
+    label: "角色 chuan fu", href: `${base}/characters?ref=chuan%20fu`,
+  });
+  assert.deepEqual(taskScope.subjectOf({ subject_kind: "scene", subject_ref: "ferry", shot_index: null }, "p1"), {
+    label: "场景 ferry", href: `${base}/scenes?ref=ferry`,
+  });
+  assert.deepEqual(taskScope.subjectOf({ subject_kind: "shot", subject_ref: null, shot_index: 3 }, "p1"), {
+    label: "镜头 3", href: `${base}/storyboard?shot=3`,
+  });
+  assert.deepEqual(taskScope.subjectOf({ subject_kind: "scene", subject_ref: null, shot_index: null }, "p1"), {
+    label: "场景", href: `${base}/scenes`,
+  });
+  const map = taskScope.subjectsByTask(
+    [{ task_id: "t1", subject_kind: "shot", subject_ref: null, shot_index: 2 }, { task_id: null, subject_kind: "character", subject_ref: "a" }, null],
+    "p1",
+  );
+  assert.deepEqual([...map.keys()], ["t1"]);
+  assert.equal(taskScope.subjectsByTask({ items: [] }, "p1").size, 0);
+});
+
+test("SSE 快照只覆盖状态几列；刷新首页保留已加载的更早页", () => {
+  const rows = [T({ id: "a", status: "queued", estimated_cost: 50 }), T({ id: "b" })];
+  const merged = taskScope.mergeLive(rows, new Map([["a", { task_id: "a", status: "running", progress: 40, attempt: 1, error_code: null, actual_cost: 0 }]]));
+  assert.equal(merged[0].status, "running");
+  assert.equal(merged[0].progress, 40);
+  assert.equal(merged[0].estimated_cost, 50);
+  assert.equal(merged[1], rows[1]);
+
+  const at = (id, h) => T({ id, created_at: `2026-10-01T${h}:00:00+00:00` });
+  const loaded = [at("c", "12"), at("b", "11"), at("a", "10"), at("z", "09")];
+  const first = [at("d", "13"), at("c", "12"), at("b", "11")];
+  assert.deepEqual(taskScope.mergeFirstPage(first, loaded).map((t) => t.id), ["d", "c", "b", "a", "z"]);
+  assert.deepEqual(taskScope.mergeFirstPage([], loaded), []);
+  assert.deepEqual(taskScope.appendPage([at("a", "10")], [at("a", "10"), at("z", "09")]).map((t) => t.id), ["a", "z"]);
+});
+
+test("时间与成本的空值可读", () => {
+  assert.equal(taskScope.timeText(null), "时间未记录");
+  assert.equal(taskScope.timeText("不是时间"), "时间未记录");
+  assert.notEqual(taskScope.timeText("2026-10-01T10:00:00Z"), "时间未记录");
+  assert.equal(taskScope.costText({ actual_cost: 0, estimated_cost: 0 }), null);
+  assert.equal(taskScope.costText({ actual_cost: 0, estimated_cost: 120 }), "预估 120 Credits");
+  assert.equal(taskScope.costText({ actual_cost: 98, estimated_cost: 120 }), "实扣 98 Credits");
+});
+
+test("生成记录缺字段：标题、时间、产物、步骤都有可读的空值", () => {
+  const rows = recordScope.normalizeRecords([
+    { id: "r1", record_type: "agent" },
+    { id: "r2", record_type: "image", asset_ids: "坏", created_at: "" },
+    { id: "r3", record_type: "video" },
+    null,
+  ]);
+  assert.deepEqual(rows.map((r) => [r.id, r.title, r.status, r.created_at, r.asset_ids]), [
+    ["r1", "文本步骤", "unknown", null, []],
+    ["r2", "出图", "unknown", null, []],
+  ]);
+  assert.deepEqual(recordScope.normalizeRecords({ items: [] }), []);
+  const d = recordScope.normalizeDetail({ id: "r1", record_type: "agent", steps: [null, { kind: "validate" }], output: "x" });
+  assert.equal(d.prompt, null);
+  assert.equal(d.incomplete, false);
+  assert.deepEqual(d.steps.map((s) => [s.index, s.kind, s.duration_ms, s.error]), [[0, "validate", 0, null]]);
+  assert.equal(d.output, null);
+  assert.equal(recordScope.normalizeDetail({ record_type: "agent" }), null);
+});
+
+// ---------------------------------------------------------------- 模型与供应商（ADR-039 A2）
+
+const prov = await jiti.import("../lib/freeflow/provider-scope.ts");
+const CID = "11111111-2222-3333-4444-555555555555";
+
+test("连接引用串：带模型 / 不带模型 / 模型里有冒号 / 不是连接", () => {
+  assert.equal(prov.orgRef(CID, "gpt-4o"), `provider.org:${CID}:gpt-4o`);
+  assert.equal(prov.orgRef(CID), `provider.org:${CID}`);
+  assert.deepEqual(prov.parseOrgRef(`provider.org:${CID}:ns:model-a`), { connectionId: CID, modelId: "ns:model-a" });
+  assert.deepEqual(prov.parseOrgRef(`provider.org:${CID}`), { connectionId: CID, modelId: null });
+  assert.equal(prov.parseOrgRef("deepseek-chat"), null);
+  assert.equal(prov.parseOrgRef("provider.org:"), null);
+  assert.equal(prov.parseOrgRef(undefined), null);
+});
+
+test("测试连接三种结论：无法免费验证与限流不算失败", () => {
+  assert.equal(prov.classifyTest({ ok: true, message: "鉴权通过", error_code: null }), "pass");
+  assert.equal(
+    prov.classifyTest({ ok: true, message: "地址可达；该上游不提供模型列表，Key 是否可用要以第一次出图为准", error_code: null }),
+    "neutral",
+  );
+  assert.equal(prov.classifyTest({ ok: false, message: "上游限流，暂时无法验证", error_code: "provider.rate_limit.exceeded" }), "neutral");
+  assert.equal(prov.classifyTest({ ok: false, message: "Key 无效", error_code: "provider.byok.rejected" }), "fail");
+  assert.equal(prov.VERDICT_LABEL.neutral, "无法免费验证");
+});
+
+test("坏默认与 byok 拒绝的原因都翻成人话，未知码不吞", () => {
+  assert.equal(prov.brokenReasonText(null), null);
+  assert.equal(prov.brokenReasonText("connection_disabled"), "指向的供应商已停用");
+  assert.match(prov.brokenReasonText("weird_code"), /weird_code/);
+  const e = (reason) => ({ code: "provider.byok.rejected", message: "m", user_message: "你为该能力配置的 API Key 调用失败", detail: { reason } });
+  assert.match(prov.describeApiError(e("reasoning_model_not_allowed")), /推理模型/);
+  assert.match(prov.describeApiError(e("connection_missing")), /已被删除/);
+  assert.equal(prov.describeApiError(e("unknown")), "你为该能力配置的 API Key 调用失败");
+  assert.equal(prov.describeApiError({ code: "common.validation_failed", message: "Base URL 必须是 https", user_message: "请求参数有误" }, true), "Base URL 必须是 https");
+  assert.equal(prov.describeApiError({ code: "common.validation_failed", message: "x", user_message: "请求参数有误" }), "请求参数有误");
+});
+
+const CFG = {
+  capability: "text_generation", label: "文本生成", available: true, configurable: true, credentials: [], unavailable_reason: null,
+  supports_org_connections: true,
+  selection: { provider_id: `provider.org:${CID}`, model_id: null, key_source: "org", layer: "org", updated_at: null, broken_reason: null },
+  providers: [
+    { provider_id: "provider.deepseek", label: "DeepSeek", kind: "catalog", available: true, models: [{ model_id: "deepseek-chat", label: "快", note: "" }], default_model_id: "deepseek-chat", supports_platform_key: true, unavailable_reason: null },
+    { provider_id: `provider.org:${CID}`, label: "公司网关", kind: "org", connection_id: CID, available: true, consistency_verified: null,
+      models: [{ model_id: "m-a", label: "m-a", note: "" }, { model_id: "m-r", label: "m-r", note: "" }], default_model_id: null, supports_platform_key: false, unavailable_reason: null },
+    { provider_id: "provider.org:dead", label: "停用的", kind: "org", connection_id: "dead", available: false, consistency_verified: false,
+      models: [{ model_id: "img", label: "img", note: "" }], default_model_id: null, supports_platform_key: false, unavailable_reason: "该供应商已停用" },
+  ],
+};
+const CONNS = [{ id: CID, provider_id: `provider.org:${CID}`, label: "公司网关", preset_id: null, base_url: "https://gw.example.com/v1", enabled: true, masked_key: "sk-••••abcd", created_at: "", updated_at: "",
+  models: [{ model_id: "m-a", protocol: "openai_chat", capability: "text_generation", consistency_verified: null }, { model_id: "m-r", protocol: "openai_chat", capability: "text_generation", consistency_verified: null, reasoning: true }] }];
+
+test("默认候选：目录一家一行、连接每个模型一行；model_id 为空时第一个模型是当前；推理与未实测标记", () => {
+  const rows = prov.defaultRows(CFG, CONNS);
+  assert.deepEqual(rows.map((r) => [r.kind, r.kind === "org" ? r.modelId : r.providerId, r.current]), [
+    ["catalog", "provider.deepseek", false],
+    ["org", "m-a", true],
+    ["org", "m-r", false],
+    ["org", "img", false],
+  ]);
+  assert.equal(rows[2].reasoning, true);
+  assert.equal(rows[1].reasoning, false);
+  assert.equal(rows[3].unverified, true);
+  assert.equal(rows[3].available, false);
+  assert.equal(prov.currentDefaultText(CFG), "供应商 公司网关 · m-a");
+  const platform = { ...CFG, selection: { ...CFG.selection, provider_id: "provider.deepseek", model_id: null, key_source: "platform", layer: "platform" } };
+  assert.match(prov.currentDefaultText(platform), /^未设置，使用平台默认（DeepSeek）/);
+  assert.equal(prov.defaultRows(platform, CONNS).some((r) => r.current), false);
+});
+
+test("草稿：预设带出地址与模型、编辑时 Key 从空开始", () => {
+  const preset = { preset_id: "deepseek", label: "DeepSeek", base_url: "https://api.deepseek.com/v1", docs_url: "d", key_url: null, icon: "", protocols: ["openai_chat"], capabilities: ["text_generation"],
+    models: [{ model_id: "deepseek-chat", protocol: "openai_chat", capability: "text_generation", consistency_verified: null }] };
+  const d = prov.draftFromPreset(preset, []);
+  assert.deepEqual(d, { presetId: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", apiKey: "", models: [{ model_id: "deepseek-chat", protocol: "openai_chat", reasoning: false }] });
+  const custom = prov.draftFromPreset(null, [{ protocol: "openai_chat", capability: "text_generation", label: "OpenAI 兼容", consistency_verified: null }]);
+  assert.equal(custom.presetId, null);
+  assert.equal(custom.models[0].protocol, "openai_chat");
+  const e = prov.draftFromConnection(CONNS[0]);
+  assert.equal(e.apiKey, "");
+  assert.deepEqual(e.models.map((m) => m.reasoning), [false, true]);
+});
+
+test("前端轻校验：空项、非 https、Key 长度、模型空白与重复", () => {
+  const ok = { presetId: null, label: "网关", baseUrl: "https://x.example.com/v1", apiKey: "sk-12345678", models: [{ model_id: "m", protocol: "openai_chat", reasoning: false }] };
+  assert.deepEqual(prov.draftProblems(ok, "create"), []);
+  assert.deepEqual(prov.draftProblems({ ...ok, apiKey: "" }, "edit"), []);
+  assert.ok(prov.draftProblems({ ...ok, apiKey: "" }, "create").includes("填写 API Key"));
+  assert.ok(prov.draftProblems({ ...ok, apiKey: "short" }, "edit").some((p) => p.includes("8–512")));
+  assert.ok(prov.draftProblems({ ...ok, baseUrl: "http://x.example.com" }, "create").some((p) => p.includes("https")));
+  assert.ok(prov.draftProblems({ ...ok, models: [{ model_id: "a b", protocol: "openai_chat", reasoning: false }] }, "create").includes("模型 ID 不能含空白"));
+  assert.ok(prov.draftProblems({ ...ok, models: [ok.models[0], ok.models[0]] }, "create").includes("模型重复"));
+  assert.ok(prov.draftProblems({ ...ok, models: [{ model_id: " ", protocol: "openai_chat", reasoning: false }] }, "create").includes("至少填一个模型"));
+});
+
+test("请求体：新建带 reasoning；PATCH 只发改动、Key 为空不带键", () => {
+  const draft = { ...prov.draftFromConnection(CONNS[0]) };
+  assert.deepEqual(prov.patchBody(draft, CONNS[0]), {});
+  const withKey = { ...draft, apiKey: "  sk-new-key-123  " };
+  assert.deepEqual(prov.patchBody(withKey, CONNS[0]), { api_key: "sk-new-key-123" });
+  const flip = { ...draft, models: draft.models.map((m, i) => (i === 0 ? { ...m, reasoning: true } : m)) };
+  assert.deepEqual(prov.patchBody(flip, CONNS[0]).models.map((m) => m.reasoning), [true, true]);
+  assert.equal("api_key" in prov.patchBody(flip, CONNS[0]), false);
+  const body = prov.createBody({ presetId: "zhipu", label: " 智谱 ", baseUrl: " https://z.example.com/v4 ", apiKey: " k-12345678 ", models: [{ model_id: " glm ", protocol: "openai_chat", reasoning: true }, { model_id: "", protocol: "openai_chat", reasoning: false }] });
+  assert.deepEqual(body, { label: "智谱", base_url: "https://z.example.com/v4", models: [{ model_id: "glm", protocol: "openai_chat", reasoning: true }], api_key: "k-12345678", preset_id: "zhipu" });
+});
+
+test("测试连接参数：草稿缺 Key 不能测；已保存的只带改过的地址与 Key", () => {
+  const draft = { presetId: null, label: "x", baseUrl: "https://x.example.com/v1", apiKey: "", models: [{ model_id: "m", protocol: "openai_chat", reasoning: false }] };
+  assert.equal(prov.draftTestBody(draft), null);
+  assert.deepEqual(prov.draftTestBody({ ...draft, apiKey: "sk-12345678" }), { protocol: "openai_chat", model_id: "m", base_url: "https://x.example.com/v1", api_key: "sk-12345678" });
+  const saved = prov.draftFromConnection(CONNS[0]);
+  assert.deepEqual(prov.savedTestBody(saved, CONNS[0]), { protocol: "openai_chat", model_id: "m-a" });
+  assert.deepEqual(prov.savedTestBody({ ...saved, baseUrl: "https://new.example.com/v1" }, CONNS[0]), { protocol: "openai_chat", model_id: "m-a", base_url: "https://new.example.com/v1" });
+});
+
+test("删除确认的引用清单与来源文案", () => {
+  const lines = prov.referenceLines(
+    { defaults: [{ capability: "text_generation" }], projects: [{ project_id: "p", name: "第七夜", capability: "image_generation" }] },
+    (c) => ({ text_generation: "文本", image_generation: "出图" })[c],
+  );
+  assert.deepEqual(lines, ["组织默认 · 文本", "项目「第七夜」· 出图"]);
+  assert.equal(prov.sourceText({ preset_id: null }, []), "自定义");
+  assert.equal(prov.sourceText({ preset_id: "zhipu" }, [{ preset_id: "zhipu", label: "智谱" }]), "预设 · 智谱");
+  assert.equal(prov.sourceText({ preset_id: "gone" }, []), "预设 · gone");
+});
+
+test("api.ts 不再引用已删除的自定义端点路由", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const src = await readFile(new URL("../lib/api.ts", import.meta.url), "utf8");
+  assert.equal(/custom-endpoint|custom_endpoint|CUSTOM_TEXT_PROVIDER_ID/.test(src), false);
+  assert.equal(typeof api.modelConfig.references, "function");
+});

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useId, useMemo, useState } from "react";
 import { FileText, ImageIcon, Loader2, RefreshCw, Search } from "lucide-react";
 
@@ -7,6 +8,8 @@ import { RenderThumb } from "@/components/project/render-slot";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { generation, generationError, isPlaceholderModel, PLACEHOLDER_LABEL, type GenerationDetail, type GenerationRecord } from "@/lib/freeflow/generation-api";
+import { normalizeDetail, normalizeRecords } from "@/lib/freeflow/record-scope";
+import { timeText } from "@/lib/freeflow/task-scope";
 import { PromptText } from "./prompt-panel";
 
 const STATUS: Record<string, string> = {
@@ -16,14 +19,36 @@ const SUBJECT: Record<string, string> = {
   character: "角色", scene: "场景", shot: "镜头", shot_image: "镜头首帧", shot_video: "视频提示词",
 };
 
-function timeOf(value: string) { return new Date(value).toLocaleString(); }
+function timeOf(value: string | null) { return timeText(value); }
 function durationOf(row: GenerationRecord) {
-  if (!row.finished_at) return "—";
-  const seconds = Math.max(0, Math.round((Date.parse(row.finished_at) - Date.parse(row.created_at)) / 1000));
+  if (!row.finished_at || !row.created_at) return "—";
+  const ms = Date.parse(row.finished_at) - Date.parse(row.created_at);
+  if (!Number.isFinite(ms)) return "—";
+  const seconds = Math.max(0, Math.round(ms / 1000));
   return seconds >= 60 ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${seconds} 秒`;
 }
 
-export function GenerationRecords({ projectId }: { projectId: string }) {
+/**
+ * 生成记录：回看创作过程（文本步骤 + 出图），看每一次的输入、提示词和结果。
+ * 和「执行队列」是两回事——那边管任务的执行与恢复，这边只回看。
+ *
+ * 出图记录的 id 就是任务 id、状态就是 `tasks.status`（`prompting/records.py`）。
+ * 页面传进来的 `liveStatus` 是同一张表的实时快照（SSE），用它覆盖列表取回时的旧值，
+ * 不在这里另算一套状态。文本记录是 `agent_runs`，不进队列，没有实时状态。
+ */
+export function GenerationRecords({
+  projectId,
+  focus = null,
+  liveStatus,
+  queueHref,
+}: {
+  projectId: string;
+  /** URL 上 `?record_type=&record_id=` 指定要打开的那一条 */
+  focus?: { type: GenerationRecord["record_type"]; id: string } | null;
+  liveStatus?: Map<string, string>;
+  /** 出图记录对应的执行队列那一行 */
+  queueHref?: (taskId: string) => string;
+}) {
   const [rows, setRows] = useState<GenerationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -39,16 +64,20 @@ export function GenerationRecords({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     setSelected(null); setDetail(null); setQuery(""); setDay(""); setFilter("all");
-    const params = new URLSearchParams(window.location.search);
-    const type = params.get("record_type"); const id = params.get("record_id");
-    if ((type === "agent" || type === "image") && id) setSelected({ type, id });
   }, [projectId]);
+
+  const focusKey = focus ? `${focus.type}:${focus.id}` : "";
+  useEffect(() => {
+    if (focus) setSelected({ type: focus.type, id: focus.id });
+    // 只跟着 URL 上的那一条变，不跟对象引用
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusKey]);
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError(""); setRows([]);
     generation.records(projectId, controller.signal)
-      .then((value) => { if (!controller.signal.aborted) setRows(value); })
+      .then((value) => { if (!controller.signal.aborted) setRows(normalizeRecords(value)); })
       .catch((e) => { if (!controller.signal.aborted) setError(generationError(e)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -60,16 +89,28 @@ export function GenerationRecords({ projectId }: { projectId: string }) {
     const controller = new AbortController();
     setDetailLoading(true);
     generation.detail(projectId, selected.type, selected.id, controller.signal)
-      .then((value) => { if (!controller.signal.aborted) setDetail(value); })
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        const next = normalizeDetail(value);
+        setDetail(next);
+        if (!next) setDetailError("这条记录的内容读不出来，可能是早期版本留下的不完整记录。");
+      })
       .catch((e) => { if (!controller.signal.aborted) setDetailError(generationError(e)); })
       .finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
     return () => controller.abort();
   }, [projectId, selected, refresh]);
 
-  const filtered = useMemo(() => rows.filter((row) => {
+  // 出图记录的状态就是任务状态：有实时快照用快照
+  const current = useMemo(() => rows.map((row) => {
+    const live = row.record_type === "image" ? liveStatus?.get(row.id) : undefined;
+    return live && live !== row.status ? { ...row, status: live } : row;
+  }), [rows, liveStatus]);
+
+  const filtered = useMemo(() => current.filter((row) => {
     if (filter === "failed" && !["failed", "cancelled"].includes(row.status)) return false;
     if (filter === "agent" || filter === "image") { if (row.record_type !== filter) return false; }
     if (day) {
+      if (!row.created_at) return false;
       const d = new Date(row.created_at);
       const localDay = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       if (localDay !== day) return false;
@@ -77,7 +118,7 @@ export function GenerationRecords({ projectId }: { projectId: string }) {
     const needle = query.trim().toLowerCase();
     return !needle || [row.title, row.subject_key, row.model_id, row.agent_id, row.error_code, row.id]
       .some((value) => value?.toLowerCase().includes(needle));
-  }), [rows, query, filter, day]);
+  }), [current, query, filter, day]);
 
   // 这一页是「一本翻得动的账」，不是一墙卡片：同一栏的值要上下对得齐。
   // 版式走 MASTER §5 的 .ff-ledger；筛选属于这本账本身，所以跟在栏头后面，
@@ -91,7 +132,7 @@ export function GenerationRecords({ projectId }: { projectId: string }) {
           <Button size="sm" variant="ghost" disabled={loading} onClick={() => setRefresh((n) => n + 1)}><RefreshCw aria-hidden className="size-3.5" />刷新</Button>
         </span>
       </div>
-      <p className="ff-ledger-note">回看创作过程、实际提示词和生成结果，找到每一次变化的来源。最近 100 条记录，时间按浏览器本地时区显示。</p>
+      <p className="ff-ledger-note">回看创作过程：文本步骤和出图各自的输入、实际提示词和结果。最近 100 条，时间按浏览器本地时区显示。重试、取消在「执行队列」里。</p>
       <div className="ff-ledger-row flex-wrap" data-form="true">
         <label className="flex min-w-48 flex-1 items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5">
           <Search aria-hidden className="size-4 text-fg-subtle" />
@@ -132,7 +173,7 @@ export function GenerationRecords({ projectId }: { projectId: string }) {
         {detailError && <div role="alert" className="rounded-lg bg-danger-soft p-3 text-sm text-danger">{detailError}<Button size="sm" onClick={() => setRefresh((n) => n + 1)}>重试读取</Button></div>}
         {detail && <>
           <dl className="grid grid-cols-2 gap-4 rounded-[2px] bg-surface-2 p-4 text-sm">
-            <div><dt className="text-xs text-fg-subtle">状态</dt><dd className="mt-1 text-fg">{STATUS[detail.status] || detail.status}</dd></div>
+            <div><dt className="text-xs text-fg-subtle">状态</dt><dd className="mt-1 text-fg">{STATUS[(detail.record_type === "image" ? liveStatus?.get(detail.id) : undefined) ?? detail.status] || detail.status}{detail.record_type === "image" && queueHref && <Link href={queueHref(detail.id)} className="ml-2 text-xs text-primary hover:underline">在执行队列中查看</Link>}</dd></div>
             <div><dt className="text-xs text-fg-subtle">实际模型</dt><dd className="mt-1 break-all text-fg">{detail.model_id || "未记录"}</dd></div>
             <div><dt className="text-xs text-fg-subtle">开始时间</dt><dd className="mt-1 text-fg">{timeOf(detail.created_at)}</dd></div>
             <div><dt className="text-xs text-fg-subtle">耗时</dt><dd className="mt-1 text-fg">{durationOf(detail)}</dd></div>

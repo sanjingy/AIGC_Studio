@@ -79,6 +79,7 @@ export function ConfirmDialog({
   tone = "primary",
   confirmDisabled = false,
   disabledReason,
+  cancelLabel = "取消",
   onCancel,
   onConfirm,
   children,
@@ -90,6 +91,8 @@ export function ConfirmDialog({
   tone?: "primary" | "danger";
   confirmDisabled?: boolean;
   disabledReason?: string;
+  /** 关掉弹窗那个按钮的字。确认动作本身就叫「取消…」时必须换掉，否则两个按钮都叫取消 */
+  cancelLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
   children?: React.ReactNode;
@@ -115,7 +118,7 @@ export function ConfirmDialog({
         )}
         <div className="mt-4 flex justify-end gap-2">
           <Button size="sm" variant="ghost" onClick={onCancel}>
-            取消
+            {cancelLabel}
           </Button>
           <Button
             size="sm"

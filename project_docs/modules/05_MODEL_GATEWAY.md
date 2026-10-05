@@ -69,7 +69,7 @@ BYOK 的凭证表放在 `billing/credentials.py` 而不是本模块，
 | 视频模型的"单段最大时长"声明（ADR-032 第 3 条） | 未实现 | `ProviderSpec` 没有这个字段 |
 | 组织级模型默认（上游 + 模型 + 计费来源） | 已实现（2026-09-24） | 表 `org_model_defaults`（迁移 `3a9d2c7e5b10`）；`gateway/upstreams.py::decide` 三层判定（项目 > 组织 > 平台目录），Gateway `_resolve` 与计费 `pricing.uses_own_key` 共用；`GET/PUT /model-config`；`tests/integration/test_model_config_api.py` |
 | 生成前临时选择 + 界面上的模型选择按钮 | 未实现 | 没有接口，`/freeflow/models` 明确写着"选在项目设置里做" |
-| 文本能力的 OpenAI 兼容自定义端点 | 已实现（2026-09-24） | 表 `org_text_endpoints`（无 capability 列）；`adapters/providers/openai_compat.py` + `endpoint_url.py`（仅 https、拒私网/回环/元数据、调用前 DNS 复查、不跟随跳转）；虚拟路由 `provider.custom.text` 只在文本分支拼；`PUT/DELETE /model-config/text_generation/custom-endpoint`、`.../test` |
+| 组织供应商连接（ADR-039，取代文本唯一自定义端点） | 已实现（2026-10-05，A 批后端） | 表 `org_provider_connections`（无 capability 列，协议白名单 `openai_chat` / `openai_images`）；`adapters/providers/openai_compat.py`、`openai_images.py` + `endpoint_url.py`（仅 https、拒私网/回环/元数据、调用前 DNS 复查、不跟随跳转，出图结果下载同样校验）；预设 `adapters/providers/presets.yaml`；虚拟路由 `provider.org:<连接 id>`；`GET /model-config/presets`、`/model-config/connections` 增删改查与测试。旧 `custom-endpoint` 三条路由已删 |
 | "可选模型 + 各自 Credits 估算"接口 | 未实现 | `GET /model-catalog` 不含任何金额 |
 | 换模型必重算 Credits 预估（ADR-024 硬约束 1） | **未实现（且当前被违反）** | 见 §11.1 |
 | ComfyUI / 本地 Runtime | 未实现 | ADR-003 / ADR-004 只有设计 |
@@ -199,27 +199,48 @@ class ModelSpec:
 用户在设置页"添加供应商"= **给目录里已有的某一家填 Key**（BYOK，ADR-025），
 不是新增一家。目录里没有的家，用户加不进来。
 
-### 5.2 文本能力的 OpenAI 兼容自定义端点（唯一例外）
+### 5.2 组织供应商连接（ADR-039；取代"文本唯一一个自定义端点"）
 
-ADR-031 第 5 条的例外：**只有 `text_generation` 允许一个 OpenAI 兼容自定义端点**。
-视频和 TTS 不允许——各家请求形状差异太大，"填个 URL 就能用"做不到，
-做了就是假入口。
+> **2026-10-05 按 ADR-039 重写**（实现：MULTI_PROVIDER_A1）。ADR-031 第 5 条"只有文本允许**一个**
+> OpenAI 兼容自定义端点"、本节旧版"一个 org 一个端点"不再适用；旧表 `org_text_endpoints`
+> 已由迁移 `b9e4c1a7d203` 搬进 `org_provider_connections`（同 id，降级可逐行还原）。
+> 下面"安全原则"一段是旧版第 1–5 条**原文**，原则不变，只在其后注明在新结构里落在哪。
 
-**在目录里怎么表示**：不进 `catalog.SPECS`（那是进程级常量，自定义端点是
-每个 org 一份、随时会改的数据）。做成一条**运行期拼出来的虚拟路由**：
+**是什么**：一个组织可以添加多个"连接"（数量上限 `settings.org_provider_connection_limit`，
+默认 20）。一个连接 = `label` + `preset_id`（可空 = 自定义）+ `base_url` + 加密的 Key
+（AK/SK 类另有 `secret_encrypted`，A 批不用）+ `models: [{model_id, protocol}]` + `enabled`。
+表结构见 §8.2。
+
+**能力由协议决定，协议是代码白名单**（`gateway/catalog.py::PROTOCOLS`）：
+
+| 协议 | 唯一能力 | 唯一适配器 | `consistency_verified` |
+|---|---|---|---|
+| `openai_chat` | `text_generation` | `OpenAICompatTextProvider`（`POST {base}/chat/completions`） | null（不出图） |
+| `openai_images` | `image_generation` | `OpenAIImagesProvider`（`POST {base}/images/generations`） | **false**（未做一致性实测，界面标"未实测"） |
+
+B 批再加 `dashscope_qwen_image` / `kling_image` / `jimeng_image` / `minimax_image`，
+每个都要附一致性实测记录才能把 `consistency_verified` 置 true（ADR-039 第 7 条）。
+视频、TTS 不开放。
+
+**预设**：`adapters/providers/presets.yaml`（随代码发布，`gateway/presets.py` 加载时严格校验：
+未知字段 / 价格字段 / 白名单外协议 / 非 https 或私网 Base URL / 重复 id / 白名单外的
+`request_overrides` 键，任何一条都让进程起不来）。**不写价格**。选预设 = 把模板拷进一行连接，
+用户只填 Key；Base URL 可改（地域节点、工作区域名），改了一样过校验。
+
+**在目录里怎么表示**：连接不进 `catalog.SPECS`（进程级常量），每个连接在运行期是一条虚拟路由：
 
 ```
-provider_id = "provider.custom.text"        # 固定串，不含 org 信息
-model_id    = 用户填的模型名（原样透传给上游）
-capability  = "text_generation"             # 写死，不接受参数
-adapter     = OpenAICompatTextProvider(base_url=..., api_key=...)
+provider_id = "provider.org:<连接 id>"          # 组织默认 / 项目偏好 / Gateway 路由三处同一个串
+model_id    = 连接里某个模型（原样透传给上游）
+capability  = PROTOCOLS[protocol].capability    # 由协议推出，不接受参数
+adapter     = PROTOCOLS[protocol].adapter(base_url=..., api_key=..., provider_id=...)
 ```
 
-数据存新表（§8.2 的 `org_text_endpoints`）。解析时机与 BYOK 相同：
-在 `_resolve()` 里现查现解密，**不进 `registry()` 那张进程级单例表**
-（理由同 ADR-027：那里长期存明文 Key，且失效难处理）。
+项目偏好是单字符串，写成 `provider.org:<uuid>` 或 `provider.org:<uuid>:<model_id>`
+（uuid 定长 36 位，模型 id 里有 `/`、`:` 也不会切错）。旧值 `provider.custom.text` 解析为
+"连接不存在"。解析时机与 BYOK 相同：`_resolve()` 里现查现解密，**不进 `registry()`**。
 
-**怎么隔离，让它不能冒充视频 / TTS**（五条，缺一不可）：
+**安全原则（旧版第 1–5 条原文）**：
 
 1. **能力写死在构造处**。虚拟路由只在 `_resolve("text_generation", ...)`
    这一个分支里被拼出来；`video_generation` / `tts` 的解析路径**根本不读**
@@ -237,8 +258,35 @@ adapter     = OpenAICompatTextProvider(base_url=..., api_key=...)
    走 ADR-025 折扣档，熔断按 org 隔离（ADR-027），
    失败**不回落平台 Key**——回落等于平台掏钱替他跑。
 
-**一个 org 一个端点**（ADR-031 说的是"一个"）。要多个时另提 ADR，
-因为"多个"会立刻带出"默认用哪个"，与 §6 的三层默认打架。
+**在新结构里怎么落地**：
+
+1. 能力只由协议白名单推出：`upstreams.pick_model` 只在连接里挑"协议绑定到本能力"的模型，
+   找不到就 `provider.byok.rejected`（`capability_mismatch`）。视频 / TTS 没有任何协议绑定，
+   `supports_org_connections()` 为假，配置接口与项目偏好都拒绝指向连接。
+2. `org_provider_connections` 同样没有 capability 列；`models[].protocol` 保存时必须在白名单里（422）。
+3. Base URL 保存时（`endpoint_url.normalize_base_url`）和每次调用前（`assert_public_host`，DNS 复查）
+   都校验，适配器 `follow_redirects=False`、3xx 报错。**出图返回的图片 URL 也是用户可控地址**：
+   Worker 下载前过 `endpoint_url.check_download_url`（规则同 Base URL，只多允许查询参数）+
+   `assert_public_host`，不跟随跳转；`b64_json` 直接用字节；字节按魔数嗅探，认不出
+   PNG / JPEG / WebP 拒收；结果一律转存自有对象存储。
+4. 不采信自我声明：连接测试走 `GET {base}/models` 只看鉴权，不读它的列表；调用只按协议契约。
+5. 计费：`provider.org:` 在 `upstreams.decide` 里一律 `KeySource.ORG` → `pricing_rules.byok_unit_credits`；
+   计费（`pricing.uses_own_key`）、任务溯源（`input_json.upstream`）与调用（`_resolve`）是同一次 `decide`。
+   熔断 scope 是 `breaker.scope(provider_id, org_id)`。连接被删 / 停用 / 没有这个能力的模型 /
+   选的模型被移除：报 `provider.byok.rejected`（`detail.reason` = `connection_missing` /
+   `connection_disabled` / `capability_mismatch` / `model_missing`），**不落平台、不换连接**；
+   指向它的组织默认**不自动改**，配置视图的 `selection.broken_reason` 给出原因码；
+   删除前可用 `GET /model-config/connections/{id}/references` 查谁正指着它（A3）。
+   **出图任务钉住上游**（A3）：建任务时记下的 `input_json.upstream` 指向连接时，Worker 按它解析，
+   不再重读默认 / 偏好（建任务后改默认不影响已建任务）；平台路由不钉，照旧 failover。
+   **推理模型**（A3）：连接模型条目带 `reasoning`（缺省 false）；`model_policy.no_reasoning_roles`
+   的调用解析到标了推理的连接模型时报 `provider.byok.rejected`（`reasoning_model_not_allowed`），
+   不换模型、不回落——平台目录的推理模型偏好则仍是"丢掉偏好、按默认跑"（`_preferred_model`）。
+
+**提示词改写**（ADR-039 第 7 条）：`openai_images` 没有统一的关闭开关（Seedream 的
+`optimize_prompt_options` 只有 standard / fast 两档、关不掉；智谱无此参数），所以 A 批没有
+可关的开关；上游回传的 `revised_prompt` 照记进 `actual_prompts`，没回就记空串。风格词照 ADR-036
+原样注入正向提示词；`negative_prompt` / `seed` 这个协议不发。
 
 ### 5.3 目录里的模型下线
 
@@ -427,8 +475,24 @@ PATCH /api/v1/projects/{id}/model-preference     # 项目覆盖（已有）
 
 | 表 | 用途 | 说明 |
 |---|---|---|
-| `org_model_defaults` | 组织级默认（§6.2） | 三层默认的最外层 |
-| `org_text_endpoints` | 文本自定义端点（§5.2） | `id / org_id / label / base_url / model_id / key_encrypted / enabled / created_by / timestamps`，**没有 capability 列** |
+| `org_model_defaults` | 组织级默认（§6.2） | 三层默认的最外层；`provider_id` 放宽到 64 字符以容纳 `provider.org:<uuid>` |
+| `org_provider_connections` | 组织供应商连接（§5.2，ADR-039） | 见下表；**没有 capability 列**。取代 `org_text_endpoints`（迁移 `b9e4c1a7d203`） |
+
+`org_provider_connections`：
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `id` | UUID PK | 迁移来的行沿用旧 `org_text_endpoints.id`，降级逐行还原 |
+| `org_id` | UUID NOT NULL，索引 | 所有查询带它；跨租户 404 |
+| `label` | VARCHAR(64) | |
+| `preset_id` | VARCHAR(64) NULL | 空 = 自定义 |
+| `base_url` | VARCHAR(512) | 入库前过 `endpoint_url.normalize_base_url` |
+| `key_encrypted` | TEXT | AES-GCM；接口只回掩码尾号 |
+| `secret_encrypted` | TEXT NULL | AK/SK 类的第二段，A 批不用 |
+| `models` | JSONB，默认 `[]` | `[{"model_id", "protocol", "reasoning"}]`，协议必须在 `catalog.PROTOCOLS` 里；`reasoning` 缺省视为 false（A3 之前的行没有这个键，不迁移） |
+| `enabled` | BOOLEAN，默认 true | 停用后指向它的默认 / 偏好报 `connection_disabled` |
+| `created_by` | UUID | |
+| `created_at` / `updated_at` / `deleted_at` | 同 `OrgEntity` | 软删；上限只数未删行 |
 
 Provider 健康度与调用指标**不进业务表**，放 Redis + 指标系统
 （现在 `gateway/breaker.py` 已经在 Redis 上）。
@@ -639,6 +703,7 @@ Provider 健康度与调用指标**不进业务表**，放 Redis + 指标系统
 - TTS 结果的 `duration_ms` 非空，且被回写成镜时长。
 - 首选模型失败 failover 后，任务结果里的 `model_id` 是**实际那个**，
   `failover_from` 非空，前端显示"实际使用 X（Y 不可用）"。
-- 自定义文本端点（P1 交付时）：往 `org_text_endpoints` 存一条，
-  `GET /model-options?capability=video_generation` 与 `?capability=tts`
-  的返回里**不含**它；`base_url` 填内网地址被拒。
+- 组织供应商连接（ADR-039）：往 `org_provider_connections` 存一条，
+  视频 / TTS 的选项里**不含**它（没有协议绑定到这两个能力）；`base_url` 填内网地址被拒；
+  出图结果 URL 指向内网 / 跳转被拒（`tests/integration/test_model_config_api.py`、
+  `tests/unit/test_openai_images.py`）。

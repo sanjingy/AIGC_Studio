@@ -66,7 +66,7 @@ function utilityNavigationOf(base: string, runningTasks: number): NavItem[] {
   return [
     {
       id: "tasks",
-      label: "生成记录",
+      label: "任务",
       shortLabel: "任务",
       href: `${base}/tasks`,
       icon: QueueIcon,

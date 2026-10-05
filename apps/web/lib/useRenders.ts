@@ -14,6 +14,7 @@ import {
   stageError,
 } from "@/lib/api";
 import { preparedPromptRunId } from "@/lib/freeflow/prepared-prompts";
+import { describeApiError } from "@/lib/freeflow/provider-scope";
 import { useProjectEvents } from "@/lib/useProjectEvents";
 
 /**
@@ -177,7 +178,8 @@ export function useRenders(projectId: string | null) {
         await fn();
         await reload();
       } catch (e) {
-        const message = e instanceof ApiRequestError ? e.error.user_message : fallback;
+        // 自带供应商被拒时补上具体原因（删了 / 停了 / 选了推理模型），通用文案只会让人去换 Key
+        const message = e instanceof ApiRequestError ? describeApiError(e.error) : fallback;
         setError(message);
         setKeyError(key, message);
       } finally {
@@ -258,7 +260,7 @@ export function useRenders(projectId: string | null) {
           setKeyError(key, null);
           await post(projectId, subject, source);
         } catch (e) {
-          const message = e instanceof ApiRequestError ? e.error.user_message : "出图请求失败";
+          const message = e instanceof ApiRequestError ? describeApiError(e.error) : "出图请求失败";
           setError(message);
           setKeyError(key, message);
           break; // 余额不足这类错误，后面几张也一定失败，没必要继续刷屏

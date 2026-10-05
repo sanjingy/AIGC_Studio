@@ -22,11 +22,13 @@ from typing import Any
 
 import httpx
 
+from adapters.providers import endpoint_url
 from adapters.providers.base import ImageRequest
 from apps.api.core.db import session_scope
 from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
 from apps.api.modules.asset import service as asset_service
+from apps.api.modules.gateway import catalog
 from apps.api.modules.gateway import service as gateway
 from apps.api.modules.local_runtime import service as local_runtime
 from apps.api.modules.task import service as task_service
@@ -119,6 +121,11 @@ async def generate_image(
     #
     # project_id 带上是为了项目级模型偏好（ADR-024）。它比 org_id 温和得多：
     # 漏了只是用户在设置页选的出图模型不生效，不会有人多付钱。
+    #
+    # upstream 是建任务时记下的上游（Provider / 连接 / 模型）。指向组织连接时 Gateway
+    # 按它钉住解析，不再重读默认与偏好——预扣是按它算的，调用也得是它。
+    raw_upstream = payload.get("upstream")
+    upstream = raw_upstream if isinstance(raw_upstream, dict) else None
     result = await gateway.generate_image(
         ImageRequest(
             prompt=prompt,
@@ -129,24 +136,38 @@ async def generate_image(
         ),
         org_id=org_id,
         project_id=project_id,
+        upstream=upstream,
     )
 
+    # 组织连接（`provider.org:`）是用户填的上游，它回传的下载地址同样是用户可控的
+    # 出网地址（ADR-039 第 6 条）：下载前过出网校验、不跟随跳转。
+    user_controlled = catalog.is_org_provider(result.provider_id)
+    # 顺序与 `actual_prompts` 一致：先 URL 后内联字节（`b64_json`）
+    images: list[bytes] = [
+        await _download(url, user_controlled=user_controlled) for url in result.urls
+    ]
+    images.extend(result.inline)
+    if any(len(data) > MAX_IMAGE_BYTES for data in images):
+        raise AppError("asset.upload.too_large", message="生成结果过大")
+
     asset_ids: list[str] = []
-    for index, url in enumerate(result.urls):
-        data = await _download(url)
+    for index, data in enumerate(images):
+        mime = _image_mime(data, user_controlled=user_controlled)
+        ext = _EXT_OF[mime]
         asset_id = uuid.uuid4()
         async with session_scope() as db:
             row = await asset_service.register_generated(
                 db,
                 org_id=org_id,
                 project_id=project_id,
-                filename=f"generated_{index}.png",
-                storage_key=f"{org_id}/{asset_id}/generated_{index}.png",
-                mime_type="image/png",
+                filename=f"generated_{index}.{ext}",
+                storage_key=f"{org_id}/{asset_id}/generated_{index}.{ext}",
+                mime_type=mime,
                 data=data,
                 owner_user_id=owner_user_id,
                 metadata={
                     "model_id": result.model_id,
+                    "provider_id": result.provider_id,
                     **_prompt_metadata(prompt, (result.actual_prompts[index:] or [""])[0]),
                 },
             )
@@ -155,13 +176,46 @@ async def generate_image(
     return {
         "asset_ids": asset_ids,
         "model_id": result.model_id,
+        "provider_id": result.provider_id,
         "actual_prompts": result.actual_prompts,
     }
 
 
-async def _download(url: str) -> bytes:
-    async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT_SECONDS) as client:
+_EXT_OF = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+
+
+def _image_mime(data: bytes, *, user_controlled: bool) -> str:
+    """按字节嗅探 MIME，不信对端说的。
+
+    平台路由（万相）一直按 PNG 落库，保持原样；组织连接回传的东西来自用户填的上游，
+    认不出是 PNG / JPEG / WebP 就拒收——不把一段任意字节当成图片存进资产库。
+    """
+    if not user_controlled:
+        return "image/png"
+    mime = local_runtime.sniff_image_mime(data)
+    if mime is None or mime not in _EXT_OF:
+        raise AppError("provider.unavailable", message="上游回传的不是 PNG / JPEG / WebP 图片")
+    return mime
+
+
+async def _download(url: str, *, user_controlled: bool = False) -> bytes:
+    """下载上游结果。**不跟随跳转**：一次 302 就能把请求带回内网。
+
+    `user_controlled=True`（组织连接回传的地址）时，下载前先做形状校验与解析校验，
+    与连接 Base URL 同一套规则（`endpoint_url`）。
+    """
+    if user_controlled:
+        url = endpoint_url.check_download_url(url)
+        await endpoint_url.assert_public_host(url)
+    async with httpx.AsyncClient(
+        timeout=DOWNLOAD_TIMEOUT_SECONDS, follow_redirects=False
+    ) as client:
         resp = await client.get(url)
+    if 300 <= resp.status_code < 400:
+        raise AppError(
+            "provider.params.invalid",
+            message=f"下载生成结果时上游返回了跳转（HTTP {resp.status_code}），出于安全不跟随",
+        )
     if resp.status_code != 200:
         raise AppError("provider.unavailable", message=f"下载生成结果失败 HTTP {resp.status_code}")
     data = resp.content

@@ -1,6 +1,6 @@
-import { ProjectLobby } from "@/components/freeflow/project-lobby";
+import { ProjectList } from "@/components/freeflow/project-lobby";
 
-// 全局层占位页，分支内未展开（README「全局层」）。
+/** 我的项目：按最近编辑排序的完整片单。新建回首页的创作输入。 */
 export default function FreeflowProjectsPage() {
-  return <ProjectLobby />;
+  return <ProjectList />;
 }

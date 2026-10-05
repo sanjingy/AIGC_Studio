@@ -43,7 +43,12 @@ export default function FreeflowSettingsPage({ params }: { params: Promise<{ id:
       )}
       {!state.error && state.loading && <p className="p-6 text-sm text-fg-subtle">加载中…</p>}
       {!state.error && !state.loading && (
-        <ProjectSettings projectId={id} project={state.project} onDelete={handleDelete} />
+        <ProjectSettings
+          projectId={id}
+          project={state.project}
+          onDelete={handleDelete}
+          onRenamed={() => void state.reload().catch(() => undefined)}
+        />
       )}
     </ProjectWorkbench>
   );

@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { AssetLibraryIcon, ModelRackIcon, ProjectIcon, StudioMarkIcon } from "@/components/icons/studio-icons";
+import { AssetLibraryIcon, ModelRackIcon, ProjectIcon, QueueIcon, StudioMarkIcon } from "@/components/icons/studio-icons";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/freeflow", label: "创作首页", icon: StudioMarkIcon },
   { href: "/freeflow/projects", label: "我的项目", icon: ProjectIcon },
   { href: "/freeflow/assets", label: "资产库", icon: AssetLibraryIcon },
+  { href: "/freeflow/tasks", label: "任务", icon: QueueIcon },
   { href: "/freeflow/models", label: "模型库", icon: ModelRackIcon },
 ];
 

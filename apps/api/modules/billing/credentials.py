@@ -89,8 +89,8 @@ def _require_capability(capability: str, provider_id: str | None = None) -> str:
     "给这个能力唯一的那家配 Key"，同能力多家之后仍然落到默认那家，
     旧前端与旧测试不需要改。
 
-    给了就必须是这个能力下**目录里真有适配器**的一家。自定义端点不走这里，
-    它的 Key 和地址、模型绑在一起存在 `org_text_endpoints`。
+    给了就必须是这个能力下**目录里真有适配器**的一家。组织供应商连接不走这里，
+    它的 Key 和地址、模型绑在一起存在 `org_provider_connections`（ADR-039）。
     """
     if capability not in configurable_capabilities():
         raise AppError(

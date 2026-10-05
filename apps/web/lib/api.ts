@@ -117,6 +117,12 @@ export type Project = {
    */
   stale_roles: ReviseTarget[];
   created_at: string;
+  /**
+   * 项目行最后一次写入的时间（`TimestampMixin.onupdate`）：改标题、写编排状态、
+   * 扣费都会刷新它。近期项目按它排、文案叫「最近编辑」，不和 `created_at` 混用。
+   * 注意列表接口本身仍按 `created_at` 分页，见 `lib/freeflow/project-recency.ts`。
+   */
+  updated_at: string;
 };
 
 export type Advance = {
@@ -376,6 +382,13 @@ export type BaseImage = {
 
 export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
+/**
+ * 后端 `TaskOut`。没有 `input_json` / `error_detail`：对象（哪个角色 / 镜头）要经
+ * `projects.renders` 按 task_id 反查，失败原因只有错误码。
+ *
+ * 时间可空：旧记录或被裁剪的响应可能缺字段，列表先过 `normalizeTask`
+ * （`lib/freeflow/task-scope.ts`）再用，界面上缺了写「时间未记录」。
+ */
 export type Task = {
   id: string;
   project_id: string | null;
@@ -383,11 +396,15 @@ export type Task = {
   status: TaskStatus;
   progress: number;
   attempt: number;
+  max_attempts: number;
   error_code: string | null;
   estimated_cost: number;
   actual_cost: number;
+  counts_as_waste: boolean;
   output_json: Record<string, any> | null;
-  created_at: string;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 };
 
 /**
@@ -1062,9 +1079,11 @@ export const assets = {
    * 页用）。**筛选在后端做**——前端拿全量再筛的话，limit 100 一到就会漏。
    * 按项目筛时后端不返回独立角色档案：它们不挂任何项目。
    */
-  library: (opts: { type?: string; folderId?: string; projectId?: string } = {}) => {
+  library: (opts: { type?: string; folderId?: string; projectId?: string; cursor?: string | null } = {}) => {
     const q = new URLSearchParams({ limit: "100" });
     if (opts.type) q.set("type", opts.type);
+    // 只翻文件那一页（后端按 created_at 往前翻）；档案与用量每页都是全量
+    if (opts.cursor) q.set("cursor", opts.cursor);
     if (opts.folderId) q.set("folder_id", opts.folderId);
     if (opts.projectId) q.set("project_id", opts.projectId);
     return apiFetch<Library>(`/assets/library?${q}`);
@@ -1267,33 +1286,42 @@ export const modelCatalog = {
   list: () => apiFetch<{ items: CapabilityModels[] }>("/model-catalog"),
 };
 
-// ---------------------------------------------------------------- 模型上游配置（组织层）
+// ---------------------------------------------------------------- 模型上游配置（组织层，ADR-039）
 
-/** 文本能力的 OpenAI 兼容自定义端点的固定 id。项目偏好里存这个值表示"走组织的自定义端点"。 */
-export const CUSTOM_TEXT_PROVIDER_ID = "provider.custom.text";
+/** 组织供应商连接在路由里的前缀：`provider.org:<连接 id>`，项目偏好可再带 `:<模型 id>` */
+export const ORG_PROVIDER_PREFIX = "provider.org:";
 
 export type ProviderOption = {
   provider_id: string;
   label: string;
-  /** catalog = 目录里真有适配器的一家；custom = 组织自己填的 OpenAI 兼容端点 */
-  kind: "catalog" | "custom";
-  /** false 时不能被选（自定义端点还没填），原因在 unavailable_reason */
+  /** catalog = 平台目录里的一家；org = 本组织自带 Key 的一个供应商连接 */
+  kind: "catalog" | "org";
+  /** false 时不能被选（连接已停用），原因在 unavailable_reason */
   available: boolean;
   models: ModelOption[];
   default_model_id: string | null;
-  /** 能不能用平台额度计费。自定义端点永远不能 */
+  /** 能不能用平台额度计费。组织连接永远不能 */
   supports_platform_key: boolean;
   unavailable_reason: string | null;
+  /** 组织连接的 id；目录里的一家为 null */
+  connection_id?: string | null;
+  /** 出图一致性实测过没有：false 标「未实测」，null 不表态 */
+  consistency_verified?: boolean | null;
 };
 
 export type UpstreamSelection = {
   provider_id: string | null;
-  /** null = 这家的目录默认顺序 */
+  /** null = 这家的目录默认顺序 / 连接里该能力的第一个模型 */
   model_id: string | null;
   key_source: "platform" | "org";
   /** org = 组织显式保存过；platform = 没存过，值是平台目录默认 */
   layer: "org" | "platform";
   updated_at: string | null;
+  /**
+   * 指向的连接已不可用时的原因码：connection_missing / connection_disabled /
+   * capability_mismatch / model_missing。默认**不会**被自动改掉，界面据此提示改选。
+   */
+  broken_reason?: string | null;
 };
 
 export type CredentialStatus = {
@@ -1304,14 +1332,6 @@ export type CredentialStatus = {
   updated_at: string | null;
 };
 
-export type CustomEndpoint = {
-  label: string;
-  base_url: string;
-  model_id: string;
-  masked_key: string | null;
-  updated_at: string;
-};
-
 export type CapabilityConfig = {
   capability: string;
   label: string;
@@ -1320,18 +1340,87 @@ export type CapabilityConfig = {
   providers: ProviderOption[];
   selection: UpstreamSelection | null;
   credentials: CredentialStatus[];
-  custom_endpoint: CustomEndpoint | null;
-  supports_custom_endpoint: boolean;
+  /** 这个能力能不能指向自带 Key 的供应商连接（由协议白名单推出） */
+  supports_org_connections?: boolean;
   unavailable_reason: string | null;
 };
 
 export type ModelConfig = { items: CapabilityConfig[] };
 
+export type ConnectionModel = {
+  model_id: string;
+  protocol: string;
+  /** 由协议决定，后端给，前端不推 */
+  capability: string;
+  consistency_verified: boolean | null;
+  /** 用户标的推理模型。旧数据没有这个键，按 false */
+  reasoning?: boolean;
+};
+
+export type ProviderPreset = {
+  preset_id: string;
+  label: string;
+  /** 空串 = 地址由用户自己填（自定义中转） */
+  base_url: string;
+  docs_url: string;
+  /** 取 Key 页面；没核到时为 null，界面改给 docs_url */
+  key_url: string | null;
+  icon: string;
+  protocols: string[];
+  capabilities: string[];
+  models: ConnectionModel[];
+};
+
+export type ProtocolSpec = {
+  protocol: string;
+  capability: string;
+  label: string;
+  consistency_verified: boolean | null;
+};
+
+export type ProviderConnection = {
+  id: string;
+  /** 设默认 / 项目偏好时用这个串 */
+  provider_id: string;
+  label: string;
+  /** null = 自定义 */
+  preset_id: string | null;
+  base_url: string;
+  models: ConnectionModel[];
+  enabled: boolean;
+  /** 尾号掩码；Key 无法解密时 null。明文永不返回 */
+  masked_key: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ConnectionModelInput = { model_id: string; protocol: string; reasoning: boolean };
+
+export type ConnectionCreate = {
+  preset_id?: string;
+  label?: string;
+  base_url?: string;
+  models?: ConnectionModelInput[];
+  api_key: string;
+  enabled?: boolean;
+};
+
+/** 全部可选，没给的不动。`api_key` 不给就沿用原来那把 */
+export type ConnectionPatch = Partial<Omit<ConnectionCreate, "preset_id">>;
+
+export type ConnectionReferences = {
+  defaults: { capability: string }[];
+  projects: { project_id: string; name: string; capability: string }[];
+};
+
 export const modelConfig = {
-  /** 每个能力：可选上游与模型（后端目录）、组织当前选择、各家 Key 状态、自定义端点 */
+  /** 每个能力：可选上游与模型（目录 + 组织连接）、组织当前选择、目录各家 Key 状态 */
   get: () => apiFetch<ModelConfig>("/model-config"),
 
-  /** 保存组织默认。Provider 与模型不匹配、选自有计费却没存 Key，后端直接拒绝 */
+  /**
+   * 保存组织默认。指向连接时 `provider_id` 是 `provider.org:<id>`（不带模型后缀）、
+   * `key_source` 必须是 org。不合法的组合后端直接拒绝，界面照实显示原因。
+   */
   putSelection: (
     capability: string,
     body: { provider_id: string; model_id: string | null; key_source: "platform" | "org" },
@@ -1341,19 +1430,45 @@ export const modelConfig = {
       body: JSON.stringify(body),
     }),
 
-  /** 已有端点时 api_key 可以不传，沿用原来那把 */
-  putEndpoint: (body: { label: string; base_url: string; model_id: string; api_key?: string }) =>
-    apiFetch<ModelConfig>("/model-config/text_generation/custom-endpoint", {
-      method: "PUT",
+  /** 预设（只含事实，不含价格）+ 协议白名单。协议下拉只能从这里取 */
+  presets: () => apiFetch<{ presets: ProviderPreset[]; protocols: ProtocolSpec[] }>("/model-config/presets"),
+
+  connections: () =>
+    apiFetch<{ items: ProviderConnection[]; limit: number }>("/model-config/connections"),
+
+  createConnection: (body: ConnectionCreate) =>
+    apiFetch<ProviderConnection>("/model-config/connections", {
+      method: "POST",
       body: JSON.stringify(body),
     }),
 
-  deleteEndpoint: () =>
-    apiFetch<void>("/model-config/text_generation/custom-endpoint", { method: "DELETE" }),
+  updateConnection: (id: string, body: ConnectionPatch) =>
+    apiFetch<ProviderConnection>(`/model-config/connections/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
 
-  /** 字段都可省：没给的用已保存的值 */
-  testEndpoint: (body: { base_url?: string; model_id?: string; api_key?: string }) =>
-    apiFetch<KeyTestResult>("/model-config/text_generation/custom-endpoint/test", {
+  /** 软删。指向它的默认 / 项目偏好**不会**自动改，之后生成会报错 */
+  deleteConnection: (id: string) =>
+    apiFetch<void>(`/model-config/connections/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  /** 哪些组织默认、哪些项目正指向这个连接（删除确认框用） */
+  references: (id: string) =>
+    apiFetch<ConnectionReferences>(`/model-config/connections/${encodeURIComponent(id)}/references`),
+
+  /** 保存之前测试：四项要给全 */
+  testDraft: (body: { protocol: string; model_id: string; base_url: string; api_key: string; preset_id?: string }) =>
+    apiFetch<KeyTestResult>("/model-config/connections/test", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /** 测已保存的连接。没给的用已保存的值，所以能测"改了还没存"的地址 / Key */
+  testSaved: (
+    id: string,
+    body: { protocol?: string; model_id?: string; base_url?: string; api_key?: string },
+  ) =>
+    apiFetch<KeyTestResult>(`/model-config/connections/${encodeURIComponent(id)}/test`, {
       method: "POST",
       body: JSON.stringify(body),
     }),

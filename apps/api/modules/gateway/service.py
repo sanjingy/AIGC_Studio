@@ -32,6 +32,7 @@ Provider / 模型 / 计费来源"和"这次真的拿去调的"是同一份结论
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from dataclasses import dataclass, field
 from functools import partial
@@ -46,7 +47,6 @@ from adapters.providers.base import (
     TextRequest,
     TextResponse,
 )
-from adapters.providers.openai_compat import OpenAICompatTextProvider
 from apps.api.core.db import session_scope
 from apps.api.core.errors import ERRORS, AppError
 from apps.api.core.logging import get_logger
@@ -262,10 +262,12 @@ async def _load_org_default(*, org_id: uuid.UUID, capability: str) -> upstreams.
         return await upstreams.load_default(db, org_id=org_id, capability=capability)
 
 
-async def _load_custom_endpoint(*, org_id: uuid.UUID) -> upstreams.ResolvedEndpoint | None:
-    """文本自定义端点（`org_text_endpoints`）。替换点，理由同 `_load_org_key`。"""
+async def _load_org_connection(
+    *, org_id: uuid.UUID, connection_id: uuid.UUID
+) -> upstreams.ResolvedConnection | None:
+    """组织供应商连接（`org_provider_connections`）。替换点，理由同 `_load_org_key`。"""
     async with session_scope() as db:
-        return await upstreams.load_endpoint(db, org_id=org_id)
+        return await upstreams.load_connection(db, org_id=org_id, connection_id=connection_id)
 
 
 def _mock_resolution(capability: str) -> Resolution:
@@ -310,27 +312,38 @@ def _prefer(
     return _prefer_model(routes, model_id)
 
 
-def _custom_resolution(
-    capability: str, endpoint: upstreams.ResolvedEndpoint, org_id: uuid.UUID
+def _connection_resolution(
+    capability: str,
+    connection: upstreams.ResolvedConnection,
+    *,
+    model_id: str | None,
+    org_id: uuid.UUID,
+    allow_reasoning: bool = True,
 ) -> Resolution:
-    """文本自定义端点的那一条虚拟路由（05_MODEL_GATEWAY.md §5.2）。
+    """组织供应商连接的那**一条**虚拟路由（ADR-039 第 4、5 条）。
 
-    **只在文本能力这一个分支里拼**：`decide()` 对别的能力永远不会给出
-    自定义端点，`supports_custom_endpoint` 是写死的能力判断，表里也没有
-    capability 列——视频 / TTS 的解析路径碰不到它。
+    只拼一条：失败不换到这个连接的别的模型、不换到别的连接、更不落平台——
+    用户选的是"这个供应商的这个模型"，计费已经按 BYOK 算过。
+    适配器由协议白名单决定（`catalog.PROTOCOLS`），能力对不上在 `pick_model`
+    里就拒绝，视频 / TTS 的解析路径拿不到任何连接。
+    熔断记在 `breaker.scope("provider.org:<id>", org_id)` 上，按 org 隔离。
     """
-    assert catalog.supports_custom_endpoint(capability)
+    model, protocol = upstreams.pick_model(
+        capability,
+        label=connection.label,
+        models=connection.models,
+        enabled=connection.enabled,
+        model_id=model_id,
+        connection_id=connection.connection_id,
+    )
+    upstreams.check_reasoning(
+        capability, connection, model_id=model, protocol=protocol, allow_reasoning=allow_reasoning
+    )
     route = Route(
-        catalog.CUSTOM_TEXT_PROVIDER_ID,
-        endpoint.model_id,
+        connection.provider_id,
+        model,
         priority=0,
-        factory=partial(
-            OpenAICompatTextProvider,
-            base_url=endpoint.base_url,
-            api_key=endpoint.api_key,
-            model_id=endpoint.model_id,
-            key_source=KeySource.ORG,
-        ),
+        factory=partial(upstreams.build_adapter, connection, model_id=model, protocol=protocol),
         key_source=KeySource.ORG,
         org_id=org_id,
     )
@@ -339,10 +352,44 @@ def _custom_resolution(
         capability=capability,
         org_id=str(org_id),
         key_source=KeySource.ORG.value,
-        provider=catalog.CUSTOM_TEXT_PROVIDER_ID,
+        provider=connection.provider_id,
+        model=model,
     )
     return Resolution(
-        capability=capability, routes=[route], key_source=KeySource.ORG, secret=endpoint.api_key
+        capability=capability, routes=[route], key_source=KeySource.ORG, secret=connection.api_key
+    )
+
+
+async def _pinned_connection(
+    capability: str, upstream: dict[str, Any], *, org_id: uuid.UUID | None
+) -> Resolution | None:
+    """建任务时钉住的组织连接（`input_json.upstream`，Lead 决定 (a)）。不是组织连接返回 None。
+
+    按记下的连接 id 与模型解析，**不再读组织默认 / 项目偏好**：用户在建任务之后改了默认，
+    这个任务仍然调建任务时记下、按它预扣过的那个上游。连接被删 / 停用 / 模型被移除
+    → `provider.byok.rejected`（`connection_missing` / `connection_disabled` / `model_missing`），
+    不落平台、不换连接。
+    """
+    provider_id = upstream.get("provider_id")
+    if not isinstance(provider_id, str) or not catalog.is_org_provider(provider_id):
+        return None
+    raw_id, raw_model = upstream.get("connection_id"), upstream.get("model_id")
+    try:
+        connection_id = uuid.UUID(str(raw_id)) if raw_id else None
+    except ValueError:
+        connection_id = None
+    connection = (
+        await _load_org_connection(org_id=org_id, connection_id=connection_id)
+        if org_id is not None and connection_id is not None
+        else None
+    )
+    if connection is None or org_id is None:
+        raise upstreams.connection_missing(capability, provider_id)
+    return _connection_resolution(
+        capability,
+        connection,
+        model_id=str(raw_model) if raw_model else None,
+        org_id=org_id,
     )
 
 
@@ -351,6 +398,8 @@ async def _resolve(
     *,
     org_id: uuid.UUID | None,
     preferred_model_id: str | None = None,
+    allow_reasoning: bool = True,
+    upstream: dict[str, Any] | None = None,
 ) -> Resolution:
     """决定这次调用用哪家、哪个模型、谁的 Key，以及路由按什么顺序试。
 
@@ -367,8 +416,16 @@ async def _resolve(
     自己的 Key 也不许打真上游），而"平台没配 Key"那一条必须**让位于 BYOK**
     （平台没 Key、用户自带 Key，该用他的）。
     """
+    # 钉住的组织连接先校验、再看测试环境的强制 Mock：连接已删 / 停用的报错在测试与线上
+    # 一致；校验只查库不出网，强制 Mock 仍然压过真正的上游调用。
+    # 平台路由（非 `provider.org:`）不钉，照旧按默认 / 偏好解析、照旧 failover。
+    pinned_connection = (
+        await _pinned_connection(capability, upstream, org_id=org_id) if upstream else None
+    )
     if mock_image.forced(capability):
         return _mock_resolution(capability)
+    if pinned_connection is not None:
+        return pinned_connection
 
     default = (
         await _load_org_default(org_id=org_id, capability=capability)
@@ -378,15 +435,21 @@ async def _resolve(
     decision = upstreams.decide(capability, preference=preferred_model_id, default=default)
     pinned = decision.layer != "platform" and decision.provider_id is not None
 
-    if decision.provider_id == catalog.CUSTOM_TEXT_PROVIDER_ID:
-        endpoint = await _load_custom_endpoint(org_id=org_id) if org_id is not None else None
-        if endpoint is None or org_id is None:
-            raise AppError(
-                "provider.byok.rejected",
-                message="选中的是文本自定义端点，但它还没有配置或已被删除，请到模型页重新选择",
-                detail={"capability": capability, "reason": "custom_endpoint_missing"},
-            )
-        return _custom_resolution(capability, endpoint, org_id)
+    if decision.is_org_connection:
+        connection = (
+            await _load_org_connection(org_id=org_id, connection_id=decision.connection_id)
+            if org_id is not None and decision.connection_id is not None
+            else None
+        )
+        if connection is None or org_id is None:
+            raise upstreams.connection_missing(capability, decision.provider_id)
+        return _connection_resolution(
+            capability,
+            connection,
+            model_id=decision.model_id,
+            org_id=org_id,
+            allow_reasoning=allow_reasoning,
+        )
 
     provider_id = decision.provider_id or catalog.provider_of().get(capability)
     use_org_key = decision.key_source is KeySource.ORG
@@ -511,14 +574,20 @@ async def generate_image(
     *,
     org_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
+    upstream: dict[str, Any] | None = None,
 ) -> ImageResult:
-    """出图。出图模型里没有"推理模型"这回事，所以不带 `allow_reasoning`。"""
+    """出图。出图模型里没有"推理模型"这回事，所以不带 `allow_reasoning`。
+
+    `upstream` 是建任务时记下的 `input_json.upstream`：指向组织连接时按它钉住解析
+    （见 `_pinned_connection`）；没有它的旧任务、平台路由照旧。
+    """
     return await _call(  # type: ignore[return-value]
         "image_generation",
         "generate_image",
         request,
         org_id=org_id,
         project_id=project_id,
+        upstream=upstream,
     )
 
 
@@ -530,6 +599,7 @@ async def _call(
     org_id: uuid.UUID | None,
     project_id: uuid.UUID | None = None,
     allow_reasoning: bool = True,
+    upstream: dict[str, Any] | None = None,
 ) -> object:
     """按优先级依次尝试，可 failover 的错误才继续换下一家。
 
@@ -546,7 +616,13 @@ async def _call(
         project_id=project_id,
         allow_reasoning=allow_reasoning,
     )
-    resolution = await _resolve(capability, org_id=org_id, preferred_model_id=preferred)
+    resolution = await _resolve(
+        capability,
+        org_id=org_id,
+        preferred_model_id=preferred,
+        allow_reasoning=allow_reasoning,
+        upstream=upstream,
+    )
     try:
         return await _attempt(capability, method, request, resolution)
     except AppError as exc:
@@ -588,6 +664,9 @@ async def _attempt(capability: str, method: str, request: object, resolution: Re
             continue
 
         await breaker.record_success(route.breaker_scope)
+        if isinstance(result, ImageResult):
+            # 回填实际出图的路由：Worker 据此判断结果下载地址是不是用户可控的
+            result = dataclasses.replace(result, provider_id=route.provider_id)
         if attempts:
             log.info(
                 "gateway.recovered_via_failover",

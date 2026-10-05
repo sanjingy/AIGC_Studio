@@ -16,11 +16,14 @@ lambda 捕获的是变量不是值，这个仓库已经因此让 DeepSeek 拿着
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from adapters.providers.dashscope import DashScopeImageProvider
 from adapters.providers.deepseek import DeepSeekProvider
+from adapters.providers.openai_compat import OpenAICompatTextProvider
+from adapters.providers.openai_images import OpenAIImagesProvider
 from apps.api.core.config import get_settings
 
 
@@ -61,15 +64,108 @@ SPECS: tuple[ProviderSpec, ...] = (
 )
 
 
-# 文本能力的 OpenAI 兼容自定义端点（ADR-031 第 5 条的唯一例外，05_MODEL_GATEWAY.md §5.2）。
+# 组织自带 Key 的供应商连接（ADR-039，取代 ADR-031 第 5 条的"一个文本自定义端点"）。
 #
-# **它不进 `SPECS`**：`SPECS` 是进程级常量，自定义端点是每个 org 一份、
-# 随时会改的数据（`org_text_endpoints`）。这里只给它一个固定的 id 和展示名，
-# 让目录 DTO、组织默认、项目偏好三处都能用同一个串指代它。
-# 能力写死成文本：视频和 TTS 没有"填个 URL 就能用"的事实标准，做了就是假入口。
-CUSTOM_TEXT_PROVIDER_ID = "provider.custom.text"
-CUSTOM_TEXT_CAPABILITY = "text_generation"
-CUSTOM_TEXT_LABEL = "OpenAI 兼容自定义端点"
+# **连接不进 `SPECS`**：`SPECS` 是进程级常量，连接是每个 org 多行、随时会改的数据
+# （`org_provider_connections`）。每个连接在运行期以一条虚拟路由出现：
+# `provider_id = "provider.org:<连接 id>"`。组织默认、项目偏好、Gateway 路由三处
+# 都用这同一个串指代它。
+ORG_PROVIDER_PREFIX = "provider.org:"
+ORG_PROVIDER_LABEL = "自带 Key 的供应商"
+
+# 迁移前文本自定义端点的固定 id。迁移把它全部改写成 `provider.org:<id>`；
+# 只有"端点早已删除"的旧项目偏好还会留着它，解析时按"连接不存在"报错。
+LEGACY_CUSTOM_TEXT_PROVIDER_ID = "provider.custom.text"
+
+
+@dataclass(frozen=True, slots=True)
+class ProtocolSpec:
+    """一个协议绑定**唯一**的能力与**唯一**的适配器（ADR-039 第 2 条）。
+
+    能力由协议推出，连接表里不存 capability：没有这一列，就没有人能往里存
+    `"tts"`。端点自己声明什么都不采信，只按这里写死的契约调。
+    """
+
+    protocol: str
+    capability: str
+    adapter: Any  # Callable[..., TextProvider | ImageProvider]
+    label: str
+    #: 这个协议出的图有没有做过一致性实测（ADR-039 第 7 条）。只对出图协议有意义：
+    #: 文本协议为 None。实测前一律 False，界面据此标"未实测"，不得宣称与万相同等一致。
+    #: 第二批专用协议附上实测记录后才能改成 True。
+    consistency_verified: bool | None = None
+
+
+PROTOCOLS: dict[str, ProtocolSpec] = {
+    "openai_chat": ProtocolSpec(
+        protocol="openai_chat",
+        capability="text_generation",
+        adapter=OpenAICompatTextProvider,
+        label="OpenAI 兼容对话（/chat/completions）",
+    ),
+    "openai_images": ProtocolSpec(
+        protocol="openai_images",
+        capability="image_generation",
+        adapter=OpenAIImagesProvider,
+        label="OpenAI 兼容出图（/images/generations）",
+        consistency_verified=False,
+    ),
+}
+
+
+def protocol_spec(protocol: str) -> ProtocolSpec | None:
+    return PROTOCOLS.get(protocol)
+
+
+def consistency_verified(protocol: str) -> bool | None:
+    """按协议给出"一致性实测过没有"。白名单外的协议与文本协议都是 None。"""
+    spec = PROTOCOLS.get(protocol)
+    return spec.consistency_verified if spec else None
+
+
+def protocols_for(capability: str) -> tuple[str, ...]:
+    return tuple(p.protocol for p in PROTOCOLS.values() if p.capability == capability)
+
+
+def supports_org_connections(capability: str) -> bool:
+    """这个能力能不能指向组织自带的连接。由协议白名单推出，不另写一份。"""
+    return bool(protocols_for(capability))
+
+
+def org_provider_id(connection_id: uuid.UUID) -> str:
+    return f"{ORG_PROVIDER_PREFIX}{connection_id}"
+
+
+def is_org_provider(provider_id: str | None) -> bool:
+    return bool(provider_id) and str(provider_id).startswith(ORG_PROVIDER_PREFIX)
+
+
+_UUID_CHARS = 36
+
+
+def parse_org_ref(value: str) -> tuple[uuid.UUID | None, str | None] | None:
+    """解析 `provider.org:<uuid>[:<model_id>]`。不是这个前缀返回 None。
+
+    uuid 定长 36 位，所以模型 id 里出现 `/`、`:`（OpenRouter、硅基流动的模型名
+    都有）也不会切错。前缀对、uuid 坏了返回 `(None, None)`——调用方按
+    "连接不存在"报错，不当成"不是连接"往平台默认上落。旧的
+    `provider.custom.text` 也走这一支。
+    """
+    if value == LEGACY_CUSTOM_TEXT_PROVIDER_ID:
+        return None, None
+    if not value.startswith(ORG_PROVIDER_PREFIX):
+        return None
+    rest = value[len(ORG_PROVIDER_PREFIX) :]
+    try:
+        connection_id = uuid.UUID(rest[:_UUID_CHARS])
+    except ValueError:
+        return None, None
+    tail = rest[_UUID_CHARS:]
+    if not tail:
+        return connection_id, None
+    if not tail.startswith(":") or len(tail) == 1:
+        return None, None
+    return connection_id, tail[1:]
 
 
 def providers_for(capability: str) -> tuple[ProviderSpec, ...]:
@@ -98,13 +194,9 @@ def provider_of() -> dict[str, str]:
     return out
 
 
-def supports_custom_endpoint(capability: str) -> bool:
-    return capability == CUSTOM_TEXT_CAPABILITY
-
-
 def provider_label(provider_id: str) -> str:
-    if provider_id == CUSTOM_TEXT_PROVIDER_ID:
-        return CUSTOM_TEXT_LABEL
+    if is_org_provider(provider_id) or provider_id == LEGACY_CUSTOM_TEXT_PROVIDER_ID:
+        return ORG_PROVIDER_LABEL
     return labels().get(provider_id, provider_id)
 
 

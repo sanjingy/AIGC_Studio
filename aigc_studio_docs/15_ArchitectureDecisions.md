@@ -1194,3 +1194,62 @@ routing → plot_index →【① 开拍前确认】→ screenplay →【② 剧�
 **代价与验收**：提示词增加一次文本推理和失败类型；必须保留计费、幂等和离线预检。
 生产入口集成测试必须证明它实际使用 Agent 输出，浏览器测试与 Mock 测试不代表
 真实视觉质量已通过。实施与部署分别记账，不能用规划文档替代完成证据。
+
+---
+
+## ADR-039 组织可添加多个自带 Key 的供应商（预设 + 自定义），文本与出图均可一键切换 ★
+
+**日期**：2026-10-05
+
+**Supersedes**：ADR-031 第 5 条中"例外：文本能力允许**一个** OpenAI 兼容自定义端点"，
+以及 `05_MODEL_GATEWAY.md` §5.2 "一个 org 一个端点"。ADR-031 其余各条（用户直接选模型、
+三层默认、failover 必须标明实际模型）**继续有效**；平台 Key 的模型仍走代码内固定目录。
+
+**背景**：负责人认为模型设置不方便，要求像 CC Switch 那样：添加多个供应商
+（Base URL + 自带 Key + 模型）、内置常用厂商预设、一键切换，覆盖文本与出图，
+Key 一律用户自带。调研（`orca/tasks/MULTI_PROVIDER.research.md`）结论：没有可整块
+引入的开源模块——LiteLLM 国产出图覆盖弱、依赖重且 2026-03 发生过 PyPI 投毒；
+new-api 渠道为全局运维配置、明确不对渠道地址做 SSRF 防护、AGPL；CC Switch 预设
+耦合 Claude Code 配置且无出图；LobeHub / Cherry Studio 列表许可证不允许搬运。
+
+**决定**：
+
+1. **组织供应商（org provider）是一行"连接"**：`label`、`preset_id`（可空=自定义）、
+   `base_url`、加密的 Key（AK/SK 类另有加密 secret）、`models`（`[{model_id, protocol}]`）、
+   `enabled`。一个组织可有多行，数量上限走配置。替代 `org_text_endpoints`，旧数据迁移。
+2. **能力由协议决定，协议是代码白名单**。表里**不存 capability**；每个协议在代码里绑定
+   唯一能力与唯一适配器：`openai_chat → text_generation`、`openai_images → image_generation`；
+   第二批再加 `dashscope_qwen_image`、`kling_image`、`jimeng_image`、`minimax_image`
+   （均为 `image_generation`）。视频、TTS 本 ADR 不开放。不采信端点自我声明（§5.2 第 4 条保留）。
+3. **预设是仓库内的数据文件**（只含事实：名称、协议、Base URL、推荐模型、文档与取 Key 链接、
+   图标键），以厂商官方文档为准，**不写价格**。选预设=把模板拷进一行连接，用户只填 Key；
+   Base URL 可改（地域节点），但与自定义一样过校验。
+4. **一键切换=改默认**。每个连接里的模型以运行期虚拟路由出现：
+   `provider_id = "provider.org:<连接 id>"`。组织默认（`org_model_defaults`）与项目偏好
+   （`projects.model_preference`）都可指向它；三层取值顺序与"Provider 与模型不匹配一律拒绝"
+   不变。判定仍只有 `upstreams.decide` 一份，计费与调用从同一结论取值。
+5. **一律按 BYOK 处理**：计费走 `pricing_rules.byok_unit_credits`（每次调用的平台服务费，
+   文本与出图同规则，不为用户自带模型录单价）；熔断按 org 隔离；失败**不回落平台 Key**，
+   也不静默换到别的连接——报可读错误并记录实际调用的连接与模型。
+6. **安全不放松**：`base_url` 保存时和每次调用前都过 `endpoint_url` 校验（仅 https、拒私网/
+   回环/元数据、DNS 复查、不跟随跳转）。**出图返回的图片 URL 也是用户可控地址**，
+   下载转存同样过校验、不跟随跳转，且支持 `b64_json`；结果一律转存自有对象存储。
+   Key 只加密存储，任何接口不回显明文（只给掩码尾号）。
+7. **画风锁定对第三方出图同样生效**：系统风格词照 ADR-036 原样注入；适配器能关的
+   提示词改写一律关闭，上游回传的实际提示词照记；第三方出图在一致性实测前不得宣称
+   与万相同等一致。第二批专用适配器必须附实测记录才能上线。
+8. **复用边界**：适配逻辑可移植 MIT 项目（LiteLLM）代码并保留版权声明；AGPL 项目
+   （new-api、Cherry Studio）只读参考，不复制代码；不引入 LiteLLM / new-api 运行时依赖。
+
+**分批**：A 批——连接表与迁移、预设文件、`openai_chat` 多连接、`openai_images` 适配器
+（覆盖 OpenAI 图片兼容中转、火山方舟 Seedream、智谱 CogView）、解析与计费、配置接口与
+连接测试、模型设置页。B 批——其余出图专用协议 + 一致性实测。
+
+**代价**：
+
+- 连接多了以后"这次到底用了哪个"更难溯源：任务 `input_json` 必须记连接 id、模型与层级，
+  生成记录要显示。
+- 第三方出图的画风一致性没有保证，用户切过去可能看到明显漂移；界面要提示"未实测"。
+- 预设数据会随厂商改版过时，需要定期核对；错了只影响默认值，用户可手改 Base URL。
+- 迁移要把旧的 `provider.custom.text` 引用改写为新的连接 id，迁移失败会让已配置的
+  租户失去文本默认，必须有回滚脚本与迁移测试。

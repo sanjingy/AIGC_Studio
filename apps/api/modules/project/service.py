@@ -120,12 +120,11 @@ async def set_model_preference(
 
     1. **按 key 合并，不整个覆盖。** 用户改了图片模型不该把之前存的
        文字模型偏好一起冲掉——前端只会传它正在改的那一个能力。
-    2. **只接受目录里真实存在的 id**，外加文本能力的一个固定值
-       `provider.custom.text`：表示"这个项目的文本走组织的自定义端点"，
-       模型随端点走。端点没配时它会在生成时明确报错（`provider.byok.rejected`），
-       不会静默退回平台默认。这里不查端点在不在——那是 Gateway 的表，
-       项目模块只认目录。 目录是"有哪些模型"的唯一真相源
-       （`gateway/catalog.py`），存一个路由表里没有的 id 等于让偏好
+    2. **只接受目录里真实存在的 id**，外加本组织供应商连接的引用
+       `provider.org:<连接 id>[:<模型 id>]`（ADR-039）：连接必须存在于本 org
+       （别的 org 的 id 一律 404）、有这个能力的协议的模型、模型在连接里。
+       连接以后被删 / 停用时偏好不会被静默改掉，生成时报可读错误。
+       目录是"有哪些模型"的唯一真相源（`gateway/catalog.py`），存一个路由表里没有的 id 等于让偏好
        静默失效：Gateway 找不到匹配的路由就按默认优先级走，用户看着
        设置页显示"已选高质档"，实际跑的是另一个模型。
 
@@ -137,10 +136,16 @@ async def set_model_preference(
     """
     row = await get_project(db, org_id=org_id, project_id=project_id)
 
-    custom = model_id == catalog.CUSTOM_TEXT_PROVIDER_ID and catalog.supports_custom_endpoint(
-        capability
-    )
-    if model_id is not None and not custom:
+    org_ref = model_id is not None and catalog.parse_org_ref(model_id) is not None
+    if org_ref:
+        # 延迟导入：gateway.service 依赖本模块（读项目偏好），模块级互相 import 会成环
+        from apps.api.modules.gateway import upstreams
+
+        assert model_id is not None
+        await upstreams.validate_preference_ref(
+            db, org_id=org_id, capability=capability, value=model_id
+        )
+    elif model_id is not None:
         allowed = catalog.model_ids(capability)
         if not allowed:
             raise AppError(
@@ -188,6 +193,24 @@ async def get_model_preference(
         return None
     value = (row.model_preference or {}).get(capability)
     return value if isinstance(value, str) and value else None
+
+
+async def list_preference_references(
+    db: AsyncSession, *, org_id: uuid.UUID, provider_ref: str
+) -> list[tuple[uuid.UUID, str, str]]:
+    """哪些项目的哪个能力的偏好指向 `provider_ref`（ADR-039，删除连接前的确认用）。
+
+    `provider_ref` 是 `provider.org:<连接 id>`；偏好写成它本身或带 `:<模型 id>` 后缀都算。
+    只算本 org 未软删的项目。返回 `(项目 id, 标题, 能力)`，一个项目指向多个能力就多行。
+    """
+    out: list[tuple[uuid.UUID, str, str]] = []
+    for row in await repo.list_with_preferences(db, org_id=org_id):
+        for capability, value in sorted((row.model_preference or {}).items()):
+            if isinstance(value, str) and (
+                value == provider_ref or value.startswith(provider_ref + ":")
+            ):
+                out.append((row.id, row.title, capability))
+    return out
 
 
 async def update_current_state(

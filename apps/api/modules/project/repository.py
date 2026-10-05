@@ -64,6 +64,16 @@ async def list_page(
     return list((await db.execute(stmt)).scalars())
 
 
+async def list_with_preferences(db: AsyncSession, *, org_id: uuid.UUID) -> list[Project]:
+    """本 org 未删、存过模型偏好的项目。按创建时间倒序。"""
+    stmt = (
+        _scoped(org_id)
+        .where(Project.model_preference.is_not(None))
+        .order_by(Project.created_at.desc())
+    )
+    return list((await db.execute(stmt)).scalars())
+
+
 async def count(db: AsyncSession, *, org_id: uuid.UUID) -> int:
     stmt = (
         select(func.count())

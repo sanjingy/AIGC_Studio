@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     # 未完成的上传超过这个时长由清理任务回收
     upload_abandon_after_seconds: int = 86_400
 
+    # --- 组织自带 Key 的供应商连接（ADR-039）---
+    # 每个组织最多几个连接。走配置不写死：上限是运营策略，不是代码事实。
+    org_provider_connection_limit: int = Field(default=20, ge=1, le=200)
+
     # --- 上游 Provider 凭据 ---
     # 用 SecretStr：打印配置对象时不会泄露。绝不进代码、不进日志、不进库。
     deepseek_api_key: SecretStr = SecretStr("")

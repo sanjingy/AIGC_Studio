@@ -80,7 +80,14 @@ class ImageResult:
     model_id: str
     # 上游实际使用的提示词。DashScope 默认会重写提示词，
     # 不记下来的话根本不知道画出来的东西是按什么描述生成的。
+    # 顺序与"先 `urls` 后 `inline`"一一对应。
     actual_prompts: list[str] = field(default_factory=list)
+    # 上游直接回传的图片字节（OpenAI 兼容出图的 `b64_json`）。没有 URL 可下载，
+    # 字节就在手里——与 `urls` 一样转存自有对象存储。
+    inline: list[bytes] = field(default_factory=list)
+    # 实际出图的路由（Gateway 回填）。Worker 据此判断结果 URL 是不是用户可控地址：
+    # `provider.org:` 开头的连接是用户填的上游，它回传的下载地址同样要过出网校验。
+    provider_id: str = ""
 
 
 class TextProvider(Protocol):

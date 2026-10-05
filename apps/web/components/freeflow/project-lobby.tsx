@@ -8,11 +8,12 @@ import {
   CirclePlus,
   Clapperboard,
   Film,
-  Loader2,
   ShieldAlert,
 } from "lucide-react";
+import { StartComposer } from "@/components/freeflow/home/start-composer";
 import { GatePendingIcon, StaleIcon } from "@/components/icons/studio-icons";
 import { ApiRequestError, projects, type Project } from "@/lib/api";
+import { formatEditedAt, sortByRecentEdit } from "@/lib/freeflow/project-recency";
 import { cn } from "@/lib/utils";
 
 type Attention = { project: Project; kind: "approval" | "failed" | "stale"; label: string; href: string };
@@ -26,125 +27,91 @@ const STAGE: Record<string, string> = {
   archived: "已归档",
 };
 
-/** 正在制作中的状态。首页的「继续制作」优先挑这几个。 */
+/** 正在制作中的状态，只用来给卡片上色。 */
 const ACTIVE = new Set(["routing", "producing", "review"]);
 
-export function ProjectLobby() {
-  const [items, setItems] = useState<Project[] | null>(null);
-  const [attention, setAttention] = useState<Attention[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
+/** 首页最多列几个近期项目，其余去「我的项目」。 */
+const HOME_RECENT = 8;
 
+/**
+ * 项目列表，按最近编辑（`updated_at`）倒序。后端按创建时间分页、前端取 50 条，
+ * 所以这是「这 50 条里最近编辑的」，见 `project-recency.ts`。
+ */
+function useRecentProjects() {
+  const [items, setItems] = useState<Project[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    let active = true;
+    let alive = true;
     projects
       .list()
-      .then(async ({ items: rows }) => {
-        if (!active) return;
-        setItems(rows);
-        const examined = await Promise.all(
-          rows.slice(0, 12).map(async (project) => {
-            const [approvals, runs] = await Promise.all([
-              projects.approvals(project.id).catch(() => []),
-              projects.runs(project.id).catch(() => []),
-            ]);
-            const result: Attention[] = [];
-            if (approvals.some((x) => x.status === "pending"))
-              result.push({ project, kind: "approval", label: "等待审核确认", href: `/freeflow/projects/${project.id}/overview` });
-            if (runs.some((x) => x.status === "failed"))
-              result.push({ project, kind: "failed", label: "有失败的运行", href: `/freeflow/projects/${project.id}/tasks` });
-            if (project.stale_roles.length)
-              result.push({ project, kind: "stale", label: `${project.stale_roles.length} 项上游已变`, href: `/freeflow/projects/${project.id}/overview` });
-            return result;
-          }),
-        );
-        if (active) setAttention(examined.flat().slice(0, 6));
-      })
+      .then(({ items: rows }) => alive && setItems(sortByRecentEdit(rows)))
       .catch((cause) => {
-        if (!active) return;
+        if (!alive) return;
         setError(cause instanceof ApiRequestError ? cause.error.user_message : "读取项目失败");
-        setAttention([]);
+        setItems([]);
       });
     return () => {
-      active = false;
+      alive = false;
     };
   }, []);
+  return { items, error };
+}
 
-  async function create(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const title = String(new FormData(event.currentTarget).get("title") ?? "").trim();
-    if (!title) return;
-    setCreating(true);
-    try {
-      const project = await projects.create(title);
-      window.location.assign(`/freeflow/projects/${project.id}/overview`);
-    } catch (cause) {
-      setError(cause instanceof ApiRequestError ? cause.error.user_message : "创建项目失败");
-      setCreating(false);
-    }
-  }
-
-  /**
-   * 「继续制作」挑的是真在制作中的那一个；都不在制作中就退回最近建的一个。
-   * 接口只给 `created_at`，没有 `updated_at`，所以这里不假装按"最后编辑"排序。
-   */
-  const continuing = useMemo(() => {
-    if (!items || items.length === 0) return null;
-    return items.find((p) => ACTIVE.has(p.status)) ?? items[0];
+/** 逐个项目查门与失败的运行。只看最近编辑的前 12 个，免得一次发几十个请求。 */
+function useAttention(items: Project[] | null): Attention[] | null {
+  const [attention, setAttention] = useState<Attention[] | null>(null);
+  useEffect(() => {
+    if (items === null) return;
+    let alive = true;
+    void Promise.all(
+      items.slice(0, 12).map(async (project) => {
+        const [approvals, runs] = await Promise.all([
+          projects.approvals(project.id).catch(() => []),
+          projects.runs(project.id).catch(() => []),
+        ]);
+        const result: Attention[] = [];
+        if (approvals.some((x) => x.status === "pending"))
+          result.push({ project, kind: "approval", label: "等待审核确认", href: `/freeflow/projects/${project.id}/overview` });
+        if (runs.some((x) => x.status === "failed"))
+          result.push({ project, kind: "failed", label: "有失败的运行", href: `/freeflow/projects/${project.id}/tasks` });
+        if (project.stale_roles.length)
+          result.push({ project, kind: "stale", label: `${project.stale_roles.length} 项上游已变`, href: `/freeflow/projects/${project.id}/overview` });
+        return result;
+      }),
+    ).then((rows) => alive && setAttention(rows.flat().slice(0, 6)));
+    return () => {
+      alive = false;
+    };
   }, [items]);
+  return attention;
+}
 
-  const rest = useMemo(() => {
-    if (!items) return [];
-    return items.filter((p) => p.id !== continuing?.id);
-  }, [items, continuing]);
-
-  const hasProjects = (items?.length ?? 0) > 0;
+/**
+ * 创作首页：创作输入 → 继续制作 + 需要你处理 → 近期项目。
+ *
+ * 「继续制作」就是最近编辑的那一个，与下面的排序同一口径。
+ */
+export function ProjectHome() {
+  const { items, error } = useRecentProjects();
+  const attention = useAttention(items);
+  const continuing = items?.[0] ?? null;
+  const recent = useMemo(() => (items ?? []).slice(1, 1 + HOME_RECENT), [items]);
+  const more = (items?.length ?? 0) - 1 - recent.length;
 
   return (
     <div className="ff-lobby">
-      <section className="ff-lobby-heading">
-        <h1>{hasProjects ? "继续制作" : "开始第一个项目"}</h1>
-        <button type="button" onClick={() => setOpen(true)} className="ff-primary-button">
-          <CirclePlus aria-hidden className="size-4" />
-          新建项目
-        </button>
-      </section>
+      <StartComposer />
 
       {error && (
         <p role="alert" className="rounded-sm border border-danger/25 bg-danger-soft px-4 py-3 text-sm text-danger">
-          {error}
+          项目列表读取失败：{error}
         </p>
-      )}
-
-      {open && (
-        <form onSubmit={create} className="ff-create-form" aria-label="新建项目">
-          <label className="flex min-w-0 flex-col gap-2 text-sm font-medium text-fg">
-            项目名称
-            <input
-              name="title"
-              autoFocus
-              required
-              maxLength={200}
-              placeholder="例如：第七夜"
-              className="h-10 rounded-md border border-border-strong bg-bg px-3 text-sm font-normal text-fg placeholder:text-fg-subtle focus:border-primary"
-            />
-          </label>
-          <button type="submit" disabled={creating} className="ff-primary-button mt-auto disabled:opacity-60">
-            {creating && <Loader2 aria-hidden className="size-4 animate-spin" />}
-            {creating ? "创建中" : "创建并进入"}
-          </button>
-          <button type="button" onClick={() => setOpen(false)} className="ff-quiet-button mt-auto">
-            取消
-          </button>
-          <p className="text-xs text-fg-subtle sm:col-span-3">先起名字，进入项目后再放入小说原文。</p>
-        </form>
       )}
 
       {items === null ? (
         <LobbyLoading />
-      ) : !hasProjects ? (
-        <EmptyProject onCreate={() => setOpen(true)} />
+      ) : items.length === 0 ? (
+        !error && <p className="text-sm text-fg-subtle">还没有项目。填好上面的项目名就能开始。</p>
       ) : (
         <>
           <div className="ff-lobby-top">
@@ -152,25 +119,21 @@ export function ProjectLobby() {
             <AttentionLedger items={attention} />
           </div>
 
-          {rest.length > 0 && (
-            <section aria-labelledby="all-projects">
+          {recent.length > 0 && (
+            <section aria-labelledby="recent-projects">
               <div className="ff-section-heading">
                 <div className="flex items-baseline gap-2.5">
-                  <h2 id="all-projects">项目片单</h2>
-                  <span className="ff-count">{items.length}</span>
+                  <h2 id="recent-projects">近期项目</h2>
+                  <span className="text-xs text-fg-subtle">按最近编辑</span>
                 </div>
+                <Link href="/freeflow/projects" className="text-xs text-fg-muted hover:text-primary">
+                  全部项目{more > 0 ? `（还有 ${more} 个）` : ""}
+                </Link>
               </div>
               <div className="ff-sheet">
-                {rest.map((project) => (
+                {recent.map((project) => (
                   <ProjectCard key={project.id} project={project} />
                 ))}
-                <button type="button" onClick={() => setOpen(true)} className="ff-new-project">
-                  <span>
-                    <CirclePlus aria-hidden className="size-5" />
-                  </span>
-                  <strong>新建项目</strong>
-                  <p>从一份小说原文开始</p>
-                </button>
               </div>
             </section>
           )}
@@ -185,8 +148,53 @@ export function ProjectLobby() {
   );
 }
 
+/** 我的项目：同一排序的完整片单。新建回首页的创作输入，那里才分得清两个动作。 */
+export function ProjectList() {
+  const { items, error } = useRecentProjects();
+  return (
+    <div className="ff-lobby">
+      <section className="ff-lobby-heading">
+        <div>
+          <h1>我的项目</h1>
+          <p>按最近编辑排序，最近动过的在前。</p>
+        </div>
+        <Link href="/freeflow#new" className="ff-primary-button">
+          <CirclePlus aria-hidden className="size-4" />
+          新建项目
+        </Link>
+      </section>
+
+      {error && (
+        <p role="alert" className="rounded-sm border border-danger/25 bg-danger-soft px-4 py-3 text-sm text-danger">
+          项目列表读取失败：{error}
+        </p>
+      )}
+
+      {items === null ? (
+        <LobbyLoading />
+      ) : items.length === 0 ? (
+        !error && <EmptyProject />
+      ) : (
+        <section aria-labelledby="all-projects">
+          <div className="ff-section-heading">
+            <div className="flex items-baseline gap-2.5">
+              <h2 id="all-projects">全部项目</h2>
+              <span className="ff-count">{items.length}</span>
+            </div>
+          </div>
+          <div className="ff-sheet">
+            {items.map((project) => (
+              <ProjectCard key={project.id} project={project} />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
 /**
- * 继续制作。全页最大的一块画面，点进去直接到项目总览。
+ * 继续制作：最近编辑的那个项目。全页最大的一块画面，点进去直接到项目总览。
  *
  * 画框里现在放的是取景网格占位：项目列表接口不返回封面图，编一张缩略图
  * 就是假素材。等有了真实封面再往这里塞 `<img>`。
@@ -202,7 +210,7 @@ function ContinueCard({ project }: { project: Project }) {
             aria-hidden
             className={cn("size-1.5 rounded-full", active ? "bg-running" : "bg-fg-subtle")}
           />
-          {active ? "制作中" : "最近打开"}
+          {active ? "制作中" : STAGE[project.status] ?? project.status}
         </span>
       </div>
       <div className="ff-continue-body">
@@ -218,6 +226,12 @@ function ContinueCard({ project }: { project: Project }) {
             <div className="ff-slate-field">
               <span className="ff-slate-key">路线</span>
               <span className="ff-slate-value">{project.route_type ?? "等待判断"}</span>
+            </div>
+            <div className="ff-slate-field">
+              <span className="ff-slate-key">最近编辑</span>
+              <span className="ff-slate-value" data-numeric="true">
+                <time dateTime={project.updated_at}>{formatEditedAt(project.updated_at)}</time>
+              </span>
             </div>
             <div className="ff-slate-field">
               <span className="ff-slate-key">已用 Credits</span>
@@ -288,8 +302,9 @@ function ProjectCard({ project }: { project: Project }) {
         <h3 title={project.title}>{project.title}</h3>
         <div className="ff-project-meta">
           <span>{project.route_type ?? "等待路线判断"}</span>
-          <span className="code shrink-0">
-            {new Date(project.created_at).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })}
+          <span className="code shrink-0" title="最近编辑">
+            <span className="sr-only">最近编辑 </span>
+            <time dateTime={project.updated_at}>{formatEditedAt(project.updated_at)}</time>
           </span>
         </div>
       </div>
@@ -315,7 +330,7 @@ function LobbyLoading() {
   );
 }
 
-function EmptyProject({ onCreate }: { onCreate: () => void }) {
+function EmptyProject() {
   return (
     <div className="ff-lobby-empty">
       <div className="ff-empty-film" aria-hidden>
@@ -323,10 +338,10 @@ function EmptyProject({ onCreate }: { onCreate: () => void }) {
       </div>
       <h3>还没有项目</h3>
       <p>创建一个项目，放入小说原文。系统会依次产出剧本、角色档案、场景档案和分镜。</p>
-      <button type="button" onClick={onCreate} className="ff-primary-button mt-6">
+      <Link href="/freeflow#new" className="ff-primary-button mt-6">
         <CirclePlus aria-hidden className="size-4" />
         新建项目
-      </button>
+      </Link>
     </div>
   );
 }

@@ -173,6 +173,22 @@ async def create_task(
         org_id=org_id, project_id=project_id, task_type=task_type, input_json=input_json
     )
 
+    # 记下这次会调哪个上游（Provider / 组织连接 / 模型 / 层级 / 计费来源）。
+    # 与下面的估价同一个判定；选中的组织连接已删 / 停用时在这里失败，任务不建、钱不动。
+    if (
+        task_type == IMAGE_TASK
+        and str((input_json or {}).get(IMAGE_SOURCE_KEY) or "") != IMAGE_SOURCE_LOCAL
+    ):
+        upstream = await pricing.upstream_snapshot(
+            db,
+            task_type=task_type,
+            payload=input_json or {},
+            org_id=org_id,
+            project_id=project_id,
+        )
+        if upstream is not None:
+            input_json = {**(input_json or {}), "upstream": upstream}
+
     # 带上 org_id：这个租户给该能力配了自己的 Key 时，估价要走 BYOK 档
     # （ADR-025），不能按平台售价预扣。
     estimated = await pricing.estimate(

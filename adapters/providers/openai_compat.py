@@ -1,4 +1,4 @@
-"""OpenAI 兼容自定义端点的文本 Provider（05_MODEL_GATEWAY.md §5.2）。
+"""OpenAI 兼容的文本 Provider：协议 `openai_chat`（ADR-039，05_MODEL_GATEWAY.md §5.2）。
 
 **只按 `text_generation` 的契约调用**：`POST {base_url}/chat/completions`，
 结果只按 `TextResponse` 解析。端点自己在 `/models` 里声明了什么（哪怕是
@@ -29,7 +29,7 @@ from adapters.providers.base import (
 from adapters.providers.deepseek import _raise_for_status
 from apps.api.core.errors import AppError
 
-PROVIDER_ID = "provider.custom.text"
+PROVIDER_ID = "provider.org"
 
 
 class OpenAICompatTextProvider:
@@ -41,10 +41,14 @@ class OpenAICompatTextProvider:
         base_url: str,
         api_key: str,
         model_id: str,
-        # 自定义端点永远是用户自己的 Key，没有"平台档"这回事
+        # 组织连接永远是用户自己的 Key，没有"平台档"这回事
         key_source: KeySource = KeySource.ORG,
         transport: httpx.AsyncBaseTransport | None = None,
+        # 连接的虚拟路由 id（`provider.org:<id>`），只用于"实际拿着哪把 Key 调了谁"的日志
+        provider_id: str | None = None,
     ) -> None:
+        if provider_id:
+            self.provider_id = provider_id
         # 构造时就规整一遍：库里的值理论上已经校验过，但这个类也会被
         # "测试连接"直接拿用户刚填的地址构造，那时还没进过库。
         self._base_url = endpoint_url.normalize_base_url(base_url)
@@ -95,7 +99,7 @@ class OpenAICompatTextProvider:
         except httpx.HTTPError as exc:
             raise AppError("provider.unavailable", message=f"自定义端点连不上：{exc}") from exc
 
-        _refuse_redirect(resp)
+        refuse_redirect(resp)
         _raise_for_status(resp)
         try:
             payload = resp.json()
@@ -136,7 +140,7 @@ class OpenAICompatTextProvider:
         except httpx.HTTPError as exc:
             raise AppError("provider.unavailable", message=f"自定义端点连不上：{exc}") from exc
 
-        _refuse_redirect(resp)
+        refuse_redirect(resp)
         _raise_for_status(resp)
         try:
             listed = [
@@ -153,7 +157,7 @@ class OpenAICompatTextProvider:
         return f"鉴权通过，但端点列出的 {len(listed)} 个模型里没有 {self.model_id}，请核对模型 ID"
 
 
-def _refuse_redirect(resp: httpx.Response) -> None:
+def refuse_redirect(resp: httpx.Response) -> None:
     # 不跟随只是第一步：3xx 本身也要当失败报，不然调用方会拿一个空的
     # 重定向响应去解析 JSON，得到一句莫名其妙的"返回的不是 JSON"。
     if 300 <= resp.status_code < 400:

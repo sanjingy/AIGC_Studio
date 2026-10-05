@@ -6,7 +6,7 @@ import { ChevronRight } from "lucide-react";
 import { AssetLibraryIcon } from "@/components/icons/studio-icons";
 
 const TITLES: Record<string, string> = {
-  "/freeflow": "创作首页", "/freeflow/projects": "我的项目", "/freeflow/assets": "资产库",
+  "/freeflow": "创作首页", "/freeflow/projects": "我的项目", "/freeflow/assets": "资产库", "/freeflow/tasks": "任务",
   "/freeflow/models": "模型库", "/freeflow/settings": "设置", "/freeflow/billing": "账单",
 };
 

@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Loader2, Lock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
   ApiRequestError,
-  CUSTOM_TEXT_PROVIDER_ID,
   modelCatalog,
   modelConfig,
   type CapabilityConfig,
@@ -17,6 +17,7 @@ import {
   type Project,
   type StyleOption,
 } from "@/lib/api";
+import { describeApiError, orgRef, parseOrgRef } from "@/lib/freeflow/provider-scope";
 import { useLockVariables } from "@/lib/freeflow/use-lock-variables";
 import { cn } from "@/lib/utils";
 
@@ -83,12 +84,15 @@ export function ProjectSettings({
   projectId,
   project,
   onDelete,
+  onRenamed,
 }: {
   /** 路由参数里的 id。不从 `project` 上取——它是异步来的，加载中还是 null。 */
   projectId: string;
   project: Project | null;
   /** 真的会删——由页面层传下来，这里只管确认交互和错误展示。 */
   onDelete: () => Promise<void>;
+  /** 改名成功后让页面重读项目，顶栏与面包屑跟着换 */
+  onRenamed?: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [typed, setTyped] = useState("");
@@ -117,7 +121,7 @@ export function ProjectSettings({
     <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 p-6">
       <h1 className="text-lg font-semibold tracking-tight text-fg">项目设置</h1>
 
-      <ProjectFileCard project={project} />
+      <ProjectFileCard project={project} onRenamed={onRenamed} />
 
       <LockVariablesCard projectId={projectId} />
 
@@ -205,6 +209,17 @@ function LedgerRow({
 }
 
 /**
+ * 保存失败时给用户看的原文：后端的 `user_message`，422 再带上逐字段的原因。
+ * 校验失败的 `user_message` 只有一句「请求参数有误」，不带字段原因等于没说。
+ */
+function saveErrorText(cause: unknown): string {
+  if (!(cause instanceof ApiRequestError)) return "保存失败，请稍后重试";
+  const fields = Object.values(cause.fieldErrors);
+  const head = cause.error.user_message || cause.error.message || "保存失败";
+  return fields.length ? `${head}：${fields.join("；")}` : head;
+}
+
+/**
  * 项目档案：能改的名字和两个只读真值放同一本账里。
  *
  * 之前是两块——一张"重命名"卡 + 一张两列的只读网格。它们说的是同一件事
@@ -213,18 +228,26 @@ function LedgerRow({
  * 保存后**不做乐观更新**：拿后端返回的那一版覆盖本地输入框，
  * 服务端 trim 过的标题才是真值。
  */
-function ProjectFileCard({ project }: { project: Project | null }) {
+function ProjectFileCard({ project, onRenamed }: { project: Project | null; onRenamed?: () => void }) {
   const [title, setTitle] = useState(project?.title ?? "");
+  /**
+   * 后端那边现在的名字。保存成功后以响应为准，不等 `project` 重读回来——
+   * 拿旧的 `project.title` 比，刚保存完输入框又会被判成「有改动」。
+   */
+  const [savedTitle, setSavedTitle] = useState<string | null>(project?.title ?? null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 项目是异步来的：第一次拿到时把输入框填上，之后不再覆盖用户正在打的字
   useEffect(() => {
-    if (project) setTitle((current) => (current === "" ? project.title : current));
+    if (!project) return;
+    setTitle((current) => (current === "" ? project.title : current));
+    setSavedTitle(project.title);
   }, [project]);
 
-  const dirty = project !== null && title.trim() !== project.title && title.trim() !== "";
+  const draft = title.trim();
+  const dirty = savedTitle !== null && draft !== savedTitle && draft !== "";
 
   async function save() {
     if (!project || !dirty) return;
@@ -232,11 +255,14 @@ function ProjectFileCard({ project }: { project: Project | null }) {
     setError(null);
     setSaved(false);
     try {
-      const updated = await projects.update(project.id, { title: title.trim() });
+      const updated = await projects.update(project.id, { title: draft });
       setTitle(updated.title);
+      setSavedTitle(updated.title);
       setSaved(true);
+      onRenamed?.();
     } catch (err) {
-      setError(err instanceof ApiRequestError ? err.error.user_message : "保存失败，请稍后重试");
+      // 草稿留在输入框里，已保存的名字不动，原因照后端原文写
+      setError(saveErrorText(err));
     } finally {
       setSaving(false);
     }
@@ -264,11 +290,20 @@ function ProjectFileCard({ project }: { project: Project | null }) {
           <Button size="sm" variant="primary" disabled={!dirty || saving} onClick={() => void save()}>
             {saving ? "保存中…" : "保存名称"}
           </Button>
-          {saved && !dirty && <span className="text-xs text-success">已保存</span>}
+          {saved && !dirty && (
+            <span role="status" className="text-xs text-success">
+              已保存
+            </span>
+          )}
         </div>
+        {dirty && savedTitle && (
+          <p className="mt-1 text-xs text-fg-subtle">
+            未保存。当前名称：<span className="text-fg-muted">{savedTitle}</span>
+          </p>
+        )}
         {error && (
           <p role="alert" className="mt-1.5 rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
-            {error}
+            名称没有保存：{error}
           </p>
         )}
       </LedgerRow>
@@ -327,6 +362,23 @@ function LockVariablesCard({ projectId }: { projectId: string }) {
   const styleOptions: StyleOption[] = saved?.style_options ?? [];
   const adaptationOptions: string[] = saved?.adaptation_options ?? ["adapt", "rewrite"];
 
+  /**
+   * 改过但还没存上的字段，旁边写出后端现在的值。保存失败时草稿留着，
+   * 用户要能一眼看出「我改成了什么」和「系统里现在是什么」。
+   */
+  const savedHint = (field: LockField): string | null => {
+    const next = edits[field];
+    const current = saved?.[field] ?? "";
+    if (next === undefined || next === current) return null;
+    const shown =
+      field === "style_key"
+        ? (styleOptions.find((o) => o.key === current)?.name ?? (current || "未选"))
+        : field === "adaptation_mode"
+          ? (ADAPTATION_LABEL[current] ?? (current || "未设"))
+          : current || "空";
+    return `未保存。当前：${shown}`;
+  };
+
   const patch: LockVariablesPatch = {};
   for (const field of LOCK_FIELDS) {
     const next = edits[field];
@@ -372,18 +424,21 @@ function LockVariablesCard({ projectId }: { projectId: string }) {
               <TextRow
                 label="时代背景"
                 value={valueOf("era")}
+                hint={savedHint("era")}
                 disabled={lock.saving}
                 onChange={(v) => set("era", v)}
               />
               <TextRow
                 label="国别 / 地区"
                 value={valueOf("region")}
+                hint={savedHint("region")}
                 disabled={lock.saving}
                 onChange={(v) => set("region", v)}
               />
               <TextRow
                 label="人种"
                 value={valueOf("ethnicity")}
+                hint={savedHint("ethnicity")}
                 disabled={lock.saving}
                 onChange={(v) => set("ethnicity", v)}
               />
@@ -408,6 +463,7 @@ function LockVariablesCard({ projectId }: { projectId: string }) {
                 </option>
               ))}
             </select>
+            {savedHint("style_key") && <p className="mt-1 text-xs text-fg-subtle">{savedHint("style_key")}</p>}
           </LedgerRow>
 
           <LedgerRow
@@ -427,6 +483,9 @@ function LockVariablesCard({ projectId }: { projectId: string }) {
                 </option>
               ))}
             </select>
+            {savedHint("adaptation_mode") && (
+              <p className="mt-1 text-xs text-fg-subtle">{savedHint("adaptation_mode")}</p>
+            )}
           </LedgerRow>
 
           <div className="ff-ledger-row" data-form="true">
@@ -488,11 +547,14 @@ function OriginBadge({ lock }: { lock: LockVariables | null }) {
 function TextRow({
   label,
   value,
+  hint,
   disabled,
   onChange,
 }: {
   label: string;
   value: string;
+  /** 改过未保存时写出后端现在的值 */
+  hint?: string | null;
   disabled: boolean;
   onChange: (value: string) => void;
 }) {
@@ -505,6 +567,7 @@ function TextRow({
         onChange={(e) => onChange(e.target.value)}
         className="h-8 rounded-md border border-border-strong bg-bg px-2.5 text-sm text-fg"
       />
+      {hint && <span className="text-xs text-fg-subtle">{hint}</span>}
     </label>
   );
 }
@@ -543,8 +606,9 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  /** 组织层配置：用来写清"跟随组织默认"是谁，以及文本有没有自定义端点可选 */
+  /** 组织层配置：用来写清"跟随组织默认"是谁，以及本组织有哪些供应商连接可选 */
   const [org, setOrg] = useState<CapabilityConfig[]>([]);
+  const [orgLoaded, setOrgLoaded] = useState(false);
 
   useEffect(() => {
     modelCatalog
@@ -553,8 +617,11 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
       .catch(() => setLoadFailed(true));
     modelConfig
       .get()
-      .then((r) => setOrg(r.items))
-      // 拿不到组织层只影响两句说明文字，选择本身仍然可用
+      .then((r) => {
+        setOrg(r.items);
+        setOrgLoaded(true);
+      })
+      // 拿不到组织层：平台模型照常可选，供应商选项列不出来（已存的照实标出）
       .catch(() => setOrg([]));
   }, []);
 
@@ -576,7 +643,8 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
       // 本地拼一份出来迟早会和后端的合并规则分叉
       setPreference(updated.model_preference);
     } catch (e) {
-      setError(e instanceof ApiRequestError ? e.error.user_message : "保存失败，请稍后重试");
+      // 显示后端原文：连接停用 / 模型不在连接里 / 能力对不上，各有各的原因
+      setError(e instanceof ApiRequestError ? describeApiError(e.error, true) : "保存失败，请稍后重试");
     } finally {
       setSaving(null);
     }
@@ -602,8 +670,9 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
         <span className="font-normal">只对这个项目生效</span>
       </div>
       <p className="ff-ledger-note">
-        不选就跟随系统默认档；选中的模型出故障时仍会自动切到同能力的下一个，
-        不会因为选过一次就把容错关掉。
+        这里是<strong className="font-medium text-fg-muted">项目覆盖</strong>：只改本项目，不选就跟随组织默认
+        （在 <Link href="/freeflow/models" className="text-primary hover:underline">模型</Link> 页设置）。
+        平台模型出故障时会自动切到同能力的下一个；选了自己的供应商则不会换到别家，出错直接报错。
       </p>
 
       {!items && <p className="ff-ledger-empty">加载中…</p>}
@@ -617,7 +686,11 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
               // 档位说明只讲模型定位，不讲价格——价格在 model_pricing 表里，
               // 写死在前端的"更便宜"等上游调价就变成谎话
               (item.models ?? []).find((m) => m.model_id === preference[item.capability])?.note ??
-              `由 ${item.provider_label} 提供，共 ${(item.models ?? []).length} 档`
+              (parseOrgRef(preference[item.capability])
+                ? orgLoaded && isStale(item, org, preference[item.capability])
+                  ? "选中的供应商已删除或模型已移除，生成会报错，请改选"
+                  : "用你自己的供应商：出错直接报错，不会换到别家"
+                : `由 ${item.provider_label} 提供，共 ${(item.models ?? []).length} 档`)
             }
           >
             <div className="flex items-center gap-2">
@@ -633,20 +706,29 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
                 )}
               >
                 <option value={FOLLOW_DEFAULT}>{followLabel(item, org)}</option>
-                {(item.models ?? []).map((m) => (
-                  <option key={m.model_id} value={m.model_id}>
-                    {m.label}　{m.model_id}
-                  </option>
-                ))}
-                {/* 自定义端点只在组织真的配了时出现：没配的选项选了只会在生成时报错 */}
-                {(() => {
-                  const ep = org.find((o) => o.capability === item.capability)?.custom_endpoint;
-                  return ep ? (
-                    <option value={CUSTOM_TEXT_PROVIDER_ID}>
-                      自定义端点　{ep.label} · {ep.model_id}
+                <optgroup label="平台模型">
+                  {(item.models ?? []).map((m) => (
+                    <option key={m.model_id} value={m.model_id}>
+                      {m.label}　{m.model_id}
                     </option>
-                  ) : null;
-                })()}
+                  ))}
+                </optgroup>
+                {/* 只列真的存在、且这个能力有模型的连接：没有的选项选了只会在生成时报错 */}
+                {orgOptions(item.capability, org).length > 0 && (
+                  <optgroup label="我的供应商">
+                    {orgOptions(item.capability, org).map((o) => (
+                      <option key={o.value} value={o.value} disabled={o.disabled}>
+                        {o.text}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {/* 存着的值在选项里找不到（连接删了 / 模型移除了）：照实显示，不让下拉静默落到别的值上 */}
+                {isStale(item, org, preference[item.capability]) && (
+                  <option value={preference[item.capability]}>
+                    {orgLoaded ? "已失效的设置（请改选）" : "我的供应商（详情暂时读不到）"}
+                  </option>
+                )}
               </select>
               {saving === item.capability && (
                 <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-fg-subtle" />
@@ -672,6 +754,29 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
   );
 }
 
+/** 本组织连接里这个能力的模型，值是 `provider.org:<id>:<model>` */
+function orgOptions(
+  capability: string,
+  org: CapabilityConfig[],
+): { value: string; text: string; disabled: boolean }[] {
+  const cfg = org.find((o) => o.capability === capability);
+  return (cfg?.providers ?? [])
+    .filter((p) => p.kind === "org" && p.connection_id)
+    .flatMap((p) =>
+      p.models.map((m) => ({
+        value: orgRef(p.connection_id as string, m.model_id),
+        text: `${p.label} · ${m.model_id}${p.consistency_verified === false ? "（画风一致性未实测）" : ""}${p.available ? "" : "（已停用）"}`,
+        disabled: !p.available,
+      })),
+    );
+}
+
+function isStale(item: CapabilityModels, org: CapabilityConfig[], value: string | undefined): boolean {
+  if (!value) return false;
+  if ((item.models ?? []).some((m) => m.model_id === value)) return false;
+  return !orgOptions(item.capability, org).some((o) => o.value === value);
+}
+
 /**
  * "不单独设置"时实际会用谁。组织层保存过就写组织默认，没保存过写平台目录默认——
  * 两者都来自后端，前端不猜。
@@ -681,7 +786,9 @@ function followLabel(item: CapabilityModels, org: CapabilityConfig[]): string {
   const sel = cfg?.selection;
   if (sel?.layer === "org") {
     const provider = cfg?.providers.find((p) => p.provider_id === sel.provider_id);
-    return `跟随组织默认（${provider?.label ?? sel.provider_id} · ${sel.model_id ?? provider?.default_model_id ?? "目录顺序"}）`;
+    if (sel.broken_reason) return "跟随组织默认（组织默认已失效，去模型页改选）";
+    const model = sel.model_id ?? provider?.default_model_id ?? provider?.models[0]?.model_id ?? "目录顺序";
+    return `跟随组织默认（${provider?.label ?? sel.provider_id} · ${model}）`;
   }
   return `跟随系统默认${item.default_model_id ? `（${item.default_model_id}）` : ""}`;
 }

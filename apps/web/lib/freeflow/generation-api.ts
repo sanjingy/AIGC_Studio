@@ -25,7 +25,8 @@ export type GenerationRecord = {
   agent_id: string | null;
   model_id: string | null;
   source: string | null;
-  created_at: string;
+  /** 旧记录可能缺，界面写「时间未记录」 */
+  created_at: string | null;
   finished_at: string | null;
   error_code: string | null;
   asset_ids: string[];

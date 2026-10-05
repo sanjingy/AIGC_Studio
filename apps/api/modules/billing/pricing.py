@@ -139,6 +139,36 @@ async def uses_own_key(
     return source is KeySource.ORG
 
 
+async def upstream_snapshot(
+    db: AsyncSession,
+    *,
+    task_type: str,
+    payload: dict[str, Any],
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None = None,
+) -> dict[str, Any] | None:
+    """这个任务会调哪个上游：Provider / 组织连接 id / 模型 / 层级 / 计费来源。
+
+    建任务时写进 `input_json.upstream`（ADR-031 代价 2、ADR-039 代价 1），与
+    :func:`estimate` 的 BYOK 判断是同一个 `upstreams.decide`。不调上游的任务
+    （mock、本机出图）返回 None。选中的组织连接已删 / 停用时在这里抛错——
+    任务不建、钱不动。
+    """
+    shape = _shape(task_type, payload)
+    if shape.capability is None or shape.mock:
+        return None
+    preference = (
+        await project_service.get_model_preference(
+            db, org_id=org_id, project_id=project_id, capability=shape.capability
+        )
+        if project_id is not None
+        else None
+    )
+    return await upstreams.describe(
+        db, org_id=org_id, capability=shape.capability, project_preference=preference
+    )
+
+
 async def estimate(
     db: AsyncSession,
     *,

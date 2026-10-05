@@ -6,16 +6,18 @@
 
 - `org_model_defaults`：组织给某个能力选的默认上游 + 模型 + 计费来源。
   三层解析里的中间一层（项目选择 > **组织默认** > 平台目录默认）。
-- `org_text_endpoints`：文本能力的 OpenAI 兼容自定义端点，一个 org 一个。
-  **没有 capability 列**——没有这一列，就没有人能往里存 `"tts"`
-  （§5.2 第 2 条）。
+- `org_provider_connections`：组织自带 Key 的供应商连接（ADR-039），一个 org 多行。
+  **没有 capability 列**——能力由每个模型的协议在代码白名单里推出
+  （`catalog.PROTOCOLS`），没有这一列，就没有人能往里存 `"tts"`（§5.2 第 2 条）。
 """
 
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
-from sqlalchemy import Index, String, Text, Uuid, text
+from sqlalchemy import Boolean, Index, String, Text, Uuid, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apps.api.core.models import OrgEntity
@@ -37,7 +39,8 @@ class OrgModelDefault(OrgEntity):
     __tablename__ = "org_model_defaults"
 
     capability: Mapped[str] = mapped_column(String(32), nullable=False)
-    provider_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: 目录里的一家（`provider.deepseek`）或组织连接（`provider.org:<uuid>`，49 字符）
+    provider_id: Mapped[str] = mapped_column(String(64), nullable=False)
     model_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     key_source: Mapped[str] = mapped_column(String(16), nullable=False)
     updated_by: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
@@ -53,27 +56,27 @@ class OrgModelDefault(OrgEntity):
     )
 
 
-class OrgTextEndpoint(OrgEntity):
-    """文本能力的 OpenAI 兼容自定义端点。一个 org 一个（ADR-031 说的是"一个"）。
+class OrgProviderConnection(OrgEntity):
+    """组织自带 Key 的一个供应商连接（ADR-039 第 1 条）。
 
-    `key_encrypted` 与 `provider_credentials` 同一套 AES-GCM（`core/crypto.py`），
-    明文只在 Gateway 解密后于内存中存在一次。`base_url` 入库前已经过
-    `endpoint_url.normalize_base_url`，调用前还会再做一次解析校验。
+    `models` 是 `[{"model_id": str, "protocol": str}]`；协议必须在
+    `catalog.PROTOCOLS` 白名单里（保存时校验），能力由协议推出。
+
+    `key_encrypted` / `secret_encrypted` 与 `provider_credentials` 同一套 AES-GCM
+    （`core/crypto.py`），明文只在 Gateway 解密后于内存中存在一次。`secret_encrypted`
+    留给 AK/SK 类协议（B 批），A 批两个协议都不用。`base_url` 入库前已过
+    `endpoint_url.normalize_base_url`，每次调用前还会再做一次解析校验。
     """
 
-    __tablename__ = "org_text_endpoints"
+    __tablename__ = "org_provider_connections"
 
     label: Mapped[str] = mapped_column(String(64), nullable=False)
+    preset_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     base_url: Mapped[str] = mapped_column(String(512), nullable=False)
-    model_id: Mapped[str] = mapped_column(String(128), nullable=False)
     key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
-    created_by: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
-
-    __table_args__ = (
-        Index(
-            "uq_org_text_endpoints_org",
-            "org_id",
-            unique=True,
-            postgresql_where=text("deleted_at IS NULL"),
-        ),
+    secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    models: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_by: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)

@@ -1,4 +1,4 @@
-"""模型上游配置：组织默认、自定义端点，以及"这次该调谁"的唯一判定（FR-GW-005 / FR-GW-020）。
+"""模型上游配置：组织默认、组织供应商连接，以及"这次该调谁"的唯一判定（FR-GW-005 / FR-GW-020）。
 
 **三层取值顺序**（05_MODEL_GATEWAY.md §6.1，逐层兜底）：
 
@@ -17,6 +17,11 @@
 **Provider 与模型不匹配一律拒绝，不静默换一家**：组织默认存的模型必须属于
 它选的那家；项目偏好指向的模型反查出来是哪家就用哪家；组织默认指向一家
 已经下线的 Provider 时报错，而不是悄悄落到平台默认。
+
+**组织供应商连接（ADR-039）**：每个连接以虚拟路由 `provider.org:<连接 id>` 出现，
+一律是用户自己的 Key（`KeySource.ORG`）。连接被删、被禁用、没有这个能力的模型、
+选的模型不在连接里——任何一条都报 `provider.byok.rejected` 的可读错误，
+不落平台、不换到别的连接。
 """
 
 from __future__ import annotations
@@ -24,27 +29,28 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adapters.providers import endpoint_url
 from adapters.providers.base import KeySource
-from adapters.providers.openai_compat import OpenAICompatTextProvider
+from apps.api.core.config import get_settings
 from apps.api.core.crypto import CryptoConfigError, decrypt_secret, encrypt_secret
 from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
 from apps.api.modules.billing import credentials
-from apps.api.modules.gateway import catalog, probe
+from apps.api.modules.gateway import catalog, presets, probe
 from apps.api.modules.gateway import repository as repo
-from apps.api.modules.gateway.models import KEY_SOURCES
+from apps.api.modules.gateway.models import KEY_SOURCES, OrgProviderConnection
 
 log = get_logger(__name__)
 
 Layer = Literal["project", "org", "platform"]
 
 MAX_LABEL_CHARS = 64
-MAX_MODEL_ID_CHARS = 128
+MAX_MODEL_ID_CHARS = presets.MAX_MODEL_ID_CHARS
+MAX_MODELS_PER_CONNECTION = 50
 
 
 # ---------------------------------------------------------------- 判定（纯函数）
@@ -74,6 +80,13 @@ class Decision:
     model_id: str | None
     layer: Layer
     key_source: KeySource | None
+    #: 选中的是组织连接时为它的 id；前缀对但 id 坏了 / 旧 `provider.custom.text`
+    #: 时 `provider_id` 仍是原串、这里为 None——解析时按"连接不存在"报错。
+    connection_id: uuid.UUID | None = None
+
+    @property
+    def is_org_connection(self) -> bool:
+        return self.provider_id is not None and catalog.parse_org_ref(self.provider_id) is not None
 
 
 def _retired(capability: str, provider_id: str) -> AppError:
@@ -87,9 +100,23 @@ def _retired(capability: str, provider_id: str) -> AppError:
 
 
 def _provider_exists(capability: str, provider_id: str) -> bool:
-    if provider_id == catalog.CUSTOM_TEXT_PROVIDER_ID:
-        return catalog.supports_custom_endpoint(capability)
+    if catalog.parse_org_ref(provider_id) is not None:
+        return catalog.supports_org_connections(capability)
     return any(spec.provider_id == provider_id for spec in catalog.providers_for(capability))
+
+
+def _org_decision(capability: str, ref: str, *, model_id: str | None, layer: Layer) -> Decision:
+    parsed = catalog.parse_org_ref(ref)
+    assert parsed is not None
+    connection_id, ref_model = parsed
+    return Decision(
+        capability,
+        catalog.org_provider_id(connection_id) if connection_id else ref,
+        model_id if model_id is not None else ref_model,
+        layer,
+        KeySource.ORG,  # 组织连接只可能是用户自己的 Key
+        connection_id,
+    )
 
 
 def decide(capability: str, *, preference: str | None, default: DefaultRow | None) -> Decision:
@@ -99,17 +126,15 @@ def decide(capability: str, *, preference: str | None, default: DefaultRow | Non
         explicit = KeySource(default.key_source)
 
     def key_for(provider_id: str) -> KeySource | None:
-        if provider_id == catalog.CUSTOM_TEXT_PROVIDER_ID:
-            return KeySource.ORG  # 自定义端点只可能是用户自己的 Key
         if default is not None and default.provider_id == provider_id:
             return explicit
         return None
 
     if preference:
-        if preference == catalog.CUSTOM_TEXT_PROVIDER_ID and catalog.supports_custom_endpoint(
-            capability
-        ):
-            return Decision(capability, preference, None, "project", KeySource.ORG)
+        if catalog.parse_org_ref(preference) is not None:
+            # 项目把这个能力指到了组织连接（`provider.org:<id>[:<模型>]`）。
+            # 能力对不对得上要看连接里的协议，这里不查库，交给解析时校验。
+            return _org_decision(capability, preference, model_id=None, layer="project")
         spec = catalog.provider_for_model(capability, preference)
         if spec is not None:
             return Decision(
@@ -126,6 +151,10 @@ def decide(capability: str, *, preference: str | None, default: DefaultRow | Non
     if default is not None:
         if not _provider_exists(capability, default.provider_id):
             raise _retired(capability, default.provider_id)
+        if catalog.parse_org_ref(default.provider_id) is not None:
+            return _org_decision(
+                capability, default.provider_id, model_id=default.model_id, layer="org"
+            )
         return Decision(
             capability, default.provider_id, default.model_id, "org", key_for(default.provider_id)
         )
@@ -147,31 +176,181 @@ async def load_default(
 
 
 @dataclass(frozen=True, slots=True)
-class ResolvedEndpoint:
-    """一次调用要用的自定义端点。**`api_key` 是明文，只活到这次请求结束。**"""
+class ResolvedConnection:
+    """一次调用要用的组织连接。**`api_key` 是明文，只活到这次请求结束。**"""
 
+    connection_id: uuid.UUID
     label: str
+    preset_id: str | None
     base_url: str
-    model_id: str
+    models: tuple[tuple[str, str], ...]  # (model_id, protocol)
+    enabled: bool
     api_key: str
+    #: 用户标成"推理模型"的 (model_id, protocol)。`no_reasoning_roles` 的角色解析到
+    #: 它们时拒绝（ADR-024 硬约束 2 对连接同样成立），不换模型、不回落。
+    reasoning_models: frozenset[tuple[str, str]] = frozenset()
+
+    @property
+    def provider_id(self) -> str:
+        return catalog.org_provider_id(self.connection_id)
 
 
-async def load_endpoint(db: AsyncSession, *, org_id: uuid.UUID) -> ResolvedEndpoint | None:
-    row = await repo.get_endpoint(db, org_id=org_id)
+def _models_of(row: OrgProviderConnection) -> tuple[tuple[str, str], ...]:
+    out: list[tuple[str, str]] = []
+    for item in row.models or []:
+        if isinstance(item, dict) and item.get("model_id") and item.get("protocol"):
+            out.append((str(item["model_id"]), str(item["protocol"])))
+    return tuple(out)
+
+
+def _reasoning_of(row: OrgProviderConnection) -> frozenset[tuple[str, str]]:
+    """标了 `reasoning: true` 的模型。A3 之前存的条目没有这个键，按 false 处理，不需要改数据。"""
+    return frozenset(
+        (str(item["model_id"]), str(item["protocol"]))
+        for item in row.models or []
+        if isinstance(item, dict)
+        and item.get("model_id")
+        and item.get("protocol")
+        and item.get("reasoning") is True
+    )
+
+
+async def load_connection(
+    db: AsyncSession, *, org_id: uuid.UUID, connection_id: uuid.UUID
+) -> ResolvedConnection | None:
+    row = await repo.get_connection(db, org_id=org_id, connection_id=connection_id)
     if row is None:
         return None
     try:
         key = decrypt_secret(row.key_encrypted)
     except CryptoConfigError as exc:
-        log.warning("upstreams.endpoint_decrypt_failed", org_id=str(org_id))
+        log.warning("upstreams.connection_decrypt_failed", org_id=str(org_id))
         raise AppError(
             "provider.byok.rejected",
-            message=f"自定义端点的 Key 无法解密：{exc}。请重新填写一次。",
-            detail={"capability": catalog.CUSTOM_TEXT_CAPABILITY, "reason": "decrypt_failed"},
+            message=f"供应商「{row.label}」的 Key 无法解密：{exc}。请重新填写一次。",
+            detail={"reason": "decrypt_failed", "connection_id": str(row.id)},
         ) from exc
-    return ResolvedEndpoint(
-        label=row.label, base_url=row.base_url, model_id=row.model_id, api_key=key
+    return ResolvedConnection(
+        connection_id=row.id,
+        label=row.label,
+        preset_id=row.preset_id,
+        base_url=row.base_url,
+        models=_models_of(row),
+        enabled=row.enabled,
+        api_key=key,
+        reasoning_models=_reasoning_of(row),
     )
+
+
+def _rejected(capability: str, reason: str, message: str, **extra: str) -> AppError:
+    return AppError(
+        "provider.byok.rejected",
+        message=message,
+        detail={"capability": capability, "reason": reason, **extra},
+    )
+
+
+def connection_missing(capability: str, provider_id: str | None) -> AppError:
+    return _rejected(
+        capability,
+        "connection_missing",
+        f"{capability} 选的供应商连接已被删除或不存在，请到模型页重新选择",
+        provider_id=str(provider_id),
+    )
+
+
+def pick_model(
+    capability: str,
+    *,
+    label: str,
+    models: tuple[tuple[str, str], ...],
+    enabled: bool,
+    model_id: str | None,
+    connection_id: uuid.UUID,
+) -> tuple[str, str]:
+    """在一个连接里为这个能力选出 (模型, 协议)。任何对不上都报错，不换连接、不落平台。
+
+    - 连接被停用 → `connection_disabled`；
+    - 连接里没有这个能力的协议的模型 → `capability_mismatch`（不采信端点自我声明，
+      能力只看代码白名单里协议绑定的那一个）；
+    - 指定了模型却不在连接里 → `model_missing`；
+    - 没指定 → 连接里这个能力的第一个模型。
+    """
+    cid = str(connection_id)
+    if not enabled:
+        raise _rejected(
+            capability,
+            "connection_disabled",
+            f"供应商「{label}」已停用，请启用它或到模型页改选其他上游",
+            connection_id=cid,
+        )
+    allowed = set(catalog.protocols_for(capability))
+    candidates = [(m, p) for m, p in models if p in allowed]
+    if not candidates:
+        raise _rejected(
+            capability,
+            "capability_mismatch",
+            f"供应商「{label}」里没有可用于 {capability} 的模型",
+            connection_id=cid,
+        )
+    if model_id is None:
+        return candidates[0]
+    for model, protocol in candidates:
+        if model == model_id:
+            return model, protocol
+    raise _rejected(
+        capability,
+        "model_missing",
+        f"供应商「{label}」里已经没有模型 {model_id}，请到模型页重新选择",
+        connection_id=cid,
+    )
+
+
+def check_reasoning(
+    capability: str,
+    connection: ResolvedConnection,
+    *,
+    model_id: str,
+    protocol: str,
+    allow_reasoning: bool,
+) -> None:
+    """`no_reasoning_roles` 的角色不许落到用户标成推理模型的连接模型上。
+
+    平台目录的推理模型偏好在 `service._preferred_model` 里被丢掉、按默认顺序跑；连接不行——
+    用户选的就是"这个供应商的这个模型"，丢掉偏好等于换模型，所以这里直接拒绝。
+    """
+    if allow_reasoning or (model_id, protocol) not in connection.reasoning_models:
+        return
+    raise _rejected(
+        capability,
+        "reasoning_model_not_allowed",
+        f"供应商「{connection.label}」的模型 {model_id} 标记为推理模型，"
+        "当前环节（分类 / 结构化抽取）不能用推理模型，请到模型页改选非推理模型",
+        connection_id=str(connection.connection_id),
+        model_id=model_id,
+    )
+
+
+def build_adapter(connection: ResolvedConnection, *, model_id: str, protocol: str) -> Any:
+    """按协议白名单造适配器。协议 → 唯一适配器；库里的协议不在白名单就拒绝。"""
+    spec = catalog.protocol_spec(protocol)
+    if spec is None:
+        raise AppError(
+            "provider.byok.rejected",
+            message=f"协议 {protocol!r} 不在白名单里",
+            detail={"reason": "protocol_unsupported"},
+        )
+    kwargs: dict[str, Any] = {
+        "base_url": connection.base_url,
+        "api_key": connection.api_key,
+        "model_id": model_id,
+        "key_source": KeySource.ORG,
+        "provider_id": connection.provider_id,
+    }
+    if protocol == "openai_images":
+        preset = presets.get(connection.preset_id) if connection.preset_id else None
+        kwargs["request_overrides"] = dict(preset.request_overrides) if preset else {}
+    return spec.adapter(**kwargs)
 
 
 async def effective_key_source(
@@ -198,17 +377,78 @@ async def effective_key_source(
     return KeySource.ORG if own else KeySource.PLATFORM
 
 
+async def describe(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    capability: str,
+    project_preference: str | None = None,
+) -> dict[str, Any]:
+    """建任务时记进 `input_json.upstream` 的那一份（ADR-031 代价 2、ADR-039 代价 1）。
+
+    与计费同一个 :func:`decide`。选中的是组织连接时**在这里就校验连接**——
+    连接被删 / 停用 / 没有这个能力的模型，任务不建、钱不动，而不是预扣之后
+    跑到 Worker 里才失败。
+    """
+    decision = decide(
+        capability,
+        preference=project_preference,
+        default=await load_default(db, org_id=org_id, capability=capability),
+    )
+    model_id = decision.model_id
+    if decision.is_org_connection:
+        connection = (
+            await load_connection(db, org_id=org_id, connection_id=decision.connection_id)
+            if decision.connection_id
+            else None
+        )
+        if connection is None:
+            raise connection_missing(capability, decision.provider_id)
+        model_id, _protocol = pick_model(
+            capability,
+            label=connection.label,
+            models=connection.models,
+            enabled=connection.enabled,
+            model_id=decision.model_id,
+            connection_id=connection.connection_id,
+        )
+    source = await effective_key_source(
+        db, org_id=org_id, capability=capability, project_preference=project_preference
+    )
+    return {
+        "capability": capability,
+        "provider_id": decision.provider_id,
+        "connection_id": str(decision.connection_id) if decision.connection_id else None,
+        "model_id": model_id,
+        "layer": decision.layer,
+        "key_source": source.value,
+    }
+
+
 # ---------------------------------------------------------------- 配置视图
 
 
 @dataclass(frozen=True, slots=True)
-class EndpointView:
-    """自定义端点的展示态。**没有 Key 明文**，只有尾号。"""
-
-    label: str
-    base_url: str
+class ConnectionModelView:
     model_id: str
+    protocol: str
+    capability: str
+    reasoning: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectionView:
+    """组织连接的展示态。**没有 Key 明文**，只有尾号。"""
+
+    id: uuid.UUID
+    provider_id: str
+    label: str
+    preset_id: str | None
+    base_url: str
+    models: list[ConnectionModelView]
+    enabled: bool
     masked_key: str | None
+    created_at: datetime
     updated_at: datetime
 
 
@@ -220,23 +460,79 @@ class SelectionView:
     #: `org` = 组织显式存过；`platform` = 没存过，走的是目录默认
     layer: Literal["org", "platform"]
     updated_at: datetime | None
+    #: 组织默认指向的连接已删 / 停用 / 没有这个能力的模型时为原因码，界面据此提示。
+    #: 不自动改默认：自动退回平台就是"静默落到平台"。
+    broken_reason: str | None = None
 
 
-async def endpoint_view(db: AsyncSession, *, org_id: uuid.UUID) -> EndpointView | None:
-    row = await repo.get_endpoint(db, org_id=org_id)
-    if row is None:
-        return None
+def _connection_view(row: OrgProviderConnection) -> ConnectionView:
     try:
         masked: str | None = credentials.mask(decrypt_secret(row.key_encrypted))
     except CryptoConfigError:
         masked = None
-    return EndpointView(
+    models: list[ConnectionModelView] = []
+    reasoning = _reasoning_of(row)
+    for model_id, protocol in _models_of(row):
+        spec = catalog.protocol_spec(protocol)
+        models.append(
+            ConnectionModelView(
+                model_id=model_id,
+                protocol=protocol,
+                capability=spec.capability if spec else "",
+                reasoning=(model_id, protocol) in reasoning,
+            )
+        )
+    return ConnectionView(
+        id=row.id,
+        provider_id=catalog.org_provider_id(row.id),
         label=row.label,
+        preset_id=row.preset_id,
         base_url=row.base_url,
-        model_id=row.model_id,
+        models=models,
+        enabled=row.enabled,
         masked_key=masked,
+        created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+async def list_connection_views(db: AsyncSession, *, org_id: uuid.UUID) -> list[ConnectionView]:
+    return [_connection_view(row) for row in await repo.list_connections(db, org_id=org_id)]
+
+
+async def connection_view(
+    db: AsyncSession, *, org_id: uuid.UUID, connection_id: uuid.UUID
+) -> ConnectionView:
+    row = await _require_connection(db, org_id=org_id, connection_id=connection_id)
+    return _connection_view(row)
+
+
+async def _broken_reason(
+    db: AsyncSession, *, org_id: uuid.UUID, capability: str, provider_id: str, model_id: str | None
+) -> str | None:
+    parsed = catalog.parse_org_ref(provider_id)
+    if parsed is None:
+        return None
+    connection_id, _ = parsed
+    row = (
+        await repo.get_connection(db, org_id=org_id, connection_id=connection_id)
+        if connection_id
+        else None
+    )
+    if row is None:
+        return "connection_missing"
+    try:
+        pick_model(
+            capability,
+            label=row.label,
+            models=_models_of(row),
+            enabled=row.enabled,
+            model_id=model_id,
+            connection_id=row.id,
+        )
+    except AppError as exc:
+        return str((exc.detail or {}).get("reason") or exc.code)
+    return None
 
 
 async def selection_view(db: AsyncSession, *, org_id: uuid.UUID, capability: str) -> SelectionView:
@@ -249,6 +545,13 @@ async def selection_view(db: AsyncSession, *, org_id: uuid.UUID, capability: str
             key_source=row.key_source,
             layer="org",
             updated_at=row.updated_at,
+            broken_reason=await _broken_reason(
+                db,
+                org_id=org_id,
+                capability=capability,
+                provider_id=row.provider_id,
+                model_id=row.model_id,
+            ),
         )
     source = await effective_key_source(db, org_id=org_id, capability=capability)
     spec = catalog.default_provider(capability)
@@ -285,9 +588,9 @@ async def set_default(
 ) -> SelectionView:
     """保存组织默认。**不合法的组合在这里拒绝，不存一条调用时才会炸的配置。**
 
-    - 上游必须是这个能力下真有适配器的一家，或（仅文本）自定义端点；
-    - 模型必须属于这家——A 家的模型名配 B 家的 Key 是拒绝，不是"帮你换一家"；
-    - 自定义端点的模型就是端点上填的那个，这里不接受另一个名字，计费来源只能是自有；
+    - 上游必须是这个能力下真有适配器的一家，或本组织的一个供应商连接；
+    - 模型必须属于这家 / 这个连接——A 家的模型名配 B 家的 Key 是拒绝，不是"帮你换一家"；
+    - 组织连接只能用自己的 Key 计费，且必须启用、有这个能力的模型；
     - 选"自有 Key"时这家必须已经存了 Key，否则第一次生成才报错，用户会以为
       是生成出了问题。
     """
@@ -299,30 +602,41 @@ async def set_default(
             detail={"allowed": list(KEY_SOURCES)},
         )
 
-    if provider_id == catalog.CUSTOM_TEXT_PROVIDER_ID:
-        if not catalog.supports_custom_endpoint(capability):
+    parsed = catalog.parse_org_ref(provider_id)
+    if parsed is not None:
+        connection_id, ref_model = parsed
+        if connection_id is None or ref_model is not None:
             raise AppError(
                 "provider.params.invalid",
-                message=f"{capability} 不支持自定义端点（只有文本生成支持）",
+                message="组织默认的上游写成 provider.org:<连接 id>，模型放在 model_id 里",
+            )
+        if not catalog.supports_org_connections(capability):
+            raise AppError(
+                "provider.params.invalid",
+                message=f"{capability} 还不支持自带 Key 的供应商",
                 detail={"capability": capability},
             )
-        endpoint = await repo.get_endpoint(db, org_id=org_id)
-        if endpoint is None:
-            raise AppError(
-                "common.validation_failed",
-                message="还没有保存自定义端点，先填写地址、模型与 Key",
-            )
-        if model_id is not None and model_id != endpoint.model_id:
-            raise AppError(
-                "provider.params.invalid",
-                message=f"自定义端点配置的模型是 {endpoint.model_id!r}，不是 {model_id!r}",
-            )
+        row = await _require_connection(db, org_id=org_id, connection_id=connection_id)
         if key_source != KeySource.ORG.value:
             raise AppError(
                 "common.validation_failed",
-                message="自定义端点只能用你自己的 Key 计费",
+                message="自带 Key 的供应商只能用你自己的 Key 计费",
             )
-        model_id = None  # 端点的模型随端点走，改端点时不用再改一遍默认
+        try:
+            pick_model(
+                capability,
+                label=row.label,
+                models=_models_of(row),
+                enabled=row.enabled,
+                model_id=model_id,
+                connection_id=row.id,
+            )
+        except AppError as exc:
+            # 存配置时的不合法组合是 4xx，不是"上游调用失败"
+            raise AppError(
+                "provider.params.invalid", message=exc.message, detail=exc.detail
+            ) from exc
+        provider_id = catalog.org_provider_id(row.id)
     else:
         allowed_providers = [spec.provider_id for spec in catalog.providers_for(capability)]
         if provider_id not in allowed_providers:
@@ -392,7 +706,43 @@ async def on_key_removed(
     )
 
 
-# ---------------------------------------------------------------- 写：自定义端点
+async def validate_preference_ref(
+    db: AsyncSession, *, org_id: uuid.UUID, capability: str, value: str
+) -> None:
+    """项目偏好要存 `provider.org:<id>[:<模型>]` 之前的校验（项目模块调用）。
+
+    连接不在本 org → 404（不确认别人的连接存在）；能力对不上 / 模型不在连接里 /
+    连接停用 → 400。存进去之后连接再变，解析时报可读错误，不静默改偏好。
+    """
+    parsed = catalog.parse_org_ref(value)
+    if parsed is None or parsed[0] is None:
+        raise AppError(
+            "provider.params.invalid",
+            message="供应商引用的格式是 provider.org:<连接 id> 或 provider.org:<连接 id>:<模型 id>",
+        )
+    connection_id, model_id = parsed
+    assert connection_id is not None
+    if not catalog.supports_org_connections(capability):
+        raise AppError(
+            "provider.params.invalid",
+            message=f"{capability} 还不支持自带 Key 的供应商",
+            detail={"capability": capability},
+        )
+    row = await _require_connection(db, org_id=org_id, connection_id=connection_id)
+    try:
+        pick_model(
+            capability,
+            label=row.label,
+            models=_models_of(row),
+            enabled=row.enabled,
+            model_id=model_id,
+            connection_id=row.id,
+        )
+    except AppError as exc:
+        raise AppError("provider.params.invalid", message=exc.message, detail=exc.detail) from exc
+
+
+# ---------------------------------------------------------------- 写：供应商连接
 
 
 def _clean_label(label: str) -> str:
@@ -411,104 +761,280 @@ def _clean_label(label: str) -> str:
 
 
 def _clean_model_id(model_id: str) -> str:
-    text = (model_id or "").strip()
-    if not text:
-        raise AppError(
-            "common.validation_failed", message="请填写模型 ID", detail={"field": "model_id"}
-        )
-    if len(text) > MAX_MODEL_ID_CHARS or any(ch.isspace() for ch in text) or not text.isprintable():
+    try:
+        return presets.check_model_id(model_id)
+    except ValueError as exc:
         raise AppError(
             "common.validation_failed",
             message=f"模型 ID 最长 {MAX_MODEL_ID_CHARS} 个字符，且不能含空白",
             detail={"field": "model_id"},
+        ) from exc
+
+
+def clean_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """规整模型列表：协议必须在白名单里，模型 id 合法，(模型, 协议) 去重，至少一个。
+
+    每条存成 `{model_id, protocol, reasoning}`；`reasoning` 缺省为 false。
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in models:
+        model_id, protocol = str(item.get("model_id") or ""), str(item.get("protocol") or "")
+        reasoning = item.get("reasoning", False)
+        if not isinstance(reasoning, bool):
+            raise AppError(
+                "common.validation_failed",
+                message="reasoning 只能是 true / false",
+                detail={"field": "models"},
+            )
+        if catalog.protocol_spec(protocol) is None:
+            raise AppError(
+                "common.validation_failed",
+                message=f"协议 {protocol!r} 不受支持",
+                detail={"field": "models", "allowed": sorted(catalog.PROTOCOLS)},
+            )
+        clean = _clean_model_id(model_id)
+        if (clean, protocol) in seen:
+            continue
+        seen.add((clean, protocol))
+        out.append({"model_id": clean, "protocol": protocol, "reasoning": reasoning})
+    if not out:
+        raise AppError(
+            "common.validation_failed",
+            message="至少填写一个模型",
+            detail={"field": "models"},
         )
-    return text
+    if len(out) > MAX_MODELS_PER_CONNECTION:
+        raise AppError(
+            "common.validation_failed",
+            message=f"一个供应商最多 {MAX_MODELS_PER_CONNECTION} 个模型",
+            detail={"field": "models"},
+        )
+    return out
 
 
-async def save_endpoint(
+async def _require_connection(
+    db: AsyncSession, *, org_id: uuid.UUID, connection_id: uuid.UUID
+) -> OrgProviderConnection:
+    row = await repo.get_connection(db, org_id=org_id, connection_id=connection_id)
+    if row is None:
+        # 别的 org 的连接与不存在的连接一样是 404，不确认它存在
+        raise AppError("common.not_found", message="供应商连接不存在")
+    return row
+
+
+async def create_connection(
     db: AsyncSession,
     *,
     org_id: uuid.UUID,
     user_id: uuid.UUID,
-    label: str,
-    base_url: str,
-    model_id: str,
-    api_key: str | None,
-) -> EndpointView:
-    """新建或更新自定义端点。已有端点时 `api_key` 可以不给（沿用原来那把）。"""
-    clean_label = _clean_label(label)
-    clean_url = endpoint_url.normalize_base_url(base_url)
-    clean_model = _clean_model_id(model_id)
-    existing = await repo.get_endpoint(db, org_id=org_id)
-    if api_key is None and existing is None:
+    preset_id: str | None,
+    label: str | None,
+    base_url: str | None,
+    models: list[dict[str, Any]] | None,
+    api_key: str,
+    enabled: bool = True,
+) -> ConnectionView:
+    """新建连接。从预设建时没给的字段从预设拷（ADR-039 第 3 条："选预设=把模板拷进一行"）。
+
+    Base URL 不论来自预设还是用户，都过同一道 `normalize_base_url`。
+    """
+    preset = None
+    if preset_id is not None:
+        preset = presets.get(preset_id)
+        if preset is None:
+            raise AppError(
+                "common.validation_failed",
+                message=f"没有预设 {preset_id!r}",
+                detail={"field": "preset_id"},
+            )
+    limit = get_settings().org_provider_connection_limit
+    if await repo.count_connections(db, org_id=org_id) >= limit:
         raise AppError(
-            "common.validation_failed", message="请填写 API Key", detail={"field": "api_key"}
+            "common.validation_failed",
+            message=f"一个组织最多添加 {limit} 个供应商",
+            detail={"limit": limit},
         )
-    key_encrypted = encrypt_secret(credentials.clean_key(api_key)) if api_key is not None else None
-    await repo.save_endpoint(
+    clean_label = _clean_label(label if label is not None else (preset.label if preset else ""))
+    raw_url = base_url if base_url is not None else (preset.base_url if preset else "")
+    clean_url = endpoint_url.normalize_base_url(raw_url)
+    raw_models: list[dict[str, Any]] = (
+        models
+        if models is not None
+        else [
+            {"model_id": m.model_id, "protocol": m.protocol, "reasoning": m.reasoning}
+            for m in preset.models
+        ]
+        if preset
+        else []
+    )
+    clean = clean_models(raw_models)
+    key = credentials.clean_key(api_key)
+    row = await repo.create_connection(
         db,
         org_id=org_id,
         label=clean_label,
+        preset_id=preset_id,
         base_url=clean_url,
-        model_id=clean_model,
-        key_encrypted=key_encrypted,
+        key_encrypted=encrypt_secret(key),
+        models=clean,
+        enabled=enabled,
         created_by=user_id,
     )
+    view = _connection_view(row)
     await db.commit()
-    # 日志里只有 host，没有 path（path 里偶尔有租户号）、更没有 Key
-    log.info("upstreams.endpoint_saved", org_id=str(org_id), model=clean_model)
-    view = await endpoint_view(db, org_id=org_id)
-    assert view is not None
+    # 日志里没有 Key、没有地址 path（path 里偶尔有租户号 / 工作区号）
+    log.info(
+        "upstreams.connection_created",
+        org_id=str(org_id),
+        connection_id=str(view.id),
+        preset_id=preset_id,
+        models=len(clean),
+    )
     return view
 
 
-async def delete_endpoint(db: AsyncSession, *, org_id: uuid.UUID) -> None:
-    """删除自定义端点。选它当组织默认的，一并退回平台目录默认。"""
-    row = await repo.get_endpoint(db, org_id=org_id)
-    if row is None:
-        raise AppError("common.not_found", message="还没有配置自定义端点")
-    await repo.soft_delete_endpoint(db, row=row)
-    default = await repo.get_default(db, org_id=org_id, capability=catalog.CUSTOM_TEXT_CAPABILITY)
-    if default is not None and default.provider_id == catalog.CUSTOM_TEXT_PROVIDER_ID:
-        await repo.soft_delete_default(db, row=default)
-    await db.commit()
-    log.info("upstreams.endpoint_removed", org_id=str(org_id))
-
-
-async def test_endpoint(
+async def update_connection(
     db: AsyncSession,
     *,
     org_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    label: str | None = None,
     base_url: str | None = None,
-    model_id: str | None = None,
+    models: list[dict[str, Any]] | None = None,
+    enabled: bool | None = None,
     api_key: str | None = None,
-) -> probe.ProbeResult:
-    """测试连接。没给的字段用已保存的值——Key 明文前端拿不回来，只能让后端自己解。
+) -> ConnectionView:
+    """改连接。没给的字段不动；`api_key` 不给就沿用原来那把（前端拿不回明文）。"""
+    row = await _require_connection(db, org_id=org_id, connection_id=connection_id)
+    changes: dict[str, Any] = {}
+    if label is not None:
+        changes["label"] = _clean_label(label)
+    if base_url is not None:
+        changes["base_url"] = endpoint_url.normalize_base_url(base_url)
+    if models is not None:
+        changes["models"] = clean_models(models)
+    if enabled is not None:
+        changes["enabled"] = bool(enabled)
+    if api_key is not None:
+        changes["key_encrypted"] = encrypt_secret(credentials.clean_key(api_key))
+    if changes:
+        row = await repo.update_connection(db, row=row, changes=changes)
+    view = _connection_view(row)
+    await db.commit()
+    log.info(
+        "upstreams.connection_updated",
+        org_id=str(org_id),
+        connection_id=str(connection_id),
+        fields=sorted(k for k in changes if k != "key_encrypted")
+        + (["api_key"] if "key_encrypted" in changes else []),
+    )
+    return view
 
-    与正式调用是**同一个适配器类**（`OpenAICompatTextProvider.verify_key`），
-    同样的地址规整与出网校验。地址不合法照样返回"测试结论"而不是 4xx，
-    与 `probe.verify` 的约定一致：这把配置不能用是一个正常的测试结果。
+
+async def delete_connection(
+    db: AsyncSession, *, org_id: uuid.UUID, connection_id: uuid.UUID
+) -> None:
+    """软删连接。
+
+    **指向它的组织默认 / 项目偏好不自动改**：多连接下自动退回平台默认，等于在用户
+    不知情时把计费从他的 Key 换到平台额度。保留引用，解析时报可读错误
+    （`connection_missing`），模型页的 `selection.broken_reason` 也会标出来。
+    """
+    row = await _require_connection(db, org_id=org_id, connection_id=connection_id)
+    await repo.soft_delete_connection(db, row=row)
+    await db.commit()
+    log.info("upstreams.connection_removed", org_id=str(org_id), connection_id=str(connection_id))
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectionReferences:
+    """谁正指着这个连接。删除确认框用：删除不自动清默认 / 偏好（ADR-039 决定 (d)）。"""
+
+    #: 组织默认里指向它的能力
+    default_capabilities: list[str]
+    #: (项目 id, 项目标题, 能力)；只算未软删的项目
+    projects: list[tuple[uuid.UUID, str, str]]
+
+
+async def connection_references(
+    db: AsyncSession, *, org_id: uuid.UUID, connection_id: uuid.UUID
+) -> ConnectionReferences:
+    """只读。连接不在本 org（或不存在 / 已删）→ 404，不确认别人的连接存在。"""
+    row = await _require_connection(db, org_id=org_id, connection_id=connection_id)
+    ref = catalog.org_provider_id(row.id)
+    defaults = sorted(
+        d.capability for d in await repo.list_defaults(db, org_id=org_id) if d.provider_id == ref
+    )
+    # 延迟导入：项目模块读偏好时会回头用到本模块（`validate_preference_ref`）
+    from apps.api.modules.project import service as project_service
+
+    projects = await project_service.list_preference_references(db, org_id=org_id, provider_ref=ref)
+    return ConnectionReferences(default_capabilities=defaults, projects=projects)
+
+
+async def test_connection(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    connection_id: uuid.UUID | None = None,
+    protocol: str | None = None,
+    model_id: str | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    preset_id: str | None = None,
+) -> probe.ProbeResult:
+    """测试连接：按协议发一次**不花钱**的最小请求（`verify_key`）。
+
+    给了 `connection_id` 就用已保存的值兜底没给的字段——Key 明文前端拿不回来，
+    只能让后端自己解。与正式调用是**同一个适配器类**、同样的地址规整与出网校验。
+    地址不合法照样返回"测试结论"而不是 4xx，与 `probe.verify` 的约定一致。
+    `ENV=test` 时走 Mock 探测，不打用户填的地址。
     """
     saved = (
-        await load_endpoint(db, org_id=org_id) if None in (base_url, model_id, api_key) else None
+        await _require_connection(db, org_id=org_id, connection_id=connection_id)
+        if connection_id is not None
+        else None
     )
-    url = base_url if base_url is not None else (saved.base_url if saved else None)
-    model = model_id if model_id is not None else (saved.model_id if saved else None)
-    key = (
-        credentials.clean_key(api_key)
-        if api_key is not None
-        else (saved.api_key if saved else None)
-    )
-    if not url or not model or not key:
-        raise AppError("common.not_found", message="还没有配置自定义端点，请先填写地址、模型与 Key")
-
-    pid = catalog.CUSTOM_TEXT_PROVIDER_ID
-    try:
-        provider = OpenAICompatTextProvider(
-            base_url=url, api_key=key, model_id=_clean_model_id(model), key_source=KeySource.ORG
+    saved_models = _models_of(saved) if saved is not None else ()
+    proto = protocol or (saved_models[0][1] if saved_models else None)
+    if proto is not None and catalog.protocol_spec(proto) is None:
+        raise AppError(
+            "common.validation_failed",
+            message=f"协议 {proto!r} 不受支持",
+            detail={"field": "protocol", "allowed": sorted(catalog.PROTOCOLS)},
         )
+    model = model_id or next((m for m, p in saved_models if p == proto), None)
+    url = base_url if base_url is not None else (saved.base_url if saved else None)
+    if api_key is not None:
+        key: str | None = credentials.clean_key(api_key)
+    elif saved is not None:
+        try:
+            key = decrypt_secret(saved.key_encrypted)
+        except CryptoConfigError:
+            key = None
+    else:
+        key = None
+    if not url or not model or not key or not proto:
+        raise AppError(
+            "common.validation_failed",
+            message="测试连接需要地址、协议、模型与 Key",
+        )
+
+    pid = catalog.org_provider_id(saved.id) if saved is not None else catalog.ORG_PROVIDER_PREFIX
+    connection = ResolvedConnection(
+        connection_id=saved.id if saved is not None else uuid.UUID(int=0),
+        label=saved.label if saved is not None else "",
+        preset_id=preset_id or (saved.preset_id if saved is not None else None),
+        base_url=url,
+        models=((model, proto),),
+        enabled=True,
+        api_key=key,
+    )
+    try:
+        adapter = build_adapter(connection, model_id=_clean_model_id(model), protocol=proto)
     except AppError as exc:
         return probe.ProbeResult(
             ok=False, provider_id=pid, message=exc.message, error_code=exc.code
         )
-    return await probe.verify_with(provider, provider_id=pid, api_key=key)
+    return await probe.verify_with(adapter, provider_id=pid, api_key=key)

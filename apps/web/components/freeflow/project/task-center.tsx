@@ -1,16 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw, X } from "lucide-react";
+import { useEffect, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { StatusChip } from "@/components/ui/status";
-import { projects, type Render, type Task, type TaskStatus } from "@/lib/api";
-import { taskTitle, type TasksState } from "@/lib/freeflow/use-tasks";
-import { cn } from "@/lib/utils";
+import { TaskLedger } from "@/components/freeflow/tasks/task-ledger";
+import { projects, type Task } from "@/lib/api";
+import { subjectsByTask, type TaskSubject } from "@/lib/freeflow/task-scope";
+import type { TasksState } from "@/lib/freeflow/use-tasks";
 
 /**
- * 生成队列。
+ * 项目的执行队列。
  *
  * **数据源是 `tasks`，不是 `agent_runs`**（CLAUDE.md：执行状态只认
  * `tasks.status`；08_TASK_REALTIME.md §7）。出图 / 视频 / 配音 / 合成
@@ -18,96 +16,28 @@ import { cn } from "@/lib/utils";
  *
  * 状态与进度走项目 SSE 增量覆盖，不轮询；行的其余字段（类型、成本、创建
  * 时间）来自 `GET /tasks`，事件负载里没有它们。
- */
-
-type Bucket = "all" | "active" | "succeeded" | "failed";
-
-const TABS: { key: Bucket; label: string }[] = [
-  { key: "all", label: "全部" },
-  { key: "active", label: "进行中" },
-  { key: "succeeded", label: "已完成" },
-  { key: "failed", label: "失败/取消" },
-];
-
-function inBucket(status: TaskStatus, bucket: Bucket): boolean {
-  if (bucket === "all") return true;
-  if (bucket === "active") return status === "queued" || status === "running";
-  if (bucket === "succeeded") return status === "succeeded";
-  return status === "failed" || status === "cancelled";
-}
-
-const SUBJECT_LABEL: Record<Render["subject_kind"], string> = {
-  character: "角色基准立绘",
-  scene: "场景参考图",
-  shot: "分镜首帧图",
-};
-
-/** 任务行上的主语。是一个名字，不是 `A · B` 的 meta 串，所以不用分隔符。 */
-function describe(render: Render): string {
-  const base = SUBJECT_LABEL[render.subject_kind];
-  if (render.subject_kind === "shot") return `${base} 镜头 ${render.shot_index}`;
-  return render.subject_ref ? `${base} ${render.subject_ref}` : base;
-}
-
-/**
- * 失败任务要给用户可读的原因，不是只甩一个错误码。
  *
- * 键是 `apps/api/core/errors.py` 里的真实错误码（`<domain>.<category>.<specific>`）。
- * 只覆盖常见的几条，不穷举——查不到的落到 `null`，界面显示原始码。
+ * 对象（哪个角色 / 场景 / 镜头）只在 `GET /projects/{id}/images` 里，按 task_id 反查。
+ * 拿不到就退回类型名，不猜——这一列是让行好读，失败了不该影响任务列表本身。
  */
-const FAIL_REASON: Record<string, string> = {
-  "provider.transient.timeout": "上游生成超时，系统会自动重试并可能切到备用通道",
-  "provider.rate_limit.exceeded": "上游限流，任务在排队等配额",
-  "provider.unavailable": "上游服务不可用，正在切换备用通道",
-  "provider.account.insufficient": "平台在上游的账户额度不足，这笔费用会全额退回",
-  "provider.byok.rejected": "你自己配置的 API Key 调用失败，去模型页测试连接或换一把",
-  "provider.params.invalid": "生成参数不被这个模型支持",
-  "provider.content.rejected": "内容被上游安全策略拦下，改一下描述再试",
-  "quality.below_threshold": "画面质量不达标，系统判定为废片并重新生成",
-  "billing.credit.insufficient": "Credits 余额不足，先充值再重试",
-  "billing.budget.exceeded": "已到本项目预算上限，需要确认追加",
-  "billing.daily_cap.exceeded": "已到今日消费上限，明天自动恢复",
-  "agent.output.schema_invalid": "模型返回的结构不合法，正在重试",
-  "agent.max_steps.exceeded": "处理超出预期复杂度，把需求拆细一点再试",
-  "consistency.profile.missing": "缺角色设定，先把角色档案那一步跑完再出图",
-};
-
-const CONNECTION_LABEL: Record<string, string> = {
-  connecting: "正在连接实时通道…",
-  live: "实时更新中",
-  reconnecting: "实时通道断开，正在重连——进度可能滞后",
-  closed: "实时通道已关闭",
-};
-
 export function TaskCenter({
   tasks,
   projectId,
+  focusId = null,
 }: {
   /** 由页面持有：右栏也要同一份任务，两处各调一次 hook 会发两遍 `GET /tasks`。 */
   tasks: TasksState;
   projectId: string;
+  focusId?: string | null;
 }) {
-  const [bucket, setBucket] = useState<Bucket>("all");
-  // 出图任务的 subject 只在 /images 那条列表里。拿不到就退回类型名，
-  // 不猜——这一条纯粹是让行标题好读，失败了不该影响任务列表本身。
-  const [subjects, setSubjects] = useState<Map<string, string>>(new Map());
+  const [subjects, setSubjects] = useState<Map<string, TaskSubject>>(new Map());
 
   useEffect(() => {
     let alive = true;
     projects
       .renders(projectId)
       .then((rows) => {
-        if (!alive) return;
-        // 接口按契约给数组；真给了别的就当成"没有出图记录"，
-        // 任务列表本身还有用，不该被主语这一列拖成白屏。
-        const list = Array.isArray(rows) ? rows : [];
-        setSubjects(
-          new Map(
-            list
-              .filter((r): r is Render & { task_id: string } => r.task_id !== null)
-              .map((r) => [r.task_id, describe(r)]),
-          ),
-        );
+        if (alive) setSubjects(subjectsByTask(rows, projectId));
       })
       .catch(() => undefined);
     return () => {
@@ -115,203 +45,12 @@ export function TaskCenter({
     };
   }, [projectId, tasks.items.length]);
 
-  const visible = useMemo(
-    () => tasks.items.filter((t) => inBucket(t.status, bucket)),
-    [tasks.items, bucket],
-  );
-  const active = tasks.items.filter((t) => t.status === "queued" || t.status === "running").length;
+  const recordHref = (task: Task) =>
+    task.type === "image.generate"
+      ? `/freeflow/projects/${encodeURIComponent(projectId)}/tasks?view=records&record_type=image&record_id=${encodeURIComponent(task.id)}`
+      : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-[980px] flex-col gap-3 p-6">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h1 className="text-lg font-semibold tracking-tight text-fg">生成队列</h1>
-        <span className="tnum text-xs text-fg-subtle">
-          {tasks.items.length} 个任务，{active} 个进行中
-        </span>
-        <span
-          className={cn("text-xs", tasks.connection === "live" ? "text-fg-subtle" : "text-running")}
-        >
-          {CONNECTION_LABEL[tasks.connection] ?? tasks.connection}
-        </span>
-        <Button size="sm" variant="ghost" className="ml-auto" onClick={() => void tasks.reload()}>
-          <RefreshCw aria-hidden className="size-3.5" />
-          刷新
-        </Button>
-      </div>
-
-      {tasks.error && (
-        <p role="alert" className="rounded-[2px] bg-danger-soft px-3 py-2 text-sm text-danger">
-          {tasks.error}
-        </p>
-      )}
-      {tasks.actionError && (
-        <p role="alert" className="rounded-[2px] bg-danger-soft px-3 py-2 text-sm text-danger">
-          {tasks.actionError}
-        </p>
-      )}
-
-      {/* 账本：栏头里放筛选，不在账本外面再摆一排胶囊按钮。
-          筛选本来就是「看这本账的哪一栏」，属于栏头。 */}
-      <section className="ff-ledger">
-        <div className="ff-ledger-head">
-          <div className="flex flex-wrap items-center gap-1">
-            {TABS.map((t) => {
-              const count = tasks.items.filter((task) => inBucket(task.status, t.key)).length;
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  aria-pressed={bucket === t.key}
-                  onClick={() => setBucket(t.key)}
-                  className={cn(
-                    "cursor-pointer rounded-[2px] px-2.5 py-1 text-xs transition-colors duration-150",
-                    bucket === t.key
-                      ? "bg-primary-soft font-semibold text-primary"
-                      : "text-fg-muted hover:bg-surface-3 hover:text-fg",
-                  )}
-                >
-                  {t.label}
-                  <span className="tnum ml-1.5 text-fg-subtle">{count}</span>
-                </button>
-              );
-            })}
-          </div>
-          <span className="hidden font-normal sm:inline">进度 / 状态</span>
-        </div>
-
-        {tasks.loading && <TaskSkeleton />}
-        {!tasks.loading && visible.length === 0 && (
-          <div className="ff-ledger-empty">
-            <p className="text-sm font-medium text-fg">
-              {tasks.items.length === 0 ? "还没有生成任务" : "当前筛选下没有任务"}
-            </p>
-            <p className="mx-auto mt-1.5 max-w-xl leading-6">
-              {tasks.items.length === 0
-                ? "出图、批量出图会在这里出现——文本阶段（advance / revise）是同步调用，只落 agent_runs，不建任务。"
-                : "切换上方筛选即可查看其他状态的任务。"}
-            </p>
-          </div>
-        )}
-        {visible.map((task) => (
-          <TaskRow
-            key={task.id}
-            task={task}
-            title={subjects.get(task.id) ?? taskTitle(task.type)}
-            pending={tasks.isPending(task.id)}
-            onRetry={() => void tasks.retry(task.id)}
-            onCancel={() => void tasks.cancel(task.id)}
-          />
-        ))}
-      </section>
-
-      <p className="text-xs leading-5 text-fg-subtle">
-        重试会<strong className="font-medium text-fg-muted">重新预扣一笔</strong> Credits，不是免费再跑一次。取消只对还没开始或
-        正在排队的任务有意义——已经发给上游的那一段拦不住（决策记录 §11.5 裁决 6）。
-      </p>
-    </div>
-  );
-}
-
-function TaskSkeleton() {
-  return (
-    <div role="status" aria-label="加载中" className="divide-y divide-border">
-      <span className="sr-only">加载中…</span>
-      {[0, 1, 2].map((row) => (
-        <div key={row} className="flex items-center gap-4 px-4 py-3">
-          <div className="min-w-0 flex-1 space-y-2">
-            <span className="rf-skeleton block h-3 w-2/5 rounded-sm" />
-            <span className="rf-skeleton block h-2.5 w-3/5 rounded-sm" />
-          </div>
-          <span className="rf-skeleton hidden h-1 w-28 sm:block" />
-          <span className="rf-skeleton block h-5 w-14 rounded-[2px]" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TaskRow({
-  task,
-  title,
-  pending,
-  onRetry,
-  onCancel,
-}: {
-  task: Task;
-  title: string;
-  pending: boolean;
-  onRetry: () => void;
-  onCancel: () => void;
-}) {
-  const reason = task.error_code ? FAIL_REASON[task.error_code] : null;
-  const running = task.status === "running" || task.status === "queued";
-  const cost = task.actual_cost || task.estimated_cost;
-
-  return (
-    <div className="ff-ledger-row">
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-fg">
-          {title}
-          {task.attempt > 1 && (
-            <span className="tnum ml-1.5 text-xs font-normal text-fg-subtle">
-              第 {task.attempt} 次尝试
-            </span>
-          )}
-        </div>
-        <div className="tnum mt-0.5 truncate text-xs text-fg-subtle">
-          {new Date(task.created_at).toLocaleString("zh-CN")}
-          {cost > 0 &&
-            `，${task.actual_cost > 0 ? "实扣" : "预估"} ${cost.toLocaleString("zh-CN")} Credits`}
-        </div>
-        {task.status === "failed" && (
-          <p className="mt-1 text-xs text-danger">
-            {reason ?? `未归类的失败：${task.error_code ?? "无错误码"}`}
-            {reason && task.error_code && (
-              <span className="ml-1 text-fg-subtle">（{task.error_code}）</span>
-            )}
-          </p>
-        )}
-      </div>
-
-      {/* 进度是 `tasks.progress` 真实字段，SSE 实时推 */}
-      <div className="hidden w-[140px] shrink-0 sm:block">
-        {running && (
-          <div className="flex flex-col gap-1">
-            <span className="ff-meter" data-tone="running">
-              <span
-                className="transition-[width] duration-200"
-                style={{ width: `${Math.max(2, Math.min(100, task.progress))}%` }}
-              />
-            </span>
-            <span className="tnum text-xs text-fg-subtle">{task.progress}%</span>
-          </div>
-        )}
-      </div>
-
-      <div className="flex w-[92px] shrink-0 justify-end gap-1">
-        {task.status === "failed" && (
-          <Button size="sm" variant="ghost" disabled={pending} onClick={onRetry} title="重新预扣并再跑一次">
-            {pending ? (
-              <Loader2 aria-hidden className="size-3.5 animate-spin" />
-            ) : (
-              <RefreshCw aria-hidden className="size-3.5" />
-            )}
-            重试
-          </Button>
-        )}
-        {running && (
-          <Button size="sm" variant="ghost" disabled={pending} onClick={onCancel} title="取消这个任务">
-            {pending ? (
-              <Loader2 aria-hidden className="size-3.5 animate-spin" />
-            ) : (
-              <X aria-hidden className="size-3.5" />
-            )}
-            取消
-          </Button>
-        )}
-      </div>
-
-      <StatusChip status={task.status} />
-    </div>
+    <TaskLedger tasks={tasks} scope="project" subjects={subjects} focusId={focusId} recordHref={recordHref} />
   );
 }

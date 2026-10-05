@@ -438,51 +438,6 @@
   white-space: nowrap;
 }
 
-.ff-new-project {
-  display: flex;
-  min-height: 150px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-frame);
-  color: var(--fg-muted);
-  transition: border-color 0.15s, color 0.15s;
-}
-.ff-new-project > span {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  margin-bottom: 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-frame);
-  background: var(--surface);
-}
-.ff-new-project strong {
-  font-size: 13px;
-  font-weight: 550;
-}
-.ff-new-project p {
-  margin-top: 4px;
-  color: var(--fg-subtle);
-  font-size: 12px;
-}
-.ff-new-project:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-}
-
-.ff-create-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-frame);
-  padding: 18px;
-  background: var(--surface);
-}
-
 .ff-section-heading {
   display: flex;
   align-items: baseline;
@@ -1248,10 +1203,6 @@
   }
   .ff-contact-sheet {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .ff-create-form {
-    grid-template-columns: minmax(0, 1fr);
-    padding: 14px;
   }
   .ff-lobby-empty {
     min-height: 300px;

@@ -1,9 +1,9 @@
-"""用户可控的出网地址怎么校验（05_MODEL_GATEWAY.md §5.2 第 3 条）。
+"""用户可控的出网地址怎么校验（05_MODEL_GATEWAY.md §5.2 第 3 条、ADR-039 第 6 条）。
 
-文本能力的 OpenAI 兼容自定义端点是这个仓库**唯一一个**由用户填、由服务端
-去请求的地址。不校验就是一个 SSRF 入口：填 `http://169.254.169.254/` 读云
-元数据，填 `https://10.0.0.5/` 扫内网，填 `https://user:pw@host/` 让密码
-进日志。所以分两道：
+组织供应商连接的 Base URL 由用户填、由服务端去请求；它回传的出图结果地址
+同样是用户可控的（:func:`check_download_url`）。不校验就是一个 SSRF 入口：
+填 `http://169.254.169.254/` 读云元数据，填 `https://10.0.0.5/` 扫内网，
+填 `https://user:pw@host/` 让密码进日志。所以分两道：
 
 1. **保存时的形状校验**（:func:`normalize_base_url`）：只收 `https://`，
    不收 userinfo / fragment / query，主机名不能是 localhost，也不能是
@@ -94,6 +94,40 @@ def normalize_base_url(raw: str) -> str:
 
     path = parts.path.rstrip("/")
     return urlunsplit(("https", parts.netloc.lower(), path, "", ""))
+
+
+def check_download_url(raw: str) -> str:
+    """校验一个**由上游回传**的结果下载地址（ADR-039 第 6 条）。
+
+    组织连接是用户填的上游，它回传的图片 URL 同样是用户可控的出网地址：一个恶意或
+    被攻破的中转可以回 `http://169.254.169.254/...` 让 Worker 去读云元数据。
+    规则与 Base URL 相同（仅 https、不带凭据、不指向本机 / 私网 / 元数据），只有一处
+    不同：**允许查询参数**——对象存储的签名链接全靠它。解析后的地址仍要在请求前
+    过 :func:`assert_public_host`，跳转仍不跟随。
+    """
+    url = (raw or "").strip()
+    if not url or len(url) > 4096 or any(ch.isspace() for ch in url) or not url.isprintable():
+        raise AppError("provider.params.invalid", message="上游回传的图片地址不合法")
+    parts = urlsplit(url)
+    if parts.scheme.lower() != "https":
+        raise AppError(
+            "provider.params.invalid", message="上游回传的图片地址不是 https，已拒绝下载"
+        )
+    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
+        raise AppError("provider.params.invalid", message="上游回传的图片地址带凭据，已拒绝下载")
+    host = (parts.hostname or "").rstrip(".").lower()
+    if not host or host in _BLOCKED_HOSTNAMES or host.endswith(".localhost"):
+        raise AppError("provider.params.invalid", message="上游回传的图片地址指向本机，已拒绝下载")
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None and not _ip_is_public(literal):
+        raise AppError(
+            "provider.params.invalid",
+            message="上游回传的图片地址指向内网、回环或云元数据地址，已拒绝下载",
+        )
+    return urlunsplit((parts.scheme.lower(), parts.netloc, parts.path, parts.query, ""))
 
 
 async def _system_resolver(host: str) -> list[str]:
