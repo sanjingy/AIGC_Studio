@@ -94,6 +94,62 @@ export function byokReasonText(reason: unknown): string | null {
   return typeof reason === "string" && reason ? (BYOK_REASON[reason] ?? null) : null;
 }
 
+/** 每个能力在平台这边走的唯一生成接口（`gateway/catalog.py::PROTOCOLS`） */
+const GENERATION_API: Record<string, string> = {
+  text_generation: "OpenAI Chat Completions（POST /chat/completions）",
+  image_generation: "OpenAI Images（POST /images/generations）",
+};
+
+const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+
+/**
+ * 自带上游调用失败时**失败在哪一层**（后端 `service._upstream_reason`）。
+ *
+ * 真实踩过：中转 `GET /models` 鉴权通过、列出了模型，`POST /chat/completions` 回 404，
+ * 界面却说"你的 API Key 调用失败"，用户去换了一把本来没问题的 Key。所以只有 401/403
+ * 才说 Key 被拒；404 说清是哪个接口、哪个模型对不上，并给出能做的事。认不出的码返回 null。
+ */
+export function upstreamFailureText(detail: Record<string, unknown> | undefined): string | null {
+  const d = detail ?? {};
+  const status = typeof d.http_status === "number" ? d.http_status : null;
+  // 后面总是紧跟中文，模型 ID 两侧留空格
+  const model = str(d.model_id) ? `模型 ${d.model_id} ` : "所选模型";
+  const op = str(d.operation) ?? "生成接口";
+  const code = str(d.upstream_error_code);
+  const api = GENERATION_API[str(d.capability) ?? ""] ?? "平台支持的 OpenAI 兼容接口";
+  const http = status ? `HTTP ${status}${code ? ` ${code}` : ""}` : null;
+  switch (str(d.reason)) {
+    case "upstream_not_found":
+      return (
+        `供应商对 ${op} 返回 ${http}：这个地址上没有该接口，或${model}不能通过它调用。` +
+        `这通常不是 API Key 的问题——测试连接只读取模型列表，列表里有这个模型不代表它支持该接口。` +
+        `平台调用的是 ${api}；请向供应商确认${model}支持这个接口，或在「模型」页换一个模型`
+      );
+    case "upstream_model_not_found":
+      return `供应商说${model}不存在（${http}）。请在「模型」页核对模型 ID，或换一个模型`;
+    case "upstream_auth_rejected":
+      return `供应商拒绝了你的 API Key${http ? `（${http}）` : ""}：Key 无效、已过期，或没有调用${model}的权限。请在「模型」页更换 Key`;
+    case "upstream_quota_exhausted":
+      return `你在供应商处的余额或额度不足${http ? `（${http}）` : ""}，请到供应商充值后再试`;
+    case "upstream_rate_limited":
+      return "供应商限流，请稍后再试";
+    case "upstream_request_rejected":
+      return `供应商不接受这次请求${http ? `（${http}）` : ""}：${model}可能不支持 ${api} 的某些参数。可在「模型」页换一个模型`;
+    case "upstream_redirect":
+      return `供应商返回了跳转${http ? `（${http}）` : ""}，出于安全不跟随。请在「模型」页把请求地址改成最终地址`;
+    case "upstream_address_rejected":
+      return "请求地址解析到了内网或保留地址，已拒绝请求。请在「模型」页检查请求地址";
+    case "upstream_content_rejected":
+      return "内容被供应商的安全策略拦下，改一下描述再试";
+    case "upstream_timeout":
+      return "供应商响应超时，请稍后再试";
+    case "upstream_unavailable":
+      return `供应商暂时不可用${http ? `（${http}）` : ""}，请稍后再试；一直这样请在「模型」页检查请求地址`;
+    default:
+      return null;
+  }
+}
+
 // ---------------------------------------------------------------- 一个模型都没有
 
 /**
@@ -122,8 +178,8 @@ export function notConfiguredText(capability: unknown): string | null {
 type ErrorLike = { code: string; message?: string; user_message?: string; detail?: Record<string, unknown> };
 
 /**
- * 一条接口错误给用户看的话。`provider.byok.rejected` 的通用文案只说"Key 调用失败"，
- * 但连接删了 / 停了 / 选了推理模型时根本不是 Key 的问题，补上 `detail.reason`。
+ * 一条接口错误给用户看的话。`provider.byok.rejected` 的通用文案只说"供应商调用失败"，
+ * 连接删了 / 停了 / 选了推理模型、上游回 404 等都不是 Key 的问题，按 `detail.reason` 说具体。
  * `preferMessage` 用在设置页：那里要显示后端原文（含字段原因），不是笼统的一句。
  */
 export function describeApiError(error: ErrorLike, preferMessage = false): string {
@@ -131,7 +187,9 @@ export function describeApiError(error: ErrorLike, preferMessage = false): strin
   if (error.code === NOT_CONFIGURED) return notConfiguredText(error.detail?.capability) ?? base;
   if (error.code !== "provider.byok.rejected") return base;
   const reason = byokReasonText(error.detail?.reason);
-  return reason ? `${reason}。去「模型」页或项目设置改选。` : base;
+  if (reason) return `${reason}。去「模型」页或项目设置改选。`;
+  const upstream = upstreamFailureText(error.detail);
+  return upstream ? `${upstream}。` : base;
 }
 
 // ---------------------------------------------------------------- 一键切换默认

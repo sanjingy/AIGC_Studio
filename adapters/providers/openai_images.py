@@ -34,7 +34,7 @@ import httpx
 
 from adapters.providers import endpoint_url
 from adapters.providers.base import ImageRequest, ImageResult, KeySource, signal_key_source
-from adapters.providers.openai_compat import refuse_redirect
+from adapters.providers.openai_compat import failure_detail, refuse_redirect
 from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
 
@@ -171,7 +171,7 @@ class OpenAIImagesProvider:
             raise AppError("provider.unavailable", message=f"出图上游连不上：{exc}") from exc
 
         refuse_redirect(resp)
-        _raise_for_status(resp)
+        _raise_for_status(resp, model_id=self.model_id)
         try:
             payload = resp.json()
         except ValueError as exc:
@@ -201,8 +201,12 @@ class OpenAIImagesProvider:
             # 不少出图上游不实现 /models。404 说明地址通了、鉴权没被拒，
             # 不能据此判定 Key 好坏，如实告诉用户。
             return "地址可达；该上游不提供模型列表，Key 是否可用要以第一次出图为准"
-        _raise_for_status(resp)
-        return "鉴权通过"
+        _raise_for_status(resp, model_id=self.model_id)
+        # 与文本连接同理：读到模型列表不等于出图接口能用，别画成"连接正常"
+        return (
+            "模型列表接口鉴权通过。只读取了模型列表（GET /models，不发出图请求），没有试调用 "
+            "POST /images/generations；该模型能否出图，以第一次出图为准"
+        )
 
 
 def _decode_b64(text: str) -> bytes:
@@ -219,18 +223,23 @@ def _decode_b64(text: str) -> bytes:
         ) from exc
 
 
-def _raise_for_status(resp: httpx.Response) -> None:
-    """状态码 → 错误目录。与 DeepSeek / 万相适配器同一套分法。"""
+def _raise_for_status(resp: httpx.Response, *, model_id: str) -> None:
+    """状态码 → 错误目录。与 DeepSeek / 万相适配器同一套分法，另带 `failure_detail`。"""
     if resp.status_code == 200:
         return
-    detail = resp.text[:300]
+    text = resp.text[:300]
+    facts = failure_detail(resp, model_id=model_id)
     if resp.status_code == 429:
-        raise AppError("provider.rate_limit.exceeded", message=detail)
+        raise AppError("provider.rate_limit.exceeded", message=text, detail=facts)
     if resp.status_code in (401, 402, 403):
-        raise AppError("provider.account.insufficient", message=f"auth failed: {detail}")
+        raise AppError(
+            "provider.account.insufficient",
+            message=f"auth failed (HTTP {resp.status_code}): {text}",
+            detail=facts,
+        )
     if resp.status_code in (400, 422):
-        lowered = detail.lower()
+        lowered = text.lower()
         if any(hint in lowered for hint in _CONTENT_HINTS):
-            raise AppError("provider.content.rejected", message=detail)
-        raise AppError("provider.params.invalid", message=detail)
-    raise AppError("provider.unavailable", message=f"HTTP {resp.status_code}: {detail}")
+            raise AppError("provider.content.rejected", message=text, detail=facts)
+        raise AppError("provider.params.invalid", message=text, detail=facts)
+    raise AppError("provider.unavailable", message=f"HTTP {resp.status_code}: {text}", detail=facts)

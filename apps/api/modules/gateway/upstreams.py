@@ -27,7 +27,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Literal
 
@@ -1072,6 +1072,9 @@ async def test_connection(
         api_key=key,
     )
     try:
+        if proto in {"openai_chat", "openai_images"}:
+            # 草稿地址与保存时同一道规整：粘完整请求地址测试，不能测成 `.../chat/completions/models`
+            connection = replace(connection, base_url=normalize_api_base(url))
         adapter = build_adapter(connection, model_id=_clean_model_id(model), protocol=proto)
     except AppError as exc:
         return probe.ProbeResult(

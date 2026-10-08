@@ -737,3 +737,48 @@ GitHub 搜索：`openai api gateway stars:>=1000`，核对候选 one-api 37,084 
 - 「我的供应商」分段（ADR-039 组织连接）是另一条路：点连接的「设为默认」即按连接的 Key
   调用，选择值为 `provider.org:<id>`，与平台行官方 Key 无关。
 - 判定逻辑在 `apps/web/lib/freeflow/provider-scope.ts::billingChoices`，有前端逻辑测试。
+
+## 2026-10-09 自带上游失败分层与测试连接口径（USER_FLOW_REPAIR provider-real，已实现、未提交）
+
+**起因（线上只读证据）**：某组织连接 `https://cchost.ai/v1` + 模型 `gpt-6.1-sol`（协议 `openai_chat`）。
+测试连接 `GET /v1/models` 鉴权通过、列表含该模型；正式 `POST /v1/chat/completions` 回 404
+`{"error":{"message":"not found","code":"not_found"}}`，被包成 `provider.byok.rejected`，界面说
+"你为该能力配置的 API Key 调用失败"——用户会去换一把本来没问题的 Key。
+
+**改了什么**（不改协议白名单、不改接口路径与入参，只给既有错误加 `detail` 字段）：
+
+- `openai_compat.raise_for_upstream` / `openai_images._raise_for_status` 失败时带
+  `detail = {http_status, operation("POST /v1/chat/completions"), model_id, upstream_error_code?}`；
+  上游错误码只收 `[A-Za-z0-9_.-]{1,64}`，出口再脱敏。错误码映射本身不变。
+- `service._as_byok_error` 增加 `detail.reason`：401/403 → `upstream_auth_rejected`；402 →
+  `upstream_quota_exhausted`；404 → `upstream_model_not_found`（上游码含 model）否则
+  `upstream_not_found`；3xx → `upstream_redirect`；429 / 内容 / 超时 / 400·422 / 地址解析到内网 /
+  其余 → `upstream_rate_limited` / `upstream_content_rejected` / `upstream_timeout` /
+  `upstream_request_rejected` / `upstream_address_rejected` / `upstream_unavailable`。
+  另带 `provider_id`、`model_id`。原有 `connection_missing` 等原因码不变。
+- `provider.byok.rejected` 目录文案改为"你自己配置的模型供应商调用失败，请到「模型」页查看原因、
+  测试连接或改选"——不再一律说 Key 错。前端 `provider-scope.ts::upstreamFailureText` 按 reason
+  写出具体接口、状态码、模型与下一步（404：不是 Key 的问题、模型列表不代表支持该接口、平台调用的是
+  Chat Completions / Images、去确认或换模型）。
+- 测试连接（`openai_chat` / `openai_images` 的 `verify_key`）结论改为"模型列表接口鉴权通过……只读取了模型列表，
+  没有试调用生成接口……以第一次生成/出图为准"，前端 `classifyTest` 判为中性「无法免费验证」，
+  不再显示「连接正常」。免费验证生成接口没有办法。
+- 草稿测试连接与保存同一道 `normalize_api_base`（此前草稿粘完整请求地址会测成
+  `.../chat/completions/models`）；规整新增剥离 `/responses` 后缀（前后端一致）。剥离只是规整地址，
+  调用仍按连接协议。
+- 添加连接表单写明：供应商需兼容 OpenAI 接口（文本 Chat Completions、出图 Images），只提供
+  Responses 等其他接口的模型暂不支持。
+
+**"只填 API Key + 请求地址"的边界**：只对"所选模型能用 OpenAI Chat Completions（文本）/ Images
+（出图）调用"的供应商成立；`/models` 列出模型不等于该模型支持这两个接口。地址规整本身无误：
+`https://cchost.ai/v1` 已是正确 base，无 `/v1/v1` 拼接（无 Key 的路由探测显示
+`/v1/chat/completions`、`/v1/responses` 均由 OpenAI 格式处理器应答 401）。
+
+**未做**：`openai_responses`（Responses API）协议。该模型是否只能走 Responses 未经证实
+（需一次带 Key 的生成调用），新增协议属 ADR-039 白名单变更，由 Lead 决定。真实上游生成未验收。
+
+**GitHub 调研**（2026-10-09）：LiteLLM（60,372 stars，MIT，commit `6e54dced8c29`）
+`litellm_core_utils/exception_mapping_utils.py` 把 404 映射为 `NotFoundError`、与 401
+`AuthenticationError` 分开，印证分层做法；本次逻辑十余行，沿用仓库既有映射风格，未复制代码。
+Wei-Shaw/sub2api（43,493 stars，LGPL-3.0，commit `5fc0e486c3f6`）与 claude-relay-service
+（12,677 stars，MIT）只读参考中转路由行为，未引入。

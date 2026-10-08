@@ -17,9 +17,13 @@ MAX_DISCOVERED_MODELS = 500
 
 
 def normalize_api_base(raw: str) -> str:
-    """Accept a base URL or a standard operation URL; preserve custom base paths."""
+    """Accept a base URL or a standard operation URL; preserve custom base paths.
+
+    `/responses` is stripped too: users copy it from Codex-style docs. Stripping it does
+    not mean that API is used -- calls still follow the connection protocol.
+    """
     base = endpoint_url.normalize_base_url(raw)
-    for suffix in ("/chat/completions", "/images/generations", "/models"):
+    for suffix in ("/chat/completions", "/images/generations", "/responses", "/models"):
         if base.endswith(suffix):
             base = base[: -len(suffix)]
             break

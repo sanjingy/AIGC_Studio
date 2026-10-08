@@ -248,7 +248,9 @@ async def test_byok_error_tells_the_user_it_is_his_key(monkeypatch: pytest.Monke
 
     assert exc.value.code == "provider.byok.rejected"
     assert exc.value.detail["upstream_code"] == "provider.account.insufficient"
-    assert "设置页" in exc.value.spec.user_message
+    assert "「模型」页" in exc.value.spec.user_message
+    # 失败在哪一层由 detail.reason 说；目录（平台 Key 的同家目录）没有状态码时按错误码分
+    assert exc.value.detail["reason"] == "upstream_auth_rejected"
     await breaker.reset(breaker.scope(FAKE_PROVIDER, org_id=org_id))
 
 

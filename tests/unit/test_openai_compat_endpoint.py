@@ -175,7 +175,11 @@ async def test_verify_key_lists_models_without_generation_cost() -> None:
 
     message = await _provider(handler).verify_key()
     assert paths == ["/v1/models"]
-    assert "包含 qwen2.5-72b-instruct" in message
+    assert "里有 qwen2.5-72b-instruct" in message
+    # 只读了模型列表：不能说成"生成已验证"
+    assert "以第一次生成为准" in message
+    assert message.startswith("模型列表接口鉴权通过")
+    assert "不计费" not in message
 
 
 async def test_constructor_refuses_private_base_url() -> None:

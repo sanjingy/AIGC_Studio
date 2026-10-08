@@ -935,12 +935,47 @@ test("坏默认与 byok 拒绝的原因都翻成人话，未知码不吞", () =>
   assert.equal(prov.brokenReasonText(null), null);
   assert.equal(prov.brokenReasonText("connection_disabled"), "指向的供应商已停用");
   assert.match(prov.brokenReasonText("weird_code"), /weird_code/);
-  const e = (reason) => ({ code: "provider.byok.rejected", message: "m", user_message: "你为该能力配置的 API Key 调用失败", detail: { reason } });
+  const e = (reason) => ({ code: "provider.byok.rejected", message: "m", user_message: "你自己配置的模型供应商调用失败", detail: { reason } });
   assert.match(prov.describeApiError(e("reasoning_model_not_allowed")), /推理模型/);
   assert.match(prov.describeApiError(e("connection_missing")), /已被删除/);
-  assert.equal(prov.describeApiError(e("unknown")), "你为该能力配置的 API Key 调用失败");
+  assert.equal(prov.describeApiError(e("unknown")), "你自己配置的模型供应商调用失败");
   assert.equal(prov.describeApiError({ code: "common.validation_failed", message: "Base URL 必须是 https", user_message: "请求参数有误" }, true), "Base URL 必须是 https");
   assert.equal(prov.describeApiError({ code: "common.validation_failed", message: "x", user_message: "请求参数有误" }), "请求参数有误");
+});
+
+test("自带上游 404 不说成 Key 错：说清接口、模型与下一步；只有 401/403 才说 Key 被拒", () => {
+  const e = (detail) => ({ code: "provider.byok.rejected", message: "m", user_message: "你自己配置的模型供应商调用失败", detail });
+  const notFound = prov.describeApiError(
+    e({
+      reason: "upstream_not_found",
+      capability: "text_generation",
+      http_status: 404,
+      operation: "POST /v1/chat/completions",
+      upstream_error_code: "not_found",
+      model_id: "gpt-6.1-sol",
+    }),
+  );
+  assert.match(notFound, /POST \/v1\/chat\/completions 返回 HTTP 404 not_found/);
+  assert.match(notFound, /模型 gpt-6\.1-sol 不能通过它调用/);
+  assert.match(notFound, /不是 API Key 的问题/);
+  assert.match(notFound, /只读取模型列表/);
+  assert.match(notFound, /OpenAI Chat Completions/);
+  assert.doesNotMatch(notFound, /更换 Key/);
+  const auth = prov.describeApiError(e({ reason: "upstream_auth_rejected", http_status: 401, model_id: "m1" }));
+  assert.match(auth, /拒绝了你的 API Key（HTTP 401）/);
+  assert.match(auth, /更换 Key/);
+  assert.match(prov.describeApiError(e({ reason: "upstream_model_not_found", http_status: 404, upstream_error_code: "model_not_found", model_id: "m1" })), /核对模型 ID/);
+  assert.match(prov.describeApiError(e({ reason: "upstream_redirect", http_status: 302 })), /最终地址/);
+  // 没有模型 ID 时不出现 "模型 undefined"
+  assert.doesNotMatch(prov.describeApiError(e({ reason: "upstream_not_found", http_status: 404 })), /undefined|null/);
+  assert.equal(prov.upstreamFailureText({ reason: "something_new" }), null);
+});
+
+test("测试连接只读了模型列表：结论画成中性，不画成「连接正常」", () => {
+  const msg =
+    "模型列表接口鉴权通过，列表（24 个）里有 gpt-6.1-sol。只读取了模型列表（GET /models，不发生成请求），没有试调用生成接口 POST /chat/completions；该模型能否用这个接口生成，以第一次生成为准";
+  assert.equal(prov.classifyTest({ ok: true, message: msg, error_code: null }), "neutral");
+  assert.equal(modelOptions.normalizeApiAddress("https://relay.example/v1/responses"), "https://relay.example/v1");
 });
 
 test("没有可用模型：按码判断、能力名翻成中文、给模型库地址，且不可重试", () => {

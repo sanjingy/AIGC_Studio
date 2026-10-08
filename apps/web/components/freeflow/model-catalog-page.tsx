@@ -841,7 +841,7 @@ function ConnectionDrawer({
       setDiscoveryNote(
         response.mock
           ? "测试环境模型列表（Mock），未连接真实上游"
-          : `读取到 ${response.models.length} 个模型，请选择要使用的模型`,
+          : `读取到 ${response.models.length} 个模型，请选择要使用的模型。列表只说明 Key 能读取模型；平台用 OpenAI Chat Completions 生成文本、OpenAI Images 出图，所选模型是否支持以第一次生成为准`,
       );
     } catch (e) {
       setError(errorText(e, "读取模型失败，可以在高级设置中手动填写模型 ID"));
@@ -955,7 +955,8 @@ function ConnectionDrawer({
             </p>
           )}
           <p className="text-sm leading-6 text-fg-muted">
-            填写 API Key 和请求地址，读取模型后选择使用。无需先选厂商。
+            填写 API Key 和请求地址，读取模型后选择使用。无需先选厂商。供应商需兼容 OpenAI
+            接口：文本走 Chat Completions，出图走 Images；只提供 Responses 等其他接口的模型暂不支持。
           </p>
           <label className="flex flex-col gap-1 text-xs text-fg">
             API 请求地址

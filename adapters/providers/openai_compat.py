@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import re
+
 import httpx
 
 from adapters.providers import endpoint_url
@@ -26,7 +28,6 @@ from adapters.providers.base import (
     signal_key_source,
     usage_of,
 )
-from adapters.providers.deepseek import _raise_for_status
 from apps.api.core.errors import AppError
 
 PROVIDER_ID = "provider.org"
@@ -100,7 +101,7 @@ class OpenAICompatTextProvider:
             raise AppError("provider.unavailable", message=f"自定义端点连不上：{exc}") from exc
 
         refuse_redirect(resp)
-        _raise_for_status(resp)
+        raise_for_upstream(resp, model_id=self.model_id)
         try:
             payload = resp.json()
         except ValueError as exc:
@@ -129,6 +130,11 @@ class OpenAICompatTextProvider:
 
         只确认"地址通、Key 被接受"。返回的模型列表**只用来提示**用户填的
         模型 id 在不在里面，不据此改变任何调用行为（§5.2 第 4 条）。
+
+        **它验证不了正式生成。** 真实踩过：中转对 `GET /v1/models` 鉴权通过、列出了
+        这个模型，`POST /v1/chat/completions` 却回 404——模型只挂在别的接口上。
+        所以结论里一律写明"生成接口未试调用、以第一次生成为准"（前端据此画成中性，
+        不画成"连接正常"）；免费地验证生成接口没有办法，发一次最小生成就要花用户的钱。
         """
         self._signal_call()
         await endpoint_url.assert_public_host(self._base_url)
@@ -141,7 +147,7 @@ class OpenAICompatTextProvider:
             raise AppError("provider.unavailable", message=f"自定义端点连不上：{exc}") from exc
 
         refuse_redirect(resp)
-        _raise_for_status(resp)
+        raise_for_upstream(resp, model_id=self.model_id)
         try:
             listed = [
                 str(item.get("id"))
@@ -151,10 +157,82 @@ class OpenAICompatTextProvider:
         except (ValueError, AttributeError):
             listed = []
         if not listed:
-            return "鉴权通过；端点没有列出模型，请确认模型 ID 拼写"
-        if self.model_id in listed:
-            return f"鉴权通过，端点列出了 {len(listed)} 个模型，包含 {self.model_id}"
-        return f"鉴权通过，但端点列出的 {len(listed)} 个模型里没有 {self.model_id}，请核对模型 ID"
+            head = "模型列表接口鉴权通过；端点没有列出模型，请确认模型 ID 拼写"
+        elif self.model_id in listed:
+            head = f"模型列表接口鉴权通过，列表（{len(listed)} 个）里有 {self.model_id}"
+        else:
+            head = (
+                f"模型列表接口鉴权通过，但列表（{len(listed)} 个）里没有 {self.model_id}，"
+                "请核对模型 ID"
+            )
+        return f"{head}。{GENERATION_UNVERIFIED}"
+
+
+# 测试连接只读了模型列表。这句话的"以第一次"是前端 `classifyTest` 判中性的依据，改措辞要同步。
+GENERATION_UNVERIFIED = (
+    "只读取了模型列表（GET /models，不发生成请求），没有试调用生成接口 "
+    "POST /chat/completions；该模型能否用这个接口生成，以第一次生成为准"
+)
+
+# 上游错误体里的 `error.code` / `error.type` 只收这种形状的短码，其余一律不进 detail
+_UPSTREAM_CODE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+
+
+def _upstream_error_code(resp: httpx.Response) -> str | None:
+    try:
+        payload = resp.json()
+    except ValueError:
+        return None
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return None
+    for key in ("code", "type"):
+        value = error.get(key)
+        if isinstance(value, str) and _UPSTREAM_CODE.match(value):
+            return value
+    return None
+
+
+def failure_detail(resp: httpx.Response, *, model_id: str) -> dict[str, object]:
+    """一次失败调用里能帮用户找到"哪里不匹配"的事实：状态码、实际调的接口、上游自己的错误码。
+
+    Gateway 出口（`service._as_byok_error`）按它们分出 `detail.reason`。真实踩过：
+    中转回 404 被包成"你的 API Key 调用失败"，用户去换了一把本来没问题的 Key。
+    接口只记方法 + 路径（看得出 `/v1/v1` 这类拼接错误），不记主机；正文原文仍只在
+    message 里，由出口统一脱敏。
+    """
+    detail: dict[str, object] = {"http_status": resp.status_code, "model_id": model_id}
+    try:
+        request = resp.request
+    except RuntimeError:  # 测试里直接构造的 Response 没有 request
+        request = None
+    if request is not None:
+        detail["operation"] = f"{request.method} {request.url.path}"
+    code = _upstream_error_code(resp)
+    if code is not None:
+        detail["upstream_error_code"] = code
+    return detail
+
+
+def raise_for_upstream(resp: httpx.Response, *, model_id: str) -> None:
+    """状态码 → 错误目录，分法与 DeepSeek 适配器相同，另带 :func:`failure_detail`。"""
+    if resp.status_code == 200:
+        return
+    text = resp.text[:300]
+    detail = failure_detail(resp, model_id=model_id)
+    if resp.status_code == 429:
+        raise AppError("provider.rate_limit.exceeded", message=text, detail=detail)
+    if resp.status_code in (401, 402, 403):
+        raise AppError(
+            "provider.account.insufficient",
+            message=f"auth failed (HTTP {resp.status_code}): {text}",
+            detail=detail,
+        )
+    if resp.status_code in (400, 422):
+        raise AppError("provider.params.invalid", message=text, detail=detail)
+    raise AppError(
+        "provider.unavailable", message=f"HTTP {resp.status_code}: {text}", detail=detail
+    )
 
 
 def refuse_redirect(resp: httpx.Response) -> None:
@@ -166,4 +244,5 @@ def refuse_redirect(resp: httpx.Response) -> None:
             message=(
                 f"自定义端点返回了跳转（HTTP {resp.status_code}），出于安全不跟随，请填写最终地址"
             ),
+            detail={"http_status": resp.status_code},
         )

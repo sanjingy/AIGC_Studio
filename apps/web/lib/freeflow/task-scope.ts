@@ -180,7 +180,7 @@ const FAIL_REASON: Record<string, string> = {
   "provider.unavailable": "上游服务不可用",
   "provider.not_configured": "还没有可用的模型，去模型库添加供应商并设为默认",
   "provider.account.insufficient": "平台在上游的账户额度不足，这笔费用全额退回",
-  "provider.byok.rejected": "你自己配置的 API Key 调用失败，去模型库测试连接或更换",
+  "provider.byok.rejected": "你自己配置的模型供应商调用失败，去「模型」页查看原因或改选",
   "provider.params.invalid": "生成参数不被这个模型支持",
   "provider.content.rejected": "内容被上游安全策略拦下，改一下描述再生成",
   "quality.below_threshold": "画面质量不达标，判为废片",

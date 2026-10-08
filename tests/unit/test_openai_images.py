@@ -266,7 +266,10 @@ def test_constructor_refuses_unsafe_base_url(base_url: str) -> None:
 
 async def test_verify_key_lists_models_and_tolerates_404() -> None:
     seen, handler = _recording([httpx.Response(200, json={"data": []})])
-    assert await _provider(handler).verify_key() == "鉴权通过"
+    message = await _provider(handler).verify_key()
+    assert message.startswith("模型列表接口鉴权通过")
+    assert "不计费" not in message
+    assert "以第一次出图为准" in message
     (req,) = seen
     assert (req.method, str(req.url)) == ("GET", f"{BASE}/models")
 

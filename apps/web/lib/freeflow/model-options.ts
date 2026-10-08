@@ -18,7 +18,7 @@ export function mergeModelOptions(
 
 export function normalizeApiAddress(raw: string): string {
   const address = raw.trim().replace(/\/+$/, "");
-  const base = address.replace(/\/(chat\/completions|images\/generations|models)$/, "");
+  const base = address.replace(/\/(chat\/completions|images\/generations|responses|models)$/, "");
   try {
     const url = new URL(base);
     return !url.pathname || url.pathname === "/" ? `${base}/v1` : base;

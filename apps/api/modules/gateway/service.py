@@ -699,12 +699,56 @@ def _as_byok_error(exc: AppError, resolution: Resolution) -> AppError:
     """
     if exc.code == "provider.byok.rejected":
         return exc
+    upstream = exc.detail
+    status = upstream.get("http_status")
+    detail: dict[str, Any] = {
+        "capability": resolution.capability,
+        "upstream_code": exc.code,
+        "key_source": KeySource.ORG.value,
+        "reason": _upstream_reason(exc.code, status if isinstance(status, int) else None, upstream),
+    }
+    if len(resolution.routes) == 1:
+        detail["provider_id"] = resolution.routes[0].provider_id
+        detail["model_id"] = resolution.routes[0].model_id
+    for key in ("http_status", "operation", "model_id", "upstream_error_code"):
+        value = upstream.get(key)
+        if isinstance(value, int) or (isinstance(value, str) and value):
+            detail[key] = (
+                value if isinstance(value, int) else probe.redact(value, resolution.secret)
+            )
     return AppError(
         "provider.byok.rejected",
         message=probe.redact(exc.message, resolution.secret),
-        detail={
-            "capability": resolution.capability,
-            "upstream_code": exc.code,
-            "key_source": KeySource.ORG.value,
-        },
+        detail=detail,
     )
+
+
+def _upstream_reason(code: str, status: int | None, upstream: dict[str, Any]) -> str:
+    """用户自带的上游失败了，失败在哪一层（`detail.reason`，前端据此给出具体建议）。
+
+    只有 401 / 403 才说"Key 被拒"。404 单独一类：真实踩过，中转对 `GET /models`
+    鉴权通过并列出了模型，`POST /chat/completions` 却回 404，被说成 Key 错，
+    用户去换了一把本来没问题的 Key。404 再按上游自己的错误码分出"模型不存在"，
+    分不出来就如实说"接口或模型在这个地址上不存在"，不猜是哪一个。
+    """
+    if status in (401, 403):
+        return "upstream_auth_rejected"
+    if status == 402:
+        return "upstream_quota_exhausted"
+    if status == 404:
+        error_code = str(upstream.get("upstream_error_code") or "").lower()
+        return "upstream_model_not_found" if "model" in error_code else "upstream_not_found"
+    if status is not None and 300 <= status < 400:
+        return "upstream_redirect"
+    if code == "provider.rate_limit.exceeded":
+        return "upstream_rate_limited"
+    if code == "provider.content.rejected":
+        return "upstream_content_rejected"
+    if code == "provider.transient.timeout":
+        return "upstream_timeout"
+    if code == "provider.account.insufficient":
+        return "upstream_auth_rejected"
+    if code == "provider.params.invalid":
+        # 有状态码是上游回了 400 / 422；没有是请求根本没发出去（地址解析到了内网）
+        return "upstream_request_rejected" if status is not None else "upstream_address_rejected"
+    return "upstream_unavailable"

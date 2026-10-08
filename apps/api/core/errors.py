@@ -118,9 +118,11 @@ ERRORS: dict[str, ErrorSpec] = {
         # 不 failover：能换的另一家用户根本没配 Key，换过去要么无 Key 可用，
         # 要么就是拿平台 Key 顶上——而计费此刻已经按 BYOK 折扣算了，
         # 顶上去等于平台掏钱买单，正是 ADR-027 要堵的那个洞。
+        # 文案不说"Key 错了"：上游 404（接口 / 模型不匹配）也走这条，说成 Key 错
+        # 会让用户去换一把本来没问题的 Key。失败在哪一层看 `detail.reason`。
         "provider.byok.rejected",
         502,
-        "你为该能力配置的 API Key 调用失败，请到设置页测试连接、更换或移除它",
+        "你自己配置的模型供应商调用失败，请到「模型」页查看原因、测试连接或改选",
         failover=False,
         disposition=Disposition.RELEASE,
     ),
