@@ -219,7 +219,51 @@ export function currentDefaultText(item: CapabilityConfig): string {
     const model = sel.model_id ?? p?.models[0]?.model_id ?? "第一个模型";
     return p ? `供应商 ${p.label} · ${model}` : `已删除的供应商 · ${model}`;
   }
-  return `平台 ${p?.label ?? sel.provider_id} · ${sel.model_id ?? "目录默认顺序"} · ${sel.key_source === "org" ? "我的 Key" : "平台额度"}`;
+  const label = p?.label ?? sel.provider_id;
+  return `平台 ${label} · ${sel.model_id ?? "目录默认顺序"} · ${sel.key_source === "org" ? `我的 ${label} 官方 Key` : "平台额度"}`;
+}
+
+// ---------------------------------------------------------------- 平台行的计费来源
+
+export type BillingChoice = {
+  label: string;
+  disabled: boolean;
+  /** 为什么点不了；可点时为 null。界面要把它写出来，不能只给一个灰掉的圆点 */
+  reason: string | null;
+};
+
+/**
+ * 平台目录行里两个计费来源的文案与可用性。
+ *
+ * 「自有」这一项指的是**平台目录里这家的官方 Key**（`provider_credentials`，按能力 +
+ * provider 存一把），不是用户在「供应商」里添加的连接——连接在「我的供应商」里单独设为默认。
+ * 两者名字都像"我的 Key"，用户添加了连接后会以为这个灰掉的圆点就是它，所以标签必须
+ * 带上供应商名和「官方」，禁用原因要写明它和连接是两回事。
+ *
+ * 禁用规则不放宽：没存这家的官方 Key 就不能选它计费（后端会拒）。
+ */
+export function billingChoices(
+  item: Pick<CapabilityConfig, "configurable">,
+  provider: { label: string; supports_platform_key: boolean },
+  hasOwnKey: boolean,
+): { platform: BillingChoice; own: BillingChoice } {
+  const locked = !item.configurable ? "当前 Skill 不允许改这个能力的上游" : null;
+  return {
+    platform: {
+      label: "平台额度",
+      disabled: Boolean(locked) || !provider.supports_platform_key,
+      reason: locked ?? (provider.supports_platform_key ? null : `平台没有提供 ${provider.label} 的额度`),
+    },
+    own: {
+      label: `我的 ${provider.label} 官方 Key`,
+      disabled: Boolean(locked) || !hasOwnKey,
+      reason:
+        locked ??
+        (hasOwnKey
+          ? null
+          : `还没保存 ${provider.label} 官方 Key，先点「配置 ${provider.label} Key」。在「供应商」里添加的连接不算，它在下方「我的供应商」里设为默认`),
+    },
+  };
 }
 
 // ---------------------------------------------------------------- 表单草稿

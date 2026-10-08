@@ -47,6 +47,7 @@ import type { ProjectState } from "@/lib/freeflow/use-project-state";
 import { PlanGate } from "./plan-gate";
 import { AdvanceAction, GateActions } from "./production-actions";
 import { RevisePanel } from "./revise-panel";
+import { StorySourcePanel } from "./story-source-panel";
 
 /**
  * 故事 / 剧本工作台（Reelbench P2A 样板）。
@@ -379,18 +380,21 @@ export function StoryWorkspace({
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1480px] flex-col gap-4 px-4 pt-4 pb-6 lg:px-6">
           {nothingYet ? (
-            <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4">
-              <div className="rf-empty-state rounded-[2px] border border-dashed border-border-strong px-6 py-8 text-center">
-                <span className="rf-empty-icon">
-                  <StoryIcon aria-hidden className="size-7" />
+            <div className="mx-auto flex w-full max-w-[820px] flex-col gap-4">
+              <header className="flex items-start gap-3">
+                <span className="rf-empty-icon mt-0.5 shrink-0">
+                  <StoryIcon aria-hidden className="size-6" />
                 </span>
-                <h2 className="mt-3 text-sm font-semibold text-fg">还没有故事产出</h2>
-                <p className="mt-1 text-sm leading-6 text-fg-subtle">
-                  给一段小说原文或一句创意，然后推进生产：编排器会依次跑路线判断、情节目录，
-                  停在「开拍前确认」这道门上——在那里定画风、时代背景与改编模式，然后才跑剧本。
-                </p>
-              </div>
-              <AdvanceAction state={state} />
+                <div className="min-w-0">
+                  <h1 className="ff-display text-2xl text-fg">故事</h1>
+                  <p className="mt-1 text-sm leading-6 text-fg-subtle">
+                    {state.savedSource.trim()
+                      ? "原文已经在项目里，还没有情节目录。确认原文无误后开始生产；开始之前都可以替换。"
+                      : "还没有故事原文。先粘贴或导入小说原文、一句创意，保存到项目，再开始生产。"}
+                  </p>
+                </div>
+              </header>
+              <StorySourcePanel projectId={projectId} state={state} onDirtyChange={setDirty} />
             </div>
           ) : effective.kind === "story" ? (
             <>
@@ -409,6 +413,8 @@ export function StoryWorkspace({
               {state.pendingGate === "plan" && <PlanGate projectId={projectId} state={state} />}
 
               {!state.pendingGate && <AdvanceAction state={state} />}
+
+              {state.savedSource.trim() && <SourceReadOnly text={state.savedSource} />}
 
               {plotIndex ? (
                 /* id 保留：门① 那句「全部 N 条就在下面」以及阶段条的旧链接都落在这里 */
@@ -712,6 +718,28 @@ function ReadOnlyChip({ label, value }: { label: string; value: string }) {
       <span className="text-fg-subtle">{label}</span>
       <span className="tnum text-fg-muted">{value}</span>
     </span>
+  );
+}
+
+/** 已有产出之后的原文：只读、默认收起。改内容走返工，原文本身不能再换（后端 409）。 */
+function SourceReadOnly({ text }: { text: string }) {
+  const chars = Array.from(text.trim()).length;
+  return (
+    <details className="group rounded-[2px] border border-border bg-surface">
+      <summary className="flex cursor-pointer list-none items-baseline justify-between gap-3 px-4 py-2.5 text-sm font-semibold text-fg">
+        <span>故事原文</span>
+        <span className="tnum text-xs font-normal text-fg-subtle">
+          {chars.toLocaleString("zh-CN")} 字 · 只读 · <span className="group-open:hidden">展开</span>
+          <span className="hidden group-open:inline">收起</span>
+        </span>
+      </summary>
+      <p className="max-h-96 overflow-y-auto border-t border-border px-4 py-3 text-sm leading-7 whitespace-pre-wrap text-fg-muted">
+        {text}
+      </p>
+      <p className="border-t border-border px-4 py-2 text-xs text-fg-subtle">
+        已有生产产出，原文不能直接替换，否则产出会和原文对不上。要改内容，用下方的返工。
+      </p>
+    </details>
   );
 }
 

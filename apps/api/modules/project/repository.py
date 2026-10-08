@@ -46,6 +46,21 @@ async def get(db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID) -> 
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+async def get_for_update(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID
+) -> Project | None:
+    """同 `get`，但对这一行加 `SELECT ... FOR UPDATE`，锁到本事务提交。"""
+    # populate_existing：同一会话里先 `get` 过这一行时，身份映射里那份是加锁前读的，
+    # 不覆盖就会拿着旧值做判断，锁等于白加
+    stmt = (
+        _scoped(org_id)
+        .where(Project.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
 async def list_page(
     db: AsyncSession,
     *,

@@ -54,6 +54,18 @@ async def get_project(db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.U
     return row
 
 
+async def lock_project(db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID) -> Project:
+    """取项目并锁住这一行，直到调用方提交。取不到同样 404（规则见 `get_project`）。
+
+    给"读状态 → 判断 → 整份写回"这类写路径用：两个并发请求各自读到旧状态
+    再各自写回，后提交的那个会把先提交的改动整份覆盖掉。
+    """
+    row = await repo.get_for_update(db, org_id=org_id, project_id=project_id)
+    if row is None:
+        raise AppError("common.not_found", message=f"project {project_id}")
+    return row
+
+
 async def list_projects(
     db: AsyncSession,
     *,

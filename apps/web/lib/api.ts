@@ -459,6 +459,15 @@ export type TaskPage = { items: Task[]; next_cursor: string | null };
  *
  * `stage` 由后端算好（含旧阶段名翻译），前端不再从 `agent_runs` 反推。
  */
+export type SourceSaved = {
+  source: string;
+  chars: number;
+  /** 原文变了且 Router 已经跑过时，后端会退回 routing */
+  stage: Stage;
+  /** false = 与已保存的一字不差，没有写库 */
+  changed: boolean;
+};
+
 export type ProjectStateSnapshot = {
   project_id: string;
   stage: Stage;
@@ -633,6 +642,19 @@ export const projects = {
   /** 软删除——后端早就有这条路由（`repo.soft_delete`，`deleted_at` 打时间戳，
    *  列表查询已经在过滤），只是这层封装一直没补。 */
   remove: (id: string) => apiFetch<void>(`/projects/${id}`, { method: "DELETE" }),
+
+  /**
+   * 只保存故事原文（`current_state_json.source`）。**一分钱不花**：不调模型、
+   * 不建任务。PUT：同一份原文点几次结果一样（`changed: false`）。
+   *
+   * 后端拒绝三种情况：空白 / 超过 2 万字 422（不截断）；已有阶段产出或待处理的门
+   * 409 `agent.source.locked`；正在生成 409 `agent.source.busy`。
+   */
+  putSource: (id: string, text: string) =>
+    apiFetch<SourceSaved>(`/projects/${id}/source`, {
+      method: "PUT",
+      body: JSON.stringify({ text }),
+    }),
 
   /** 推进到下一个审核门。真实 LLM 调用，会花 Credits。 */
   advance: (id: string, userInput: string) =>

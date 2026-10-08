@@ -4,11 +4,36 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class AdvanceIn(BaseModel):
     user_input: str = Field(default="", max_length=20_000)
+
+
+class SourceIn(BaseModel):
+    """故事原文。与 `AdvanceIn.user_input` 同一个上限，但**超长报错、不截断**：
+    `advance` 截断是历史行为，这里是用户主动保存，悄悄丢掉后半本小说
+    用户要到产出对不上才会发现。"""
+
+    text: str = Field(max_length=20_000)
+
+    @field_validator("text")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        text = v.strip()
+        if not text:
+            raise ValueError("原文不能为空")
+        return text
+
+
+class SourceOut(BaseModel):
+    source: str
+    chars: int
+    #: 保存后的阶段。原文变了且 Router 已经跑过时会退回 routing
+    stage: str
+    #: false = 与已保存的原文一字不差，没有写库
+    changed: bool
 
 
 class AdvanceOut(BaseModel):

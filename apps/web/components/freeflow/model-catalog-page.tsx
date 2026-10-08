@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, CircleAlert, Eye, EyeOff, Loader2, Plus, Trash2, X } from "lucide-react";
+import { Check, CircleAlert, Eye, EyeOff, KeyRound, Loader2, Plus, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogCloseButton } from "@/components/ui/dialog";
@@ -19,6 +19,7 @@ import {
   type ProviderPreset,
 } from "@/lib/api";
 import {
+  billingChoices,
   brokenReasonText,
   classifyTest,
   createBody,
@@ -286,8 +287,14 @@ function DefaultSection({
 
       {item.supports_org_connections && (
         <>
-          <div className="ff-ledger-row py-2 text-[11px] font-medium text-fg-subtle hover:bg-transparent">
-            我的供应商
+          {/* 分段小标题不用 `.ff-ledger-row`：studio.css 不在 Tailwind 的 layer 里，它的
+              `align-items: center` 会压过 `items-start`，竖排之后标题被挤到正中 */}
+          <div className="flex flex-col items-start gap-0.5 border-b border-border px-4 py-2 text-left">
+            <span className="text-[11px] font-medium text-fg-subtle">我的供应商</span>
+            <span className="text-xs leading-5 text-fg-subtle">
+              你在上方「供应商」里添加的连接在这里选：点「设为默认」后{item.label}就按这个连接的 Key 调用。
+              和上面平台行里的「官方 Key」是两回事，不用另外配置。
+            </span>
           </div>
           {orgRows.length === 0 && (
             <p className="ff-ledger-empty px-4 py-3 text-xs text-fg-subtle">
@@ -311,7 +318,7 @@ function DefaultSection({
                 </span>
               </div>
               {r.current ? (
-                <span className="text-xs font-medium text-primary">当前默认</span>
+                <CurrentBadge />
               ) : (
                 <Button
                   size="sm"
@@ -367,6 +374,7 @@ function CatalogRow({
   const [keyOpen, setKeyOpen] = useState(false);
   const credential = item.credentials.find((c) => c.provider_id === provider.provider_id) ?? null;
   const hasOwnKey = Boolean(credential?.configured);
+  const billing = billingChoices(item, provider, hasOwnKey);
 
   useEffect(() => {
     setModelId(savedModel);
@@ -404,29 +412,37 @@ function CatalogRow({
                 </option>
               ))}
             </select>
-            <div role="radiogroup" aria-label={`${provider.label} 计费来源`} className="flex items-center gap-3">
-              <label className="flex items-center gap-1.5 text-xs">
-                <input
-                  type="radio"
-                  name={`bill-${item.capability}-${provider.provider_id}`}
-                  checked={keySource === "platform"}
-                  disabled={!item.configurable || !provider.supports_platform_key}
-                  onChange={() => setKeySource("platform")}
-                />
-                平台额度
-              </label>
-              <label className={cn("flex items-center gap-1.5 text-xs", !hasOwnKey && "opacity-50")}>
-                <input
-                  type="radio"
-                  name={`bill-${item.capability}-${provider.provider_id}`}
-                  checked={keySource === "org"}
-                  disabled={!item.configurable || !hasOwnKey}
-                  onChange={() => setKeySource("org")}
-                />
-                我的 Key
-              </label>
+            <div role="radiogroup" aria-label={`${provider.label} 计费来源`} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {(["platform", "own"] as const).map((which) => {
+                const choice = billing[which];
+                const value = which === "platform" ? "platform" : "org";
+                return (
+                  <label
+                    key={which}
+                    className={cn("flex items-center gap-1.5 text-xs", choice.disabled ? "cursor-not-allowed text-fg-subtle" : "cursor-pointer")}
+                    title={choice.reason ?? undefined}
+                  >
+                    <input
+                      type="radio"
+                      name={`bill-${item.capability}-${provider.provider_id}`}
+                      checked={keySource === value}
+                      disabled={choice.disabled}
+                      aria-describedby={item.configurable && choice.reason ? `${id}-${which}-why` : undefined}
+                      onChange={() => setKeySource(value)}
+                    />
+                    {choice.label}
+                  </label>
+                );
+              })}
             </div>
           </div>
+          {/* Skill 锁住时整段上方已有一句说明，这里只写各自的原因 */}
+          {item.configurable && (billing.platform.reason || billing.own.reason) && (
+            <p className="flex flex-col text-xs leading-5 text-fg-subtle">
+              {billing.platform.reason && <span id={`${id}-platform-why`}>{billing.platform.reason}。</span>}
+              {billing.own.reason && <span id={`${id}-own-why`}>{billing.own.reason}。</span>}
+            </p>
+          )}
           {modelId && (
             <span className="text-xs leading-5 text-fg-subtle">
               {provider.models.find((m) => m.model_id === modelId)?.note}
@@ -434,19 +450,20 @@ function CatalogRow({
           )}
           <span className="flex flex-wrap items-center gap-2 text-xs text-fg-subtle">
             <span>
-              {provider.label} 密钥：
+              {provider.label} 官方 Key：
               <span className="code" data-testid={`masked-${item.capability}`}>
                 {hasOwnKey ? (credential?.masked_key ?? "已保存") : "未配置"}
               </span>
             </span>
-            <button
-              type="button"
-              className="cursor-pointer text-primary underline-offset-2 hover:underline"
+            <Button
+              size="sm"
+              variant={hasOwnKey ? "ghost" : undefined}
               aria-expanded={keyOpen}
               onClick={() => setKeyOpen((v) => !v)}
             >
-              {hasOwnKey ? "更换" : "配置"}
-            </button>
+              <KeyRound aria-hidden className="size-3.5" />
+              {hasOwnKey ? `更换 ${provider.label} Key` : `配置 ${provider.label} Key`}
+            </Button>
             {hasOwnKey && (
               <button
                 type="button"
@@ -462,7 +479,7 @@ function CatalogRow({
           </span>
         </div>
         {current && !dirty ? (
-          <span className="text-xs font-medium text-primary">当前默认</span>
+          <CurrentBadge />
         ) : (
           <Button
             size="sm"
@@ -488,12 +505,22 @@ function CatalogRow({
           providerLabel={provider.label}
           onSaved={() => {
             setKeyOpen(false);
-            onKeyChanged(`${provider.label} 的密钥已保存。选「我的 Key」并设为默认后才会用它计费`);
+            onKeyChanged(`${provider.label} 官方 Key 已保存。选「我的 ${provider.label} 官方 Key」并设为默认后才会用它计费`);
           }}
           onCancel={() => setKeyOpen(false)}
         />
       )}
     </>
+  );
+}
+
+/** 已选中的那一行。比一行灰字醒目：用户要一眼看出「现在用的是哪一家」 */
+function CurrentBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-[2px] bg-primary-soft px-2 py-1 text-xs font-medium text-primary">
+      <Check aria-hidden className="size-3.5" />
+      已选为默认
+    </span>
   );
 }
 
@@ -1427,7 +1454,7 @@ function KeyForm({
         </button>
       </div>
       <p className="text-xs leading-5 text-fg-subtle">
-        保存 Key 不等于改用它计费——选「我的 Key」并设为默认后，{capabilityLabel}才会走你自己的账号。
+        保存 Key 不等于改用它计费——选「我的 {providerLabel} 官方 Key」并设为默认后，{capabilityLabel}才会走你自己的账号。
       </p>
       {result && <TestResultLine result={result} />}
       {error && (

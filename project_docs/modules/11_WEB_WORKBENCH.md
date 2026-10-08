@@ -39,6 +39,27 @@ BGM、转场、剪映导出都在"明确不做（M2 内）"里。任何在界面
 
 ---
 
+### 2026-10-08 故事原文与模型选择（USER_FLOW_REPAIR，已实现、未提交）
+
+- **故事页原文面板**（`components/freeflow/project/story-source-panel.tsx`，逻辑在
+  `lib/freeflow/story-source.ts`）：粘贴或导入 .txt / .md（react-dropzone，只在浏览器读成
+  文字、不上传；UTF-8 / BOM / UTF-16 / GB18030 解码，docx、二进制、空文件、>1 MB 给原因），
+  「保存原文」走免费的 `PUT /projects/{id}/source`（契约见模块 03 §7.1），「开始生产」
+  需原文已保存且无未保存修改、二次确认写明扣 Credits。本地草稿按「账号 + 项目」存
+  localStorage，读写全 try/catch；未保存时拦站内离开与整页离开。有阶段产出后原文只读。
+- **保存成功后的状态**：`useProjectState.saveSource` 先用 PUT 的返回值更新本地快照
+  （`applySavedSource`），再以 `reload({ requireState: true })` 重拉。重拉失败不吞：
+  面板显示「原文已经保存，但刷新项目状态失败」+「重新加载」，已保存的原文与"已保存"
+  状态照常显示，不会残留"有未保存的修改"。
+- **首页**：「只创建项目」create 后原文非空即 PUT；「开始生产」失败后重试先 PUT 当前原文
+  再 advance（advance 不改写已保存原文，见 `agent.source.conflict`），不再建第二个项目。
+- **推进入口**：`needsSource` 与后端同判据（state 在 routing 且无 source）；无原文时
+  不给推进，只给「去故事页填写原文」。界面上的「补充说明」假入口已删。
+- **模型页**：平台行自有计费项写作「我的 {供应商} 官方 Key」，禁用时写明原因并以
+  `aria-describedby` 关联；「我的供应商」分段说明连接的 Key 与官方 Key 是两回事；
+  当前默认显示「✓ 已选为默认」徽章。分段小标题不用 `.ff-ledger-row`——`studio.css`
+  不在 Tailwind layer 内，它的 `align-items: center` 会压过工具类。
+
 ## 2. 用户与使用场景
 
 用户是外部创作者，桌面浏览器，1440 / 1920 两档为主。

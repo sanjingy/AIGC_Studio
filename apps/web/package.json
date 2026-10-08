@@ -18,7 +18,8 @@
     "lucide-react": "^0.469.0",
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.6.0",
-    "@xyflow/react": "^12.11.3"
+    "@xyflow/react": "^12.11.3",
+    "react-dropzone": "^20.1.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

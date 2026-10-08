@@ -58,6 +58,23 @@ async def finish_run(
     run.finished_at = datetime.now(UTC)
 
 
+async def supersede_run(db: AsyncSession, *, org_id: uuid.UUID, run_id: uuid.UUID) -> None:
+    """模型跑完时原文或进度已被换掉：这次运行作废。**不 commit。**
+
+    标成 failed 并摘掉 `output_json`——前端在 state 缺某阶段产出时会退回
+    "该 Agent 最新一条带 output_json 的运行"，留着它，按旧原文生成的结果就会
+    以产出的身份出现在新原文下面。模型原始输出仍在 agent_steps，token 照记。
+    """
+    stmt = select(AgentRun).where(AgentRun.org_id == org_id, AgentRun.id == run_id)
+    run = (await db.execute(stmt)).scalar_one_or_none()
+    if run is None:
+        return
+    run.status = "failed"
+    run.output_json = None
+    run.error_code = "agent.run.superseded"
+    run.error_detail = "生成期间原文或进度被改动，结果未采用"
+
+
 async def add_step(
     db: AsyncSession,
     *,
@@ -235,6 +252,43 @@ async def get_pending(
         Approval.status == "pending",
     )
     return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def has_pending_approval(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID
+) -> bool:
+    """任何一道门在等人处理。"""
+    stmt = (
+        select(Approval.id)
+        .where(
+            Approval.org_id == org_id,
+            Approval.project_id == project_id,
+            Approval.status == "pending",
+        )
+        .limit(1)
+    )
+    return (await db.execute(stmt)).first() is not None
+
+
+async def has_running_run(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, since: datetime
+) -> bool:
+    """`since` 之后开始、还处在 running 的 Agent 运行。
+
+    只看最近开始的：进程被硬杀时 run 会永远停在 running（`runner` 的 except
+    来不及执行），不设时间窗，这个项目的原文就再也改不了。
+    """
+    stmt = (
+        select(AgentRun.id)
+        .where(
+            AgentRun.org_id == org_id,
+            AgentRun.project_id == project_id,
+            AgentRun.status == "running",
+            AgentRun.created_at >= since,
+        )
+        .limit(1)
+    )
+    return (await db.execute(stmt)).first() is not None
 
 
 async def get_approval(

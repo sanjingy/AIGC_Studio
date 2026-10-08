@@ -3,7 +3,7 @@
 > 状态：**部分实现**（结构化生成已实现；字段级编辑后端已实现但未提交、前端未接）
 > 优先级：P0
 > 负责人：待定
-> 最近核对：2026-09-02
+> 最近核对：2026-10-08（§7.1 故事原文保存）
 
 ## 0. 2026-09-05 新增的两条缺口（字段级编辑上线后暴露）
 
@@ -189,6 +189,64 @@ GET   /api/v1/projects/{project_id}/conversation
 前端落点在 `/freeflow` 下（ADR-030）：`story` / `screenplay` / `characters` / `scenes` /
 `storyboard` 五个页面。编辑用表单或表格，**不给用户裸 JSON 编辑器**——裸 JSON 会让用户
 以为可以加字段，而 schema 是 `extra="forbid"`。
+
+### 7.1 故事原文保存（2026-10-08 USER_FLOW_REPAIR，已实现、未提交）
+
+原文存在 `projects.current_state_json.source`，读取复用 `GET /projects/{id}/state`。
+写入有两条路，**只有第一条能换原文**：
+
+```text
+PUT  /api/v1/projects/{project_id}/source     {text}  → {source, chars, stage, changed}
+POST /api/v1/projects/{project_id}/advance    {user_input}（付费，只在原文为空时首次接纳）
+```
+
+`PUT /source`（模块 04 `orchestrator.replace_source`）：
+
+- **不花钱**：不建 AgentRun / Task、不预扣、不写账本；`SELECT … FOR UPDATE` 锁项目行。
+- 入参 strip 后为空 → 422；超过 20,000 字 → 422（**不截断**，`advance` 的截断是历史行为）。
+- 同一份原文 → 200 `changed=false`，不写库（幂等）。原文真变了且 Router 已经判过路线 →
+  删掉 `router`、退回 `routing`，下次推进按新原文重判。
+- 跨租户 404。
+
+`advance` 对原文的规则（在调用任何模型之前判定，被拒时零 AgentRun、零账本流水）：
+
+- 只在 `routing` 阶段看 `user_input`，带了原文就先锁项目行再读。
+- 原文为空 → 接纳这份 `user_input` 作为原文（首页「开始生产」的首次路径）。
+- 已有原文、带来的与之相同（首尾空白不计）→ 放行，原文不变。
+- 已有原文、带来的不同 → 409 `agent.source.conflict`。换原文只能走 `PUT /source`，
+  否则就绕过了它的锁定检查。
+- `routing` 阶段仍没有原文 → 422 `agent.source.required`（此前会拿空串调 Router、照样扣钱）。
+- 过了 `routing` 的 `user_input` 一律忽略并记 warning（此前会覆盖原文）。
+
+错误码（`apps/api/core/errors.py`，前四个发生在调用模型之前；除 busy 外不可重试）：
+
+| 码 | HTTP | 何时 |
+|---|---|---|
+| `agent.source.required` | 422 | routing 阶段没有原文就推进 |
+| `agent.source.locked` | 409 | `PUT /source` 时已有阶段产出（含旧格式 `story`/`visual`）或待处理的门；`detail.reason` = `has_output` / `pending_gate` |
+| `agent.source.busy` | 409，可重试 | `PUT /source` 时 15 分钟内开始的 Agent 运行仍在 running |
+| `agent.source.conflict` | 409 | `advance` 带来的原文与已保存的不同 |
+
+`advance` 与 `PUT /source` 交错（2026-10-09 opus55c 修）：
+
+- `advance` 每一步都先锁项目行再读状态，**一直锁到这一步的 AgentRun 落库**（`run_agent`
+  里那次提交，在模型调用之前），所以 `PUT /source` 要么在推进读状态之前完成，要么等到
+  运行已是 running、被判 409 `agent.source.busy`。行锁不跨模型调用。
+- 模型跑完的写回改为**条件写**（`orchestrator._commit_output`）：重新锁行读最新状态，
+  原文与 `stage` 都和调用前一致才把产出并进**最新**状态（不再整份写回调用前的旧 state）；
+  不一致就作废这次运行——`failed` + `agent.run.superseded`、摘掉 `output_json`
+  （前端在 state 缺产出时会退回读运行记录的 `output_json`），原始输出留在 `agent_steps`、
+  token 照记——新原文与状态原样不动，接口 409。
+- 计费：同步推进这条路不走账本（不预扣、不结算），作废不产生流水、无需退款；
+  但这次上游调用已经发生，平台 Key 下的上游成本照付，用量记在被作废的运行上。
+
+| 码 | HTTP | 何时 |
+|---|---|---|
+| `agent.run.superseded` | 409 | 模型跑完写回前发现原文或阶段已被换掉，结果作废 |
+
+残留：`busy` 依赖 15 分钟窗，被硬杀的运行过窗前会让 PUT 返回 busy；过窗后 PUT 能换原文，
+此时仍在跑的运行会在写回时被作废（上游费用白花，但不会丢稿、不会挂错产出）。
+测试：`tests/integration/test_story_source.py`（20 条，含两条用 Event 卡住交错点的并发用例）。
 
 ## 8. 技术选择与工程设计
 

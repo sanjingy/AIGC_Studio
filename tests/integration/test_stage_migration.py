@@ -46,6 +46,9 @@ ALL_STORED_STAGES: tuple[str, ...] = CURRENT_STAGES + LEGACY_STAGES
 # 一份"什么产出都有"的状态。把 stage 换成任意值就能模拟一个停在那一步的
 # 存量项目，而不必真的跑一遍流水线（跑一遍要十几秒，穷举十来个阶段就是几分钟）。
 FULL_OUTPUTS: dict[str, Any] = {
+    # 真实存量项目都有原文：`advance` 在跑 Router 之前就先存它。没有原文的
+    # routing 项目现在会被 422 拒掉（`agent.source.required`），那条另有用例。
+    "source": "被调职的刑警第一天到资料馆报到，馆长给了他一道观察力考题。",
     "router": {"route": "NOVEL_TO_ANIME", "estimated_shots": 12},
     "plot_index": {
         "genre": "悬疑",

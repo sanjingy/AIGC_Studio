@@ -3,7 +3,7 @@
 import { useEffect, useId, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ArrowRight, CirclePlus, Loader2, Play } from "lucide-react";
+import { ArrowRight, CircleCheck, CirclePlus, Loader2, Play, RotateCw } from "lucide-react";
 
 import { ModelSetupLink } from "@/components/freeflow/model-setup-link";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,8 @@ import {
   SOURCE_MAX,
   TITLE_MAX,
   charCount,
-  createOnlyWarning,
+  createOnlyNote,
+  createOnlyPlan,
   startAvailability,
   startPlan,
   type StartPhase,
@@ -29,7 +30,7 @@ const message = (cause: unknown, fallback: string) =>
 /**
  * 首页的创作输入。两个动作分开（规则见 `lib/freeflow/home-start.ts`）：
  *
- * - 「只创建项目」只发 `POST /projects`，原文不保存；
+ * - 「只创建项目」发 `POST /projects`，原文非空时再 `PUT /projects/{id}/source`（免费）；
  * - 「开始生产」先确认，再 create → advance，advance 会调用模型、扣 Credits。
  *
  * 原文在提交前只存在这一页，所以有内容时拦住整页离开和站内跳转。
@@ -46,15 +47,17 @@ export function StartComposer() {
   // 开始生产失败时的错误码。只用来判断"是不是没配模型"，文案仍走 `error`
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // 项目建好了、原文却没存上：主按钮换成「重试保存原文」，重试不再建项目
+  const [saveFailed, setSaveFailed] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
 
   const draft = { title, source, createdId, phase };
   const { createOnly, start } = startAvailability(draft);
-  const warning = createOnlyWarning(source);
+  const note = createOnlyNote(source);
   const chars = charCount(source.trim());
   const unsaved = source.trim() !== "" && !leaving;
-  // 建好了项目、advance 却失败：此时才换成「进入项目 / 重试」。生成进行中不给离开的入口。
+  // 建好了项目、advance 或保存原文却失败：此时才换成「进入项目 / 重试」。进行中不给离开的入口。
   const failedAfterCreate = createdId !== null && phase === "idle";
   // 没有可用模型：重试多少次都一样，主按钮换成「去模型库」，重试降为次要
   const noModel = failedAfterCreate && needsModelSetup(errorCode);
@@ -68,24 +71,47 @@ export function StartComposer() {
   }
 
   async function createOnlyNow() {
-    if (!createOnly.enabled) return;
+    if (!createOnly.enabled && !saveFailed) return;
     setError(null);
-    setPhase("creating");
-    try {
-      const project = await projects.create(title.trim());
-      go(project.id);
-    } catch (cause) {
-      setError(`创建项目失败：${message(cause, "请稍后重试")}`);
-      setPhase("idle");
+    setErrorCode(null);
+    const plan = createOnlyPlan({ createdId, source });
+    let projectId = createdId;
+    if (plan.create) {
+      setPhase("creating");
+      try {
+        projectId = (await projects.create(title.trim())).id;
+        setCreatedId(projectId);
+      } catch (cause) {
+        setError(`创建项目失败：${message(cause, "请稍后重试")}`);
+        setPhase("idle");
+        return;
+      }
     }
+    if (!projectId) return;
+    if (plan.saveSource) {
+      setPhase("saving");
+      try {
+        await projects.putSource(projectId, source.trim());
+      } catch (cause) {
+        setSaveFailed(true);
+        setError(
+          `项目已创建，但原文没有保存：${message(cause, "请检查网络")}。原文还在这里，点「重试保存原文」，不会再建一个项目。`,
+        );
+        setPhase("idle");
+        return;
+      }
+    }
+    go(projectId);
   }
 
   async function startNow() {
     setConfirming(false);
     setError(null);
     setErrorCode(null);
+    setSaveFailed(false);
     let projectId = createdId;
-    if (startPlan({ createdId }).create) {
+    const plan = startPlan({ createdId });
+    if (plan.create) {
       setPhase("creating");
       try {
         projectId = (await projects.create(title.trim())).id;
@@ -97,6 +123,16 @@ export function StartComposer() {
       }
     }
     if (!projectId) return;
+    if (plan.saveSource) {
+      setPhase("saving");
+      try {
+        await projects.putSource(projectId, source.trim());
+      } catch (cause) {
+        setError(`项目已创建，但原文没有更新，没有开始生产：${message(cause, "请检查网络")}。原文还在这里，可以重试或先进入项目。`);
+        setPhase("idle");
+        return;
+      }
+    }
     setPhase("advancing");
     try {
       await projects.advance(projectId, source.trim());
@@ -156,7 +192,7 @@ export function StartComposer() {
             className="min-h-32 resize-y rounded-md border border-border-strong bg-bg px-3 py-2 text-sm leading-6 text-fg placeholder:text-fg-subtle focus:border-primary disabled:opacity-70"
           />
           <p id={`${sourceId}-hint`} className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-xs text-fg-subtle">
-            <span>原文只在「开始生产」时提交；在那之前只留在这一页，离开或刷新就没了。</span>
+            <span>点「只创建项目」或「开始生产」时原文才保存进项目；在那之前只留在这一页，离开或刷新就没了。</span>
             <span className={cn("tnum", chars > SOURCE_MAX && "text-danger")}>
               {chars.toLocaleString("zh-CN")} / {SOURCE_MAX.toLocaleString("zh-CN")} 字
             </span>
@@ -174,7 +210,9 @@ export function StartComposer() {
             <Loader2 aria-hidden className="size-4 animate-spin" />
             {phase === "creating"
               ? "正在创建项目…"
-              : "项目已创建，正在生成路线判断和情节目录，可能需要一两分钟。请不要关闭页面。"}
+              : phase === "saving"
+                ? "项目已创建，正在保存原文…"
+                : "项目已创建，正在生成路线判断和情节目录，可能需要一两分钟。请不要关闭页面。"}
           </p>
         )}
 
@@ -182,40 +220,49 @@ export function StartComposer() {
           <div className="min-w-0 text-xs leading-5 text-fg-subtle">
             {noModel ? (
               <p>模型库在新标签页打开，这一页和原文都留着；配好模型后再重试，不会再建一个项目。</p>
+            ) : failedAfterCreate && saveFailed ? (
+              <p>项目已经建好，重试只会再保存一次原文，不会再建一个项目，也不调用模型。</p>
             ) : failedAfterCreate ? (
-              <p>项目已经建好，重试只会再次开始生产，不会再建一个项目。</p>
+              <p>项目已经建好，重试会先把这一页当前的原文存进项目（免费），再开始生产，不会再建一个项目。</p>
             ) : (
               <>
                 <p>
                   <strong className="font-medium text-fg-muted">只创建项目</strong>
-                  ：只保存项目名，不保存原文，也不调用模型。
+                  ：保存项目名和已填的原文，不调用模型、不扣 Credits。
                 </p>
                 <p>
                   <strong className="font-medium text-fg-muted">开始生产</strong>
                   ：创建项目并提交原文，会调用模型、扣 Credits，开始前会再确认一次。
                 </p>
-                {warning && (
-                  <p className="mt-1 flex items-start gap-1.5 text-running">
-                    <AlertTriangle aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-                    {warning}
+                {note && (
+                  <p className="mt-1 flex items-start gap-1.5 text-fg-muted">
+                    <CircleCheck aria-hidden className="mt-0.5 size-3.5 shrink-0 text-success" />
+                    {note}
                   </p>
                 )}
               </>
             )}
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
-            {failedAfterCreate ? (
+            {failedAfterCreate && (
               <Link href={`/freeflow/projects/${createdId}/overview`} className="ff-quiet-button">
                 进入项目
                 <ArrowRight aria-hidden className="size-4" />
               </Link>
-            ) : (
+            )}
+            {failedAfterCreate && saveFailed && (
+              <Button variant="primary" onClick={() => void createOnlyNow()}>
+                <RotateCw aria-hidden className="size-4" />
+                重试保存原文
+              </Button>
+            )}
+            {!failedAfterCreate && (
               <Button
                 disabled={!createOnly.enabled}
-                title={createOnly.reason ?? "只保存项目名，进入项目"}
+                title={createOnly.reason ?? "保存项目名和原文，不调用模型"}
                 onClick={() => void createOnlyNow()}
               >
-                {phase === "creating" && !confirming ? (
+                {(phase === "creating" || phase === "saving") && !confirming ? (
                   <Loader2 aria-hidden className="size-4 animate-spin" />
                 ) : (
                   <CirclePlus aria-hidden className="size-4" />
@@ -230,7 +277,7 @@ export function StartComposer() {
               onClick={() => setConfirming(true)}
             >
               <Play aria-hidden className="size-4" />
-              {createdId ? "重试开始生产" : "开始生产"}
+              {createdId && !saveFailed ? "重试开始生产" : "开始生产"}
             </Button>
             {noModel && <ModelSetupLink newTab />}
           </div>

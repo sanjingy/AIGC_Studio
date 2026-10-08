@@ -178,6 +178,42 @@ ERRORS: dict[str, ErrorSpec] = {
         "处理超出预期复杂度，请简化需求",
         disposition=Disposition.REFUND,
     ),
+    # 故事原文（`current_state_json.source`）。三个都发生在调用模型之前，
+    # 一分钱不花，所以没有处置语义可言（RELEASE 是默认值，没有预扣可释放）。
+    "agent.source.required": ErrorSpec(
+        # 没有原文就开始生产：Router 会拿一个空字符串去调模型、扣 Credits，
+        # 产出必然是编出来的。在调模型之前就拒掉。
+        "agent.source.required",
+        422,
+        "还没有故事原文，先粘贴或导入小说原文、创意，保存后再开始生产",
+    ),
+    "agent.source.locked": ErrorSpec(
+        # 已有情节目录等阶段产出或待处理的审核门：直接换原文会让已有产出
+        # 与原文对不上，而界面看不出来。要改走返工。
+        "agent.source.locked",
+        409,
+        "这个项目已经有生产产出或待确认的审核门，原文不能直接替换",
+    ),
+    "agent.source.conflict": ErrorSpec(
+        # 项目已经存了原文，推进时又带来一份不同的（多半是旧页面或另一个标签页）。
+        # 推进不改写已保存的原文——换原文只走 `PUT /source`，那里有锁定检查。
+        "agent.source.conflict",
+        409,
+        "项目里已经保存了另一份故事原文，开始生产不会改写它；要换原文请先在故事页保存",
+    ),
+    "agent.run.superseded": ErrorSpec(
+        # 模型跑完、写回前发现原文或进度已被换掉（`orchestrator._commit_output`）。
+        # 结果不采用，免得按旧原文生成的产出挂到新原文上。上游调用已经发生。
+        "agent.run.superseded",
+        409,
+        "生成期间项目原文或进度变了，这一步的结果已作废、没有写进项目，请按当前原文重新开始",
+    ),
+    "agent.source.busy": ErrorSpec(
+        "agent.source.busy",
+        409,
+        "这个项目正在生成，等这一步结束后再改原文",
+        retryable=True,
+    ),
     # --- 一致性引擎 ---
     "consistency.profile.missing": ErrorSpec(
         # 出图要拿一致性档案（角色资产包 / 场景资产包）和风格档案去合成提示词。

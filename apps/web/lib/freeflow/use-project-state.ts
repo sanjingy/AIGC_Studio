@@ -12,9 +12,11 @@ import {
   type Project,
   type ProjectStateSnapshot,
   type ReviseTarget,
+  type SourceSaved,
   type Stage,
 } from "@/lib/api";
 import { describeApiError } from "@/lib/freeflow/provider-scope";
+import { applySavedSource } from "@/lib/freeflow/story-source";
 
 /**
  * 阶段产出的**兜底**来源：`agent_runs.output_json`，按 agent_id 取最新一版。
@@ -98,7 +100,7 @@ export const GATE_REDO_ROLE: Record<GateName, ReviseTarget> = {
 
 export type OutputSet = Record<ReviseTarget, any>;
 
-export type ProjectAction = "advance" | "approve" | "reject" | "revise";
+export type ProjectAction = "advance" | "approve" | "reject" | "revise" | "source";
 
 function latestApproval(approvals: Approval[], gate: GateName): Approval | null {
   return (
@@ -172,12 +174,14 @@ export function useProjectState(projectId: string) {
   const [actionErrorCode, setActionErrorCode] = useState<string | null>(null);
   const [busy, setBusy] = useState<ProjectAction | null>(null);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (opts?: { requireState?: boolean }) => {
     const [p, st, r, a, c] = await Promise.all([
       projects.get(projectId),
       // 编排状态：阶段和阶段产出的权威来源。拿不到就退回从 agent_runs 倒推，
       // 不让整页空白——倒推出来的阶段在绝大多数情形下是对的。
-      projects.state(projectId).catch(() => null),
+      // `requireState`：调用方手里已有更新的快照（保存原文后），拿不到就报错，
+      // 不能拿 null 把它冲掉。
+      opts?.requireState === true ? projects.state(projectId) : projects.state(projectId).catch(() => null),
       projects.runs(projectId),
       projects.approvals(projectId),
       // 返工对话是加分项，拿不到不该让整页空白
@@ -249,6 +253,44 @@ export function useProjectState(projectId: string) {
       }
     },
     [reload],
+  );
+
+  /**
+   * 只保存故事原文（`PUT /projects/{id}/source`）。**不花钱**。
+   *
+   * 不走 `run`：失败要留在原文面板里就地显示（还要靠错误码区分"已锁定 / 正在生成"），
+   * 不该变成页面顶上那条通用的动作错误。
+   *
+   * 成功后先用 PUT 的返回值更新本地快照（`applySavedSource`），再重拉其余状态。
+   * 重拉失败不能吞掉：原文已经存上了，但别的部分可能是旧的——返回 `refreshed: false`
+   * 让面板明说，并给重试入口。
+   */
+  const saveSource = useCallback(
+    async (
+      text: string,
+    ): Promise<{ ok: true; refreshed: boolean } | { ok: false; message: string; code: string | null }> => {
+      setBusy("source");
+      try {
+        let saved: SourceSaved;
+        try {
+          saved = await projects.putSource(projectId, text);
+        } catch (cause) {
+          return cause instanceof ApiRequestError
+            ? { ok: false, message: describeApiError(cause.error), code: cause.error.code }
+            : { ok: false, message: "保存失败，请检查网络后重试", code: null };
+        }
+        setSnapshot((prev) => applySavedSource(prev, saved, projectId));
+        try {
+          await reload({ requireState: true });
+          return { ok: true, refreshed: true };
+        } catch {
+          return { ok: true, refreshed: false };
+        }
+      } finally {
+        setBusy(null);
+      }
+    },
+    [projectId, reload],
   );
 
   /**
@@ -338,6 +380,10 @@ export function useProjectState(projectId: string) {
     [snapshot, reload],
   );
 
+  const savedSource =
+    typeof snapshot?.current_state_json?.source === "string" ? snapshot.current_state_json.source : "";
+  const hasOutput = ROLE_ORDER.some((role) => Boolean(output[role]));
+
   return {
     project,
     runs,
@@ -348,8 +394,18 @@ export function useProjectState(projectId: string) {
     stageLabel: STAGE_LABEL[stage],
     pendingApproval,
     pendingGate: (pendingApproval?.gate as GateName | undefined) ?? null,
-    /** 还没跑过任何一步：这时 `advance` 需要用户先给原始素材。 */
-    needsSource: runs.length === 0,
+    /**
+     * 还没有故事原文、又停在 routing：这时推进会被后端 422 拒掉（`agent.source.required`）。
+     * 与后端同一条判据；state 接口没取到时退回旧的倒推（一步没跑过）。
+     */
+    needsSource: snapshot ? stage === "routing" && !savedSource.trim() : runs.length === 0,
+    /** 已保存进项目的原文（`current_state_json.source`），没有就是空串。 */
+    savedSource,
+    /**
+     * 原文还能不能直接替换。镜像后端 `replace_source` 的判据（还没有阶段产出、
+     * 没有待处理的门），后端仍是最终裁决——这里只决定给不给编辑入口。
+     */
+    sourceEditable: !hasOutput && !pendingApproval,
     /** 整份编排状态。没取到就是 null——调用方要处理这种情况。 */
     snapshot,
     /** 过期记账：上游改过、这些下游产出停在旧版本。 */
@@ -363,6 +419,7 @@ export function useProjectState(projectId: string) {
     approve,
     reject,
     revise,
+    saveSource,
     /** 字段级编辑 / 撤销之后把新产出并回本地状态。见上面的说明。 */
     applyPatchedOutput,
     reload,

@@ -11,13 +11,15 @@ Director 是"读状态 → 决定下一步"的纯函数，不生产内容。
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents import registry
+from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
 from apps.api.modules.agent import anchors, runner
 from apps.api.modules.agent import repository as repo
@@ -247,7 +249,13 @@ async def advance(
     遇到审核门就停下，返回 blocked=True。
     调用方（API 或 Worker）负责决定要不要继续调。
     """
-    project = await project_service.get_project(db, org_id=org_id, project_id=project_id)
+    # **锁住项目行再读状态，一直锁到这一步的 AgentRun 落库（`run_agent` 里第一次
+    # 提交）**。`PUT /source` 锁同一行，并拿"有没有 running 的运行"判断能不能换原文：
+    # 不锁的话，"这里读到旧原文"和"运行落库"之间换进来的新原文判不出正在生成，
+    # 模型跑完 `_save` 整份写回旧 state，新原文就被覆盖了。锁在模型调用之前释放，
+    # 不跨付费调用；中间只有几次本地查询。两个并发的首次推进各带一份原文时，
+    # 后到的那个也因此读得到先到的原文（见下面的 409）。
+    project = await project_service.lock_project(db, org_id=org_id, project_id=project_id)
     state: dict[str, Any] = dict(project.current_state_json or {})
     stage = current_stage(state)
 
@@ -255,11 +263,35 @@ async def advance(
     # 它是后续每个阶段的依据；只传给 Router 然后丢掉，就是
     # "生成的内容和上传的小说没关系"的成因。先存再跑还有一个好处：
     # Router 调用失败时用户不用把整篇小说重新贴一遍。
-    if user_input.strip() and state.get("source") != user_input[:MAX_SOURCE_CHARS]:
-        state["source"] = user_input[:MAX_SOURCE_CHARS]
-        await _save(db, org_id=org_id, project_id=project_id, state=state)
+    #
+    # **只在 routing 阶段收。** 之后的阶段一律从 state 拼输入，user_input
+    # 不会交给任何 Agent；此前它在任何阶段都会覆盖原文，界面上的"补充说明"
+    # 一句话就能把整篇小说换掉，而已有产出仍挂在旧原文上。
+    #
+    # **已经存过原文就不再改写它**，只在原文为空时首次接纳。换原文走
+    # `PUT /source`（`replace_source`），那里才有"已有产出 / 待处理的门 /
+    # 正在生成"这几道检查；从这里换就绕过了它们。带的是同一份原文（首页
+    # 重试、旧页面）照常放行；不同就 409，且在调用任何模型之前。
+    incoming = user_input[:MAX_SOURCE_CHARS]
+    if stage == "routing" and incoming.strip():
+        saved = str(state.get("source", "")).strip()
+        if not saved:
+            # 不在这里提交（提交会提前放锁）：随 AgentRun 落库那次提交一起写进去，
+            # 那次提交在模型调用之前，Router 失败原文也已经存上了。
+            state["source"] = incoming
+            project.current_state_json = dict(state)
+        elif saved != incoming.strip():
+            raise AppError("agent.source.conflict")
+    elif user_input.strip():
+        log.warning("agent.advance_input_ignored", project_id=str(project_id), stage=stage)
+
+    # 没有原文就不让 Router 跑：它会拿空字符串调模型、照样扣钱，
+    # 后面每一步都建立在一份编出来的"故事"上。
+    if stage == "routing" and not str(state.get("source", "")).strip():
+        raise AppError("agent.source.required")
 
     if stage == "done":
+        await db.commit()  # 放锁
         return Advance(stage="done", ran_role=None, gate_opened=None, blocked=False, output=None)
 
     # 到了门口：开门并停下等人
@@ -276,8 +308,8 @@ async def advance(
                 gate=gate,
                 payload={"stage": stage, "summary": summary},
             )
-            await db.commit()
             log.info("agent.gate_opened", project_id=str(project_id), gate=gate)
+        await db.commit()  # 建门 + 放锁
         return Advance(stage=stage, ran_role=None, gate_opened=gate, blocked=True, output=None)
 
     # 到这里 stage 一定是生产阶段。老项目可能缺上游产出，先退到能跑的那一步。
@@ -286,14 +318,15 @@ async def advance(
     spec_id = _SPEC_OF[stage]
     spec = registry.get(spec_id)
     if spec is None:
-        from apps.api.core.errors import AppError
-
         raise AppError("common.internal", message=f"阶段 {stage} 引用的 Agent {spec_id} 不存在")
     role = stage
 
     # 门① 锁定的画风/时代背景/改编模式要进提示词变量。读不到（还没走到门①、
     # 或存量项目没补上）就为 None，`_variables_for` 会退回按原文证据推。
     lock = await project_service.get_lock_variables(db, org_id=org_id, project_id=project_id)
+
+    # 这一步依据的原文与进度。模型跑完写回前要核对它们没被换掉，见 `_commit_output`
+    basis = (state.get("source"), state.get("stage"))
 
     result = await runner.run_agent(
         db,
@@ -311,8 +344,13 @@ async def advance(
     # Router 要求澄清时原地停住，不要带着错误的路线往下跑——
     # 猜错路线会让用户白跑一整条生产链
     if stage == "routing" and output.get("requires_clarification"):
-        state["router"] = output
-        await _save(db, org_id=org_id, project_id=project_id, state=state)
+
+        def _hold(fresh: dict[str, Any]) -> None:
+            fresh["router"] = output
+
+        await _commit_output(
+            db, org_id=org_id, project_id=project_id, run_id=result.run_id, basis=basis, apply=_hold
+        )
         return Advance(
             stage="routing",
             ran_role=role,
@@ -321,11 +359,17 @@ async def advance(
             output=output,
         )
 
-    state[_key(stage)] = output
-    # 正向产出永远是新鲜的：刚跑出来的这一版就是最新的上游。
-    mark_fresh(state, stage)
-    state["stage"] = _NEXT[stage]
-    await _save(db, org_id=org_id, project_id=project_id, state=state)
+    ran = stage
+
+    def _apply(fresh: dict[str, Any]) -> None:
+        fresh[_key(ran)] = output
+        # 正向产出永远是新鲜的：刚跑出来的这一版就是最新的上游。
+        mark_fresh(fresh, ran)
+        fresh["stage"] = _NEXT[ran]
+
+    state = await _commit_output(
+        db, org_id=org_id, project_id=project_id, run_id=result.run_id, basis=basis, apply=_apply
+    )
 
     if stage == "plot_index":
         await _sync_detected_era(db, org_id=org_id, project_id=project_id, state=state)
@@ -341,6 +385,58 @@ async def advance(
         blocked=False,
         output=output,
     )
+
+
+# 原文替换时，多久以内开始的 running 运行算"正在生成"。见 `repo.has_running_run`
+_BUSY_WINDOW = timedelta(minutes=15)
+
+# 旧格式项目的阶段产出键（`_LEGACY_STAGES` 的另一半）。有它们同样算"已经开始生产"
+_LEGACY_OUTPUT_KEYS = ("story", "visual")
+
+
+@dataclass(frozen=True, slots=True)
+class SourceSaved:
+    source: str
+    stage: Stage
+    changed: bool
+
+
+async def replace_source(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, text: str
+) -> SourceSaved:
+    """只保存故事原文，不跑任何 Agent、不建任务、不碰计费。
+
+    `advance` 也会存原文，但它存完立刻调 Router 扣钱——用户想先把稿子放进
+    项目、隔天再开工，或首页「只创建项目」，此前都只能把原文丢掉。
+
+    只在还没有真正的阶段产出、也没有待处理的门时允许：情节目录之后的每一份
+    产出都是从原文改编来的，悄悄换掉原文，界面上看到的产出就和原文对不上。
+
+    Router 的产出不算阶段产出（它是调度决策），但它是按旧原文判的路线：
+    原文真的变了就把它清掉、退回 routing，下次推进按新原文重判。
+    """
+    project = await project_service.lock_project(db, org_id=org_id, project_id=project_id)
+    state: dict[str, Any] = dict(project.current_state_json or {})
+
+    # 生产阶段的产出键就是阶段名（只有 routing 映射成 router，它不在这张表里）
+    if any(k in state for k in (*PRODUCING_STAGES, *_LEGACY_OUTPUT_KEYS)):
+        raise AppError("agent.source.locked", detail={"reason": "has_output"})
+    if await repo.has_pending_approval(db, org_id=org_id, project_id=project_id):
+        raise AppError("agent.source.locked", detail={"reason": "pending_gate"})
+    since = datetime.now(UTC) - _BUSY_WINDOW
+    if await repo.has_running_run(db, org_id=org_id, project_id=project_id, since=since):
+        raise AppError("agent.source.busy")
+
+    changed = state.get("source") != text
+    if changed:
+        state["source"] = text
+        if "router" in state:
+            del state["router"]
+            state["stage"] = "routing"
+        project.current_state_json = state
+    await db.commit()
+    log.info("agent.source_saved", project_id=str(project_id), chars=len(text), changed=changed)
+    return SourceSaved(source=text, stage=current_stage(state), changed=changed)
 
 
 async def resolve_gate(
@@ -361,12 +457,8 @@ async def resolve_gate(
     """
     approval = await repo.get_approval(db, org_id=org_id, approval_id=approval_id)
     if approval is None or approval.project_id != project_id:
-        from apps.api.core.errors import AppError
-
         raise AppError("common.not_found", message=f"approval {approval_id}")
     if approval.status != "pending":
-        from apps.api.core.errors import AppError
-
         raise AppError("common.conflict", message=f"审核已处理过：{approval.status}")
 
     await repo.resolve_approval(
@@ -402,6 +494,40 @@ async def resolve_gate(
         blocked=decision == "rejected",
         output=None,
     )
+
+
+async def _commit_output(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    run_id: uuid.UUID,
+    basis: tuple[Any, Any],
+    apply: Callable[[dict[str, Any]], None],
+) -> dict[str, Any]:
+    """把一次模型产出写回编排状态：**条件写**，不整份覆盖。
+
+    模型调用期间项目行没有锁（不能把行锁跨过一次付费调用），这段时间里
+    原文可能被 `PUT /source` 换掉。以前这里把调用前读到的整份 state 写回去，
+    新原文就被旧 state 覆盖了，产出还挂在新原文上、界面看不出来。
+
+    现在重新锁行读最新状态：原文和进度（`basis`）都没变，才把这一步的产出
+    并进**最新**的状态；变了就把这次运行作废（`failed` +
+    `agent.run.superseded`，摘掉 `output_json`，原始输出仍在 agent_steps 里，
+    token 用量照记），新原文与状态原样不动，然后 409。
+    """
+    project = await project_service.lock_project(db, org_id=org_id, project_id=project_id)
+    fresh: dict[str, Any] = dict(project.current_state_json or {})
+    if (fresh.get("source"), fresh.get("stage")) != basis:
+        await repo.supersede_run(db, org_id=org_id, run_id=run_id)
+        await db.commit()
+        log.warning("agent.run_superseded", project_id=str(project_id), run_id=str(run_id))
+        raise AppError("agent.run.superseded")
+    apply(fresh)
+    # 整体重新赋值，理由同 `_save`
+    project.current_state_json = dict(fresh)
+    await db.commit()
+    return fresh
 
 
 async def _save(

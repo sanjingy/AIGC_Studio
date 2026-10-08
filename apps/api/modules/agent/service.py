@@ -54,6 +54,13 @@ async def run_to_gate(
     return result
 
 
+async def replace_source(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, text: str
+) -> orchestrator.SourceSaved:
+    """只保存故事原文，不调模型、不花钱。规则见 `orchestrator.replace_source`。"""
+    return await orchestrator.replace_source(db, org_id=org_id, project_id=project_id, text=text)
+
+
 async def resolve_gate(
     db: AsyncSession,
     *,

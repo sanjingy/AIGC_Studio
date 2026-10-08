@@ -2,6 +2,7 @@
 
 import type * as React from "react";
 import { useState } from "react";
+import Link from "next/link";
 import { AlertTriangle, Check, Loader2, Play, Undo2 } from "lucide-react";
 
 import { ModelSetupLink } from "@/components/freeflow/model-setup-link";
@@ -146,19 +147,26 @@ export function GateActions({
 }
 
 /**
- * 「推进生产」。
+ * 「推进生产」。会调用模型、扣 Credits，一路跑到下一个审核门。
  *
- * 项目还没跑过任何一步时必须先给原始素材：后端把它存进
- * `current_state_json.source`，是整条生产链的依据。之后的每一步都从
- * state 拼输入，所以补充说明是可选的。
+ * **只推进，不收文字。** 原文在故事页单独保存（`PUT /projects/{id}/source`，免费）；
+ * 还没有原文时这里只给去故事页的入口——后端也会 422 拒掉没原文的推进。
+ *
+ * 这里曾经有一个「补充说明」输入框，但编排器从不把 `user_input` 交给后续阶段，
+ * 只会拿它覆盖 `current_state_json.source`：用户写的一句"注意节奏"会替换掉整篇
+ * 小说原文。它是假入口，已删除；后端也已改为只在 routing 阶段接受原文。
  */
 export function AdvanceAction({ state, className }: { state: ProjectState; className?: string }) {
-  const [input, setInput] = useState("");
-  const [open, setOpen] = useState(false);
   const needsSource = state.needsSource;
   const working = state.busy === "advance";
   const atGate = state.pendingGate !== null;
-  const showBox = needsSource || open;
+  const blocked = atGate
+    ? "有审核门等待处理，确认或打回后才能继续"
+    : state.stage === "done"
+      ? "文本链路已经走完"
+      : needsSource
+        ? "还没有故事原文"
+        : null;
 
   return (
     <section className={cn("rounded-[2px] border border-border bg-surface p-3.5", className)}>
@@ -167,65 +175,37 @@ export function AdvanceAction({ state, className }: { state: ProjectState; class
           <h3 className="text-sm font-semibold text-fg">推进生产</h3>
           <p className="mt-0.5 text-xs text-fg-subtle">
             当前阶段：{state.stageLabel}
-            {atGate && "。先处理审核门才能继续"}
+            {blocked && `。${blocked}`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {!needsSource && (
-            <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)}>
-              {open ? "收起补充说明" : "补充说明"}
-            </Button>
-          )}
+        {needsSource && state.project ? (
+          <Link href={`/freeflow/projects/${state.project.id}/story`} className="ff-quiet-button">
+            去故事页填写原文
+          </Link>
+        ) : (
           <Button
             size="sm"
             variant="primary"
-            disabled={working || atGate || state.stage === "done" || (needsSource && !input.trim())}
-            title={
-              atGate
-                ? "有审核门等待处理，确认或打回后才能继续"
-                : state.stage === "done"
-                  ? "文本链路已经走完"
-                  : needsSource && !input.trim()
-                    ? "先粘贴小说原文或写一句创意"
-                    : "一路跑到下一个审核门"
-            }
-            onClick={() => void state.advance(input.trim()).then((ok) => ok && setInput(""))}
+            disabled={working || blocked !== null}
+            title={blocked ?? "一路跑到下一个审核门"}
+            onClick={() => void state.advance()}
           >
             {busyIcon(working) ?? <Play aria-hidden className="size-3.5" />}
-            {working ? "生成中…" : needsSource ? "开始生产" : "推进到下一道门"}
+            {working ? "生成中…" : "推进到下一道门"}
           </Button>
-        </div>
+        )}
       </div>
 
-      {showBox && (
-        <label className="mt-2.5 flex flex-col gap-1">
-          <span className="text-xs font-medium text-fg">
-            {needsSource ? "原始素材（小说原文，或一句话创意）" : "补充说明（可选）"}
-          </span>
-          <textarea
-            rows={needsSource ? 6 : 3}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            maxLength={20000}
-            placeholder={
-              needsSource
-                ? "把小说原文粘进来，或写一句创意。路线由 Router 自己判断，不用选。"
-                : "这一步要注意什么"
-            }
-            className="resize-none rounded-md border border-border-strong bg-bg px-2 py-1.5 text-sm leading-5 text-fg"
-          />
-          <span className="text-xs text-fg-subtle">
-            {needsSource
-              ? "落库后每一步都以它为依据；上限 20000 字，超出部分不会保存。"
-              : "会作为本次推进的输入落库，之后的阶段仍从项目状态拼输入。"}
-          </span>
-        </label>
+      {needsSource ? (
+        <p className="mt-2 text-xs leading-5 text-fg-subtle">
+          先在故事页粘贴或导入小说原文、创意并保存（免费），再开始生产。
+        </p>
+      ) : (
+        <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-fg-subtle">
+          <AlertTriangle aria-hidden className="mt-px size-3.5 shrink-0" />
+          这是真实的模型调用，会扣 Credits，并且一路跑到下一个审核门才停。
+        </p>
       )}
-
-      <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-fg-subtle">
-        <AlertTriangle aria-hidden className="mt-px size-3.5 shrink-0" />
-        这是真实的模型调用，会扣 Credits，并且一路跑到下一个审核门才停。
-      </p>
 
       {state.actionError && state.busy === null && <ActionError state={state} />}
     </section>

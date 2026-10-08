@@ -673,13 +673,27 @@ test("首页两个动作：只创建只要项目名；开始生产要项目名�
 });
 
 test("开始生产失败后重试：只发 advance，不再建项目；项目名不再参与校验", () => {
-  assert.deepEqual(homeStart.startPlan({ createdId: null }), { create: true, advance: true });
-  assert.deepEqual(homeStart.startPlan({ createdId: "p1" }), { create: false, advance: true });
+  assert.deepEqual(homeStart.startPlan({ createdId: null }), { create: true, saveSource: false, advance: true });
+  // 重试先 PUT：用户可能改过原文，而 advance 不改写已保存的原文（409 agent.source.conflict）
+  assert.deepEqual(homeStart.startPlan({ createdId: "p1" }), { create: false, saveSource: true, advance: true });
   const a = homeStart.startAvailability({ title: "", source: "原文", createdId: "p1", phase: "idle" });
   assert.equal(a.createOnly.enabled, false);
   assert.equal(a.start.enabled, true);
-  assert.equal(homeStart.createOnlyWarning("  "), null);
-  assert.match(homeStart.createOnlyWarning("一段原文"), /不会随项目保存/);
+  assert.equal(homeStart.createOnlyNote("  "), null);
+  assert.match(homeStart.createOnlyNote("一段原文"), /一起保存进项目/);
+});
+
+test("只创建项目：有原文就免费保存；保存失败重试只发 PUT；超长原文先挡住", () => {
+  assert.deepEqual(homeStart.createOnlyPlan({ createdId: null, source: "原文" }), { create: true, saveSource: true });
+  assert.deepEqual(homeStart.createOnlyPlan({ createdId: null, source: "  " }), { create: true, saveSource: false });
+  assert.deepEqual(homeStart.createOnlyPlan({ createdId: "p1", source: "原文" }), { create: false, saveSource: true });
+  const base = { title: "t", source: "", createdId: null, phase: "idle" };
+  assert.equal(homeStart.startAvailability(base).createOnly.enabled, true);
+  const long = homeStart.startAvailability({ ...base, source: "字".repeat(homeStart.SOURCE_MAX + 1) });
+  assert.equal(long.createOnly.enabled, false);
+  assert.match(long.createOnly.reason, /超过/);
+  const saving = homeStart.startAvailability({ ...base, phase: "saving" });
+  assert.equal(saving.createOnly.reason, "正在保存原文");
 });
 
 test("资产类型筛选与后端 mime.py 一致，text 有入口；项目范围没有 Skill", () => {
@@ -1070,4 +1084,155 @@ test("读取候选保留手填及已选模型，完整地址与执行 base 一�
   assert.equal(prov.createBody(draft).label, "gateway.example");
   assert.equal(prov.createBody(draft).base_url, "https://gateway.example/v1");
   assert.equal(prov.draftTestBody(draft).base_url, prov.createBody(draft).base_url);
+});
+
+test("平台行计费来源：没存官方 Key 时禁用并写明它和供应商连接不是一回事", () => {
+  const p = { label: "DeepSeek", supports_platform_key: true };
+  const none = prov.billingChoices({ configurable: true }, p, false);
+  assert.equal(none.platform.disabled, false);
+  assert.equal(none.own.disabled, true);
+  assert.equal(none.own.label, "我的 DeepSeek 官方 Key");
+  assert.match(none.own.reason, /配置 DeepSeek Key/);
+  assert.match(none.own.reason, /我的供应商/);
+  const saved = prov.billingChoices({ configurable: true }, p, true);
+  assert.equal(saved.own.disabled, false);
+  assert.equal(saved.own.reason, null);
+  // 平台不给额度：平台项禁用并说明
+  const byok = prov.billingChoices({ configurable: true }, { label: "X", supports_platform_key: false }, true);
+  assert.equal(byok.platform.disabled, true);
+  assert.match(byok.platform.reason, /没有提供 X 的额度/);
+  // Skill 锁住：两项都禁用，即使存了 Key 也不放开
+  const locked = prov.billingChoices({ configurable: false }, p, true);
+  assert.equal(locked.platform.disabled && locked.own.disabled, true);
+});
+
+test("当前默认文案：自有计费写明是哪家官方 Key", () => {
+  const cfg = {
+    providers: [{ provider_id: "provider.deepseek", kind: "catalog", label: "DeepSeek", models: [] }],
+    selection: { layer: "org", provider_id: "provider.deepseek", model_id: null, key_source: "org" },
+  };
+  assert.equal(prov.currentDefaultText(cfg), "平台 DeepSeek · 目录默认顺序 · 我的 DeepSeek 官方 Key");
+});
+
+const storySource = await jiti.import("../lib/freeflow/story-source.ts");
+
+test("导入原文：UTF-8（含 BOM）、GBK、UTF-16 都能读；二进制、空文件、非 UTF-8/GBK 给出可修复的原因", () => {
+  const utf8 = new TextEncoder().encode("雨夜，少女在旧车站。\r\n第二行");
+  let r = storySource.decodeStoryFile(utf8);
+  assert.equal(r.ok, true);
+  assert.equal(r.encoding, "utf-8");
+  assert.equal(r.text, "雨夜，少女在旧车站。\n第二行");
+
+  const bom = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode("带BOM")]);
+  assert.equal(storySource.decodeStoryFile(bom).text, "带BOM");
+
+  // "雨夜" 的 GBK 编码
+  const gbk = new Uint8Array([0xd3, 0xea, 0xd2, 0xb9]);
+  r = storySource.decodeStoryFile(gbk);
+  assert.equal(r.ok, true);
+  assert.equal(r.encoding, "gb18030");
+  assert.equal(r.text, "雨夜");
+
+  const utf16 = new Uint8Array([0xff, 0xfe, 0x68, 0x00, 0x69, 0x00]);
+  assert.equal(storySource.decodeStoryFile(utf16).text, "hi");
+
+  // .docx 是 zip：PK 头后面跟着 NUL
+  const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00]);
+  r = storySource.decodeStoryFile(zip);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /不是纯文本/);
+
+  assert.match(storySource.decodeStoryFile(new Uint8Array()).error, /空的/);
+  assert.match(storySource.decodeStoryFile(new TextEncoder().encode(" \n\t ")).error, /没有文字/);
+});
+
+test("原文校验：空白不行，上限按码点数，超了写出实际字数", () => {
+  assert.match(storySource.sourceProblem("  \n"), /空/);
+  assert.equal(storySource.sourceProblem("一句创意"), null);
+  assert.equal(storySource.sourceProblem("😀".repeat(storySource.SOURCE_MAX)), null);
+  assert.match(storySource.sourceProblem("字".repeat(storySource.SOURCE_MAX + 5)), /20,005 字/);
+  assert.equal(storySource.sourceDirty(" 原文 ", "原文"), false);
+  assert.equal(storySource.sourceDirty("原文2", "原文"), true);
+});
+
+test("拒收原因：类型、大小、数量翻成人话，未知码不吞", () => {
+  assert.match(storySource.fileRejectionText("file-invalid-type", ""), /\.docx/);
+  assert.match(storySource.fileRejectionText("file-too-large", ""), /1 MB/);
+  assert.match(storySource.fileRejectionText("too-many-files", ""), /一个/);
+  assert.equal(storySource.fileRejectionText("weird", "原文"), "原文");
+});
+
+test("本地草稿：按账号与项目隔离；坏数据与存储异常都当没有；与已保存一致不恢复", () => {
+  const mem = new Map();
+  const store = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v), removeItem: (k) => mem.delete(k) };
+  const a = storySource.draftKey("u1", "p1");
+  assert.notEqual(a, storySource.draftKey("u2", "p1"));
+  assert.notEqual(a, storySource.draftKey("u1", "p2"));
+
+  storySource.writeDraft(store, a, "草稿", new Date("2026-10-08T00:00:00Z"));
+  assert.deepEqual(storySource.readDraft(store, a), { text: "草稿", savedAt: "2026-10-08T00:00:00.000Z" });
+  assert.equal(storySource.readDraft(store, storySource.draftKey("u2", "p1")), null);
+
+  assert.equal(storySource.draftToRestore(storySource.readDraft(store, a), "草稿"), null);
+  assert.equal(storySource.draftToRestore(storySource.readDraft(store, a), "旧的").text, "草稿");
+
+  storySource.writeDraft(store, a, "   ");
+  assert.equal(mem.has(a), false, "空草稿不留");
+
+  mem.set(a, "{not json");
+  assert.equal(storySource.readDraft(store, a), null);
+  const broken = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("quota"); }, removeItem: () => { throw new Error("x"); } };
+  assert.equal(storySource.readDraft(broken, a), null);
+  storySource.writeDraft(broken, a, "x");
+  storySource.clearDraft(broken, a);
+  assert.equal(storySource.readDraft(null, a), null);
+});
+
+test("保存原文：PUT 返回值直接并进快照，不靠重拉", () => {
+  const now = new Date("2026-10-08T12:00:00Z");
+  const prev = {
+    project_id: "p1",
+    stage: "plot_index",
+    current_state_json: { source: "旧原文", stage: "plot_index", router: { route: "X" }, extra: 1 },
+    stale_roles: [],
+    updated_at: "2026-10-01T00:00:00Z",
+  };
+  // 原文变了、后端退回 routing：router 作废，阶段跟着退回
+  const changed = storySource.applySavedSource(
+    prev,
+    { source: "新原文", chars: 3, stage: "routing", changed: true },
+    "p1",
+    now,
+  );
+  assert.equal(changed.current_state_json.source, "新原文");
+  assert.equal(changed.stage, "routing");
+  assert.equal(changed.current_state_json.stage, "routing");
+  assert.equal("router" in changed.current_state_json, false);
+  assert.equal(changed.current_state_json.extra, 1, "其余字段原样保留");
+  assert.equal(changed.updated_at, now.toISOString());
+  assert.equal(prev.current_state_json.source, "旧原文", "不原地改旧快照");
+
+  // 同一份原文：什么都不该动
+  const same = storySource.applySavedSource(
+    prev,
+    { source: "旧原文", chars: 3, stage: "plot_index", changed: false },
+    "p1",
+    now,
+  );
+  assert.equal(same.stage, "plot_index");
+  assert.deepEqual(same.current_state_json.router, { route: "X" });
+  assert.equal(same.updated_at, prev.updated_at);
+
+  // 快照没取到（state 接口失败过）：造最小快照，原文仍然可见
+  const fresh = storySource.applySavedSource(
+    null,
+    { source: "原文", chars: 2, stage: "routing", changed: true },
+    "p9",
+    now,
+  );
+  assert.equal(fresh.project_id, "p9");
+  assert.equal(fresh.current_state_json.source, "原文");
+  assert.deepEqual(fresh.stale_roles, []);
+  // 并回之后面板不再显示"有未保存的修改"
+  assert.equal(storySource.sourceDirty("  原文\n", fresh.current_state_json.source), false);
 });

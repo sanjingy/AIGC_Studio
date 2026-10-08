@@ -16,6 +16,8 @@ from apps.api.modules.agent.schemas import (
     RegistryOut,
     ReviseIn,
     ReviseOut,
+    SourceIn,
+    SourceOut,
 )
 from apps.api.modules.auth.deps import CurrentUser, DbSession
 
@@ -89,6 +91,22 @@ async def advance(
         gate_opened=result.gate_opened,
         blocked=result.blocked,
         output=result.output,
+    )
+
+
+@router.put("/projects/{project_id}/source", response_model=SourceOut)
+async def put_source(
+    project_id: uuid.UUID, payload: SourceIn, user: CurrentUser, db: DbSession
+) -> SourceOut:
+    """保存故事原文。**不调模型、不建任务、不扣 Credits**。
+
+    PUT：同一份原文点几次结果都一样。已有阶段产出或待处理的门时 409。
+    """
+    saved = await service.replace_source(
+        db, org_id=user.org_id, project_id=project_id, text=payload.text
+    )
+    return SourceOut(
+        source=saved.source, chars=len(saved.source), stage=saved.stage, changed=saved.changed
     )
 
 

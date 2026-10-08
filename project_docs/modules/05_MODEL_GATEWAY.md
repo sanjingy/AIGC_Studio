@@ -726,3 +726,14 @@ GitHub 搜索：`openai api gateway stars:>=1000`，核对候选 one-api 37,084 
 前端默认只输入 API Key 和请求地址，点击读取后选择模型/用途；名称、手填模型与协议在高级设置。未开放视频/TTS 协议。完整标准 operation URL 规整为 API base，配置、探测和执行保持同一地址。未做付费上游生成验证。
 
 验证：Ruff/format、Mypy（156 源文件）、49 项模型发现与端点相关单测、68 项前端逻辑测试及正式构建通过。浏览器使用独立 Mock，验证两输入、动态选择、规范化保存、自动名称、保存后无 Key、读取失败保留草稿、手填图片模型、1440/1280/390 视口及无运行时错误。证据 `orca/tasks/API_CONFIG_SIMPLE/`。未跑数据库全量集成测试、未调用付费 Provider、未提交部署。
+
+## 2026-10-08 模型页计费来源文案（USER_FLOW_REPAIR，已实现、未提交）
+
+只改界面，**不改选择契约、不放宽禁用、不碰 `gateway._resolve`**。用户反馈"选不了我的 Key"
+的原因是两种 Key 被同一个词指代：
+
+- 平台行里的自有计费项（ADR-025 的平台目录 BYOK）改名「我的 {供应商} 官方 Key」；没保存
+  该供应商官方 Key 时禁用，并在下方写明原因与「配置 X Key」按钮。
+- 「我的供应商」分段（ADR-039 组织连接）是另一条路：点连接的「设为默认」即按连接的 Key
+  调用，选择值为 `provider.org:<id>`，与平台行官方 Key 无关。
+- 判定逻辑在 `apps/web/lib/freeflow/provider-scope.ts::billingChoices`，有前端逻辑测试。
