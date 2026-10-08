@@ -14,6 +14,7 @@ import {
   type ReviseTarget,
   type Stage,
 } from "@/lib/api";
+import { describeApiError } from "@/lib/freeflow/provider-scope";
 
 /**
  * 阶段产出的**兜底**来源：`agent_runs.output_json`，按 agent_id 取最新一版。
@@ -167,6 +168,8 @@ export function useProjectState(projectId: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  /** `actionError` 对应的错误码。界面据此决定给不给「去模型库」，不匹配文案。 */
+  const [actionErrorCode, setActionErrorCode] = useState<string | null>(null);
   const [busy, setBusy] = useState<ProjectAction | null>(null);
 
   const reload = useCallback(async () => {
@@ -228,14 +231,16 @@ export function useProjectState(projectId: string) {
     async (action: ProjectAction, fn: () => Promise<unknown>) => {
       setBusy(action);
       setActionError(null);
+      setActionErrorCode(null);
       try {
         await fn();
         await reload();
         return true;
       } catch (cause) {
         setActionError(
-          cause instanceof ApiRequestError ? cause.error.user_message : "操作失败，请稍后重试",
+          cause instanceof ApiRequestError ? describeApiError(cause.error) : "操作失败，请稍后重试",
         );
+        setActionErrorCode(cause instanceof ApiRequestError ? cause.error.code : null);
         // 失败也重拉：advance 可能已经跑完前半段才在某一步失败
         await reload().catch(() => undefined);
         return false;
@@ -352,6 +357,7 @@ export function useProjectState(projectId: string) {
     loading,
     error,
     actionError,
+    actionErrorCode,
     busy,
     advance,
     approve,
@@ -360,7 +366,10 @@ export function useProjectState(projectId: string) {
     /** 字段级编辑 / 撤销之后把新产出并回本地状态。见上面的说明。 */
     applyPatchedOutput,
     reload,
-    clearActionError: () => setActionError(null),
+    clearActionError: () => {
+      setActionError(null);
+      setActionErrorCode(null);
+    },
   };
 }
 

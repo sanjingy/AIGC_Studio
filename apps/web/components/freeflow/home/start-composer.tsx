@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowRight, CirclePlus, Loader2, Play } from "lucide-react";
 
+import { ModelSetupLink } from "@/components/freeflow/model-setup-link";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { ApiRequestError, credits, projects } from "@/lib/api";
@@ -17,6 +18,7 @@ import {
   startPlan,
   type StartPhase,
 } from "@/lib/freeflow/home-start";
+import { describeApiError, needsModelSetup } from "@/lib/freeflow/provider-scope";
 import { useLeaveGuard } from "@/lib/freeflow/use-leave-guard";
 import { useNavigationGuard } from "@/lib/freeflow/use-navigation-guard";
 import { cn, formatCredits } from "@/lib/utils";
@@ -41,6 +43,8 @@ export function StartComposer() {
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [phase, setPhase] = useState<StartPhase>("idle");
   const [error, setError] = useState<string | null>(null);
+  // 开始生产失败时的错误码。只用来判断"是不是没配模型"，文案仍走 `error`
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
@@ -52,6 +56,8 @@ export function StartComposer() {
   const unsaved = source.trim() !== "" && !leaving;
   // 建好了项目、advance 却失败：此时才换成「进入项目 / 重试」。生成进行中不给离开的入口。
   const failedAfterCreate = createdId !== null && phase === "idle";
+  // 没有可用模型：重试多少次都一样，主按钮换成「去模型库」，重试降为次要
+  const noModel = failedAfterCreate && needsModelSetup(errorCode);
 
   useLeaveGuard(unsaved);
   useNavigationGuard(unsaved, (proceed) => setPendingLeave(() => proceed));
@@ -77,6 +83,7 @@ export function StartComposer() {
   async function startNow() {
     setConfirming(false);
     setError(null);
+    setErrorCode(null);
     let projectId = createdId;
     if (startPlan({ createdId }).create) {
       setPhase("creating");
@@ -95,7 +102,13 @@ export function StartComposer() {
       await projects.advance(projectId, source.trim());
       go(projectId);
     } catch (cause) {
-      setError(`项目已创建，但开始生产失败：${message(cause, "请稍后重试")}。原文还在这里，可以重试或先进入项目。`);
+      const code = cause instanceof ApiRequestError ? cause.error.code : null;
+      setErrorCode(code);
+      setError(
+        needsModelSetup(code) && cause instanceof ApiRequestError
+          ? `项目已创建，但还不能开始生产：${describeApiError(cause.error)}。原文还在这里，配好后回到这一页点「重试开始生产」。`
+          : `项目已创建，但开始生产失败：${message(cause, "请稍后重试")}。原文还在这里，可以重试或先进入项目。`,
+      );
       setPhase("idle");
     }
   }
@@ -167,7 +180,9 @@ export function StartComposer() {
 
         <div className="mt-4 flex flex-col gap-3 border-t border-border pt-4 md:flex-row md:items-end md:justify-between">
           <div className="min-w-0 text-xs leading-5 text-fg-subtle">
-            {failedAfterCreate ? (
+            {noModel ? (
+              <p>模型库在新标签页打开，这一页和原文都留着；配好模型后再重试，不会再建一个项目。</p>
+            ) : failedAfterCreate ? (
               <p>项目已经建好，重试只会再次开始生产，不会再建一个项目。</p>
             ) : (
               <>
@@ -209,7 +224,7 @@ export function StartComposer() {
               </Button>
             )}
             <Button
-              variant="primary"
+              variant={noModel ? "secondary" : "primary"}
               disabled={!start.enabled}
               title={start.reason ?? "确认后创建项目并开始生产"}
               onClick={() => setConfirming(true)}
@@ -217,6 +232,7 @@ export function StartComposer() {
               <Play aria-hidden className="size-4" />
               {createdId ? "重试开始生产" : "开始生产"}
             </Button>
+            {noModel && <ModelSetupLink newTab />}
           </div>
         </div>
         {!start.enabled && start.reason && phase === "idle" && (

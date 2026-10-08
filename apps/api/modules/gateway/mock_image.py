@@ -12,7 +12,7 @@ ABC_AUDIT 判定那个判据是错的：`ENV=local` 的部署、或者任何忘�
    写在生产代码里。它排在 BYOK 之前：某个 org 存了自己的 DashScope Key，
    测试里跑到出图一样会打真上游。
 2. 其余一律走真实 Gateway。平台 Key、org 自己的 BYOK Key 都算。
-3. 一把 Key 都没有时**如实报错**（`provider.unavailable`，中文文案），
+3. 一把 Key 都没有时**如实报错**（`provider.not_configured`，中文文案），
    不建资产、不扣 Credits。用户知道发生了什么，而不是拿到一张假图。
 
 代价是 `CLAUDE.md` 承诺的"没有 Key 也能跑通全链路"只在 `ENV=test` 成立。
@@ -76,7 +76,7 @@ def fallback(capability: str) -> bool:
     的占位图，任务 `succeeded`，Credits 照扣，而界面上**没有任何地方说过
     这张图是假的**。他会拿着它去对画风、去排片。
 
-    现在缺 Key 就是 `provider.unavailable`，如实报错。要一张假图只有一条
+    现在缺 Key 就是 `provider.not_configured`，如实报错。要一张假图只有一条
     路：`ENV=test`（见 `forced`）。
     """
     del capability

@@ -929,6 +929,37 @@ test("坏默认与 byok 拒绝的原因都翻成人话，未知码不吞", () =>
   assert.equal(prov.describeApiError({ code: "common.validation_failed", message: "x", user_message: "请求参数有误" }), "请求参数有误");
 });
 
+test("没有可用模型：按码判断、能力名翻成中文、给模型库地址，且不可重试", () => {
+  assert.equal(prov.NOT_CONFIGURED, "provider.not_configured");
+  assert.equal(prov.MODELS_HREF, "/freeflow/models");
+  assert.equal(prov.needsModelSetup("provider.not_configured"), true);
+  for (const c of ["provider.unavailable", "provider.byok.rejected", null, undefined, ""]) {
+    assert.equal(prov.needsModelSetup(c), false, String(c));
+  }
+  const e = (capability) => ({
+    code: "provider.not_configured",
+    message: "没有可用的模型来完成「text_generation」",
+    user_message: "还没有可用的模型：请到「模型库」添加供应商并设为默认，或联系管理员配置平台 Key",
+    detail: capability === undefined ? undefined : { capability },
+  });
+  assert.equal(
+    prov.describeApiError(e("text_generation")),
+    "还没有可用的文本生成模型：请到「模型库」添加供应商并设为默认，或联系管理员配置平台 Key",
+  );
+  assert.match(prov.describeApiError(e("image_generation")), /^还没有可用的图片生成模型/);
+  // 认不出的能力、没有 detail：用后端原句，不把 `video_generation` 这种内部名直出给用户
+  assert.equal(prov.describeApiError(e("video_generation")), e().user_message);
+  assert.equal(prov.describeApiError(e()), e().user_message);
+  for (const text of [prov.describeApiError(e("text_generation")), prov.describeApiError(e())]) {
+    assert.doesNotMatch(text, /text_generation|备用通道/);
+  }
+  // 上游故障仍是原码原文案，不被新码吞掉
+  assert.equal(prov.describeApiError({ code: "provider.unavailable", user_message: "正在切换备用通道" }), "正在切换备用通道");
+  assert.equal(taskScope.canRetry({ status: "failed", error_code: "provider.not_configured" }), false);
+  assert.equal(taskScope.canRetry({ status: "failed", error_code: "provider.unavailable" }), true);
+  assert.match(taskScope.failReason("provider.not_configured"), /模型库/);
+});
+
 const CFG = {
   capability: "text_generation", label: "文本生成", available: true, configurable: true, credentials: [], unavailable_reason: null,
   supports_org_connections: true,
@@ -1024,4 +1055,19 @@ test("api.ts 不再引用已删除的自定义端点路由", async () => {
   const src = await readFile(new URL("../lib/api.ts", import.meta.url), "utf8");
   assert.equal(/custom-endpoint|custom_endpoint|CUSTOM_TEXT_PROVIDER_ID/.test(src), false);
   assert.equal(typeof api.modelConfig.references, "function");
+});
+
+
+const modelOptions = await jiti.import("../lib/freeflow/model-options.ts");
+test("读取候选保留手填及已选模型，完整地址与执行 base 一致", () => {
+  assert.deepEqual(modelOptions.mergeModelOptions(["remote-a", "remote-a"], ["custom-b", "remote-a"]), ["remote-a", "custom-b"]);
+  assert.equal(modelOptions.normalizeApiAddress("https://gateway.example/v4/chat/completions/"), "https://gateway.example/v4");
+  assert.equal(modelOptions.normalizeApiAddress("https://gateway.example"), "https://gateway.example/v1");
+  assert.equal(modelOptions.normalizeApiAddress("https://gateway.example/chat/completions"), "https://gateway.example/v1");
+  assert.equal(modelOptions.normalizeApiAddress("https://gateway.example/v4/images/generations"), "https://gateway.example/v4");
+  const draft = { presetId: null, label: "", baseUrl: "https://gateway.example/v1/chat/completions", apiKey: "secret-test-key", models: [{ model_id: "arbitrary-custom", protocol: "openai_chat", reasoning: false }] };
+  assert.deepEqual(prov.draftProblems(draft, "create"), []);
+  assert.equal(prov.createBody(draft).label, "gateway.example");
+  assert.equal(prov.createBody(draft).base_url, "https://gateway.example/v1");
+  assert.equal(prov.draftTestBody(draft).base_url, prov.createBody(draft).base_url);
 });

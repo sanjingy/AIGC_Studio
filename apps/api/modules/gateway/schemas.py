@@ -171,6 +171,17 @@ class PresetListOut(BaseModel):
     protocols: list[ProtocolOut]
 
 
+class ConnectionDiscoverIn(BaseModel):
+    base_url: str = Field(min_length=1, max_length=512)
+    api_key: str | None = Field(default=None, min_length=8, max_length=512)
+
+
+class ConnectionDiscoverOut(BaseModel):
+    base_url: str
+    models: list[str]
+    mock: bool = False
+
+
 class ConnectionModelIn(BaseModel):
     model_id: str = Field(min_length=1, max_length=128)
     protocol: str = Field(min_length=1, max_length=32)

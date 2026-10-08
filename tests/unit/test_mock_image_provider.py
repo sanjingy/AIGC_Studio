@@ -74,7 +74,7 @@ def test_rule_3_no_key_no_longer_falls_back_to_mock(monkeypatch: pytest.MonkeyPa
     撤销的理由记在 `mock_image.fallback` 的 docstring 里：部署出去但没配 Key
     的环境，用户点"生成"拿回一张写着 MOCK IMAGE 的占位图，任务 `succeeded`、
     Credits 照扣，而界面上没有任何地方说过这张图是假的——他会拿着它去对画风。
-    现在缺 Key 一律 `provider.unavailable`，如实报错。
+    现在缺 Key 一律 `provider.not_configured`，如实报错。
 
     这条用例断言的是**撤销本身**：谓词恒 False，且 `ENV=local` 下没有任何
     Mock 路由被注册进来。哪天有人把兜底加回去，这里会红。

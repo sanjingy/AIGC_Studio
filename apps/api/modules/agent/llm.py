@@ -844,7 +844,7 @@ def get_provider() -> LLMProvider:
 
     平台 Key、org 的 BYOK Key、模型目录、熔断与 failover 全都是
     `gateway._resolve` 的职责，在这里再判一次"有没有 Key"必然对不上。
-    一把可用的都没有时，Gateway 抛 `provider.unavailable`（中文文案），
+    一把可用的都没有时，Gateway 抛 `provider.not_configured`（中文文案），
     用户看到的是"没有可用的模型"，而不是一份不知道哪来的假档案。
 
     `CLAUDE.md` 承诺的"没有 Key 也能跑通全链路"因此只在 `ENV=test` 成立。

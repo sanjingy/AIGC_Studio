@@ -2,6 +2,8 @@
 
 2026-09-25 · Lead 负责计划、契约与验收；Opus 串行实施。
 
+> 2026-10-08 统一：视觉细节以 `design-system/aigc-studio/MASTER.md` 为准，本文保留阶段范围和证据。后续模块实施前必查 GitHub 至少 1,000 stars 的同类模块，合适则优先复用；完整规则见 `project_docs/06_DEVELOPMENT_PRINCIPLES.md`。
+
 ## 目标与依据
 
 用户要求按 https://reelbench.79px.com 的页面和模块控制规划、逐步复刻。以公开首页及官方 dashboard/storyboard 截图为视觉依据；本次未进入登录后真实工作台，不能把宣传图上的操作当作已验证能力。截图存于 `orca/tasks/reelbench-{dashboard,storyboard}.png`。历史研究 `_research/reelbench_ux_review.md` 仅作辅助，时间差异以当前代码和本次截图为准。
@@ -22,7 +24,7 @@
 |---|---|---|---|
 | P1 分镜工作台样板 | 模块栏、真实节点/镜头目录、分镜总览、筛选、编辑预览、当前范围补图、历史与审核 | 复用现有 nodes/index/node_index；不伪造集归属、时长、视频 | 已完成，f512af0 已部署，用户确认效果 |
 | P2 剧本/角色/场景 | 同一壳内按实际集/场、角色、地点选择；主区编辑+图；上传/选资产/生成闭环 | P1 验收；复用内容补丁、提示词、基准图接口 | 已验收（Mock；真实后端闭环留 P4） |
-| P3 首页/资产/任务/设置 | 参考创意输入首页、近期项目；资产检索与使用；任务范围/失败恢复；清楚的上游模型控制 | P1 壳稳定；只提供可持久化且实际消费的选项 | 实施中：P3A 首页/资产 |
+| P3 首页/资产/任务/设置 | 参考创意输入首页、近期项目；资产检索与使用；任务范围/失败恢复；清楚的上游模型控制 | P1 壳稳定；只提供可持久化且实际消费的选项 | 已完成 P3 与 ADR-039 A 批；10 月 6 日提交部署记录见下，整体真实闭环仍待 P4 |
 | P4 整体验收与交付 | 桌面/窄屏、真实 API 闭环、回归、文档、提交推送与服务器更新 | P1–P3 Lead 验收；部署前验证差异与健康检查 | 待实施 |
 
 依赖顺序 P1 → P2 → P3 → P4；每次仅一个实施 Worker，失败返工通过后才推进。每个阶段另建有明确允许文件范围与测试要求的任务书。
@@ -66,3 +68,4 @@
 - 2026-10-05 ADR-039 A1 后端验收通过（Lead 复核）：ruff/format/mypy 通过，全量 pytest 1308 passed / 2 skipped（基线 1209/2），迁移 `b9e4c1a7d203` 往返通过。证据 `orca/tasks/MULTI_PROVIDER_A1.report.md`。A2 前端设置页与 A3 后端补三项（出图钉住上游、推理模型标记、连接引用查询）并行中。
 - 2026-10-05 ADR-039 A3 后端补三项验收通过（Lead 复核 pytest 1322 passed / 2 skipped）：出图任务按 `input_json.upstream` 钉住连接执行、连接模型 `reasoning` 标记与 no_reasoning 角色拒绝、`GET /model-config/connections/{id}/references`。
 - 2026-10-06 ADR-039 A2 前端模型设置页验收通过（Lead 复核）：逻辑测试 66/66、typecheck、独立 build；Mock 浏览器 A2 69/69，真实本地后端接口冒烟 13/13；回归 P3B 75/75、P3A 104/104、P2B 129/129、P2A 98/98、nav 19/19、P1 50/50；响应体与 DOM 无明文 Key。证据 `orca/tasks/MULTI_PROVIDER_A2.report.md`。**A 批全部完成。** 未提交：P3A、P3B、A1/A3 后端、A2 前端。B 批（其余出图协议 + 一致性实测）与 P4 待派。
+- 2026-10-06 负责人授权提交推送部署：提交 `868c1c7`（P3 + ADR-039 A 批）并推送；香港测试机部署脚本 EXIT=0，`alembic upgrade head` 到 `b9e4c1a7d203`（迁移前 pg_dump 备份 `/root/db_backups/pre_868c1c7_*.sql.gz`），api/worker 重启后 healthy。**部署后发现**：`aigc-web.service` 挂着 drop-in `90-preview-build.conf`（`NEXT_BUILD_DIR=.next-preview-f512af0`，9-26 的 P1 预览构建），服务一直在跑它，部署脚本更新的 `.next` 从未被服务读到——10-03 的 P2 部署实际没有生效。已把 drop-in 移到 `/root/90-preview-build.conf.bak.20261006`，`daemon-reload` + 重启后服务回到 `.next`，全部路由 200（含新增 `/freeflow/tasks`）。P1 预览目录 `.next-preview-f512af0` 暂留，可删。

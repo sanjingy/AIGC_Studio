@@ -80,8 +80,9 @@ export function useRenders(projectId: string | null) {
    * 上面那个 `error` 挂在中栏顶部，而角色/场景档案是在**抽屉里**看的，
    * 抽屉盖住了那条横幅——出错的时候用户只会看到按钮弹回原样，
    * 也就是"点了没反应"。所以每个出图位自己也要能显示自己的错误。
+   * 错误码一并记下：没有可用模型（`provider.not_configured`）时界面要给「去模型库」。
    */
-  const [errors, setErrors] = useState<Map<string, string>>(new Map());
+  const [errors, setErrors] = useState<Map<string, { message: string; code: string | null }>>(new Map());
   const { tasks: liveTasks } = useProjectEvents(projectId);
 
   const reload = useCallback(async () => {
@@ -151,12 +152,12 @@ export function useRenders(projectId: string | null) {
     return out;
   }, [historyByKey]);
 
-  const setKeyError = useCallback((key: string, message: string | null) => {
+  const setKeyError = useCallback((key: string, message: string | null, code: string | null = null) => {
     setErrors((prev) => {
       if (message === null && !prev.has(key)) return prev;
       const next = new Map(prev);
       if (message === null) next.delete(key);
-      else next.set(key, message);
+      else next.set(key, { message, code });
       return next;
     });
   }, []);
@@ -181,7 +182,7 @@ export function useRenders(projectId: string | null) {
         // 自带供应商被拒时补上具体原因（删了 / 停了 / 选了推理模型），通用文案只会让人去换 Key
         const message = e instanceof ApiRequestError ? describeApiError(e.error) : fallback;
         setError(message);
-        setKeyError(key, message);
+        setKeyError(key, message, e instanceof ApiRequestError ? e.error.code : null);
       } finally {
         setPending((p) => {
           const next = new Set(p);
@@ -262,7 +263,7 @@ export function useRenders(projectId: string | null) {
         } catch (e) {
           const message = e instanceof ApiRequestError ? describeApiError(e.error) : "出图请求失败";
           setError(message);
-          setKeyError(key, message);
+          setKeyError(key, message, e instanceof ApiRequestError ? e.error.code : null);
           break; // 余额不足这类错误，后面几张也一定失败，没必要继续刷屏
         } finally {
           setPending((p) => {
@@ -353,7 +354,9 @@ export function useRenders(projectId: string | null) {
     historyOf: (subject: RenderSubject) => historyByKey.get(subjectKey(subject)) ?? [],
     isPending: (subject: RenderSubject) => pending.has(subjectKey(subject)),
     /** 这个出图位自己的错误。抽屉里看不到中栏那条横幅，见 `errors` 的说明。 */
-    errorOf: (subject: RenderSubject) => errors.get(subjectKey(subject)) ?? null,
+    errorOf: (subject: RenderSubject) => errors.get(subjectKey(subject))?.message ?? null,
+    /** 上面那条错误的错误码；没有错误或不是接口错误时为 null */
+    errorCodeOf: (subject: RenderSubject) => errors.get(subjectKey(subject))?.code ?? null,
     generate,
     generateMany,
     assign,

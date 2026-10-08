@@ -314,6 +314,7 @@ _RECORDED_FAILURES = (
     "prompt.run.mismatch",
     "consistency.profile.missing",
     "provider.unavailable",
+    "provider.not_configured",
 )
 
 

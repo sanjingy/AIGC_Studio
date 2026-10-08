@@ -85,6 +85,23 @@ ERRORS: dict[str, ErrorSpec] = {
         failover=True,
         disposition=Disposition.KEEP,
     ),
+    "provider.not_configured": ErrorSpec(
+        # 这个能力**一个候选模型都没有**：平台没配 Key，组织也没接供应商
+        # （`gateway._candidates` 的空路由分支）。与上面那条 `unavailable`
+        # 的区别决定了谁去修：那条是上游出了故障，换一家或等一等会好；
+        # 这条等多久都不会好，只有用户（或管理员）去配了才行。复用
+        # "正在切换备用通道"，用户只会反复重试。
+        #
+        # 文案是一条通用的：目录里的 user_message 不带参数，缺的是哪个能力
+        # 在 `detail.capability` 里，界面要说"文本生成 / 图片生成"就读它。
+        # 不 failover：一条候选都没有，没有可换的。`RELEASE`：失败时一次上游
+        # 都没调，没有成本，预扣（出图任务才有）原样退回。
+        "provider.not_configured",
+        409,
+        "还没有可用的模型：请到「模型库」添加供应商并设为默认，或联系管理员配置平台 Key",
+        failover=False,
+        disposition=Disposition.RELEASE,
+    ),
     "provider.account.insufficient": ErrorSpec(
         # 平台自己在上游欠费。用户无责，必须全退并立刻告警。
         "provider.account.insufficient",

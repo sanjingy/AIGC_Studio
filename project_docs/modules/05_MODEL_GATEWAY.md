@@ -380,6 +380,14 @@ CREATE UNIQUE INDEX uq_org_model_defaults ON org_model_defaults (org_id, capabil
 这一层要不要改成"失败即失败，不 failover"？
 本文档按"仍然 failover + 显著提示"写，因为白付钱的代价更实。
 
+**一个候选都没有 ≠ 候选都失败**（2026-10-06，`FIX_NO_MODEL_ERROR`）：解析完这个能力
+一条路由都没有（平台没配 Key、组织也没接供应商；`_candidates` 的空路由分支）时报
+`provider.not_configured`（409，`retryable=False`、`failover=False`、`RELEASE`），
+`user_message` 把用户指到「模型库」，缺的能力在 `detail.capability`。有候选、只是全部
+失败（`_attempt` 末尾）、单家上游故障、本机运行时、embedding 仍是 `provider.unavailable`
+（502，"正在切换备用通道"，可重试）。两者不能合并：后者等一等或换一家会好，前者等多久都
+不会好，前端遇到它给「去模型库」而不把「重试」当主按钮（按错误码判断，不匹配文案）。
+
 ### 6.4 溯源
 
 ADR-031 代价第 2 条：每个生成任务的 `input_json` 必须记下解析出的模型
@@ -707,3 +715,14 @@ Provider 健康度与调用指标**不进业务表**，放 Redis + 指标系统
   视频 / TTS 的选项里**不含**它（没有协议绑定到这两个能力）；`base_url` 填内网地址被拒；
   出图结果 URL 指向内网 / 跳转被拒（`tests/integration/test_model_config_api.py`、
   `tests/unit/test_openai_images.py`）。
+
+
+## 2026-10-08 API 配置简化（ADR-040，已实现；真实上游验收待完成）
+
+GitHub 搜索：`openai api gateway stars:>=1000`，核对候选 one-api 37,084 stars（MIT）、LiteLLM 60,323 stars（需按目录核许可证）、Vercel AI 27,160 stars（需按目录核许可证）、new-api 49,382 stars（AGPL-3.0）。选择 one-api `web/default/src/pages/Channel/EditChannel.js` 的自定义模型选项合并逻辑，commit `8df4a2670b98266bd287c698243fff327d9748cf`，适配为纯 TS helper 并保留 MIT 许可。无需引入网关运行时；服务端读取接口接入现有 FastAPI、加密 Key 与 SSRF 契约。
+
+新增 `POST /model-config/connections/discover` 与 `POST /model-config/connections/{id}/discover`，入参 `{base_url, api_key?}`，返回 `{base_url, models: string[], mock}`。草稿必须给 Key，已保存连接可省略 Key 并复用加密存储的值，跨组织 404。没有写库、任务、扣费或生成操作。模型只返回 ID，不相信上游能力声明。
+
+前端默认只输入 API Key 和请求地址，点击读取后选择模型/用途；名称、手填模型与协议在高级设置。未开放视频/TTS 协议。完整标准 operation URL 规整为 API base，配置、探测和执行保持同一地址。未做付费上游生成验证。
+
+验证：Ruff/format、Mypy（156 源文件）、49 项模型发现与端点相关单测、68 项前端逻辑测试及正式构建通过。浏览器使用独立 Mock，验证两输入、动态选择、规范化保存、自动名称、保存后无 Key、读取失败保留草稿、手填图片模型、1440/1280/390 视口及无运行时错误。证据 `orca/tasks/API_CONFIG_SIMPLE/`。未跑数据库全量集成测试、未调用付费 Provider、未提交部署。

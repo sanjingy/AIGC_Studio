@@ -18,6 +18,7 @@ import {
   type StoryboardView,
 } from "@/components/freeflow/storyboard/storyboard-directory";
 import { NodeCoverage, ScopeSheet, StatStrip } from "@/components/freeflow/storyboard/storyboard-overview";
+import { RenderFailure, canRetryRender } from "@/components/freeflow/render-failure";
 import { ImageSourcePicker } from "@/components/project/image-source-picker";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogCloseButton } from "@/components/ui/dialog";
@@ -616,7 +617,7 @@ export function StoryboardEditor({
                           {activeBusy ? <Loader2 aria-hidden className="size-3.5 animate-spin" /> : <Sparkles aria-hidden className="size-3.5" />}
                           {activeBusy ? "生成中" : activeInfo.current ? "再出一张" : "生成首帧图"}
                         </Button>
-                        {activeInfo.latest?.status === "failed" && activeInfo.latest.taskId && (
+                        {activeInfo.latest?.status === "failed" && activeInfo.latest.taskId && canRetryRender(activeInfo.latest.errorCode) && (
                           <Button size="sm" disabled={activeBusy} onClick={() => renders.retry(activeSubject!, activeInfo.latest!.taskId as string)}>
                             <RefreshCw aria-hidden className="size-3.5" />
                             重试这次任务
@@ -631,14 +632,11 @@ export function StoryboardEditor({
                         {preparedShotPrompt && !shotDirty && (
                           <p className="text-xs text-fg-subtle">出图将使用你已准备的提示词</p>
                         )}
-                        {activeError && (
-                          <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">
-                            {activeError}
-                          </p>
-                        )}
-                        {activeInfo.latest?.status === "failed" && activeInfo.latest.errorCode && (
-                          <p className="text-xs text-danger">上次出图失败，错误码：{activeInfo.latest.errorCode}。可以重试这次任务，或再出一张。</p>
-                        )}
+                        <RenderFailure
+                          error={activeError}
+                          errorCode={activeSubject ? renders.errorCodeOf(activeSubject) : null}
+                          lastFailedCode={activeInfo.latest?.status === "failed" ? activeInfo.latest.errorCode : null}
+                        />
                       </>
                     }
                   />

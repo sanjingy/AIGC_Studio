@@ -5,7 +5,9 @@
 > 见 `project_docs/00_CURRENT_STATUS.md`；提交或合并不代表已部署或验收通过。
 
 面向普通用户的 AI 内容生产操作系统：用户描述目标，系统编排 Agent 完成
-从小说到成片的整条生产链。主线是**小说 → 5 分钟悬疑漫剧**。
+从小说或创意到逐镜带配音 MP4 的生产链。
+
+> **2026-10-08 统一规则**：先读 `project_docs/06_DEVELOPMENT_PRINCIPLES.md`。面向外部创作者的 SaaS，工作台采用 Reelbench 参考方向；模块编码前必查 GitHub 同类模块，候选至少 1,000 stars，合适则优先套用代码并记录许可证、来源版本与适配方案。旧定位、配色和阶段说明不得覆盖最新规则。
 
 ---
 
@@ -17,8 +19,8 @@
 | 顺序 | 文档 | 为什么先读它 |
 |---|---|---|
 | 1 | `project_docs/00_CURRENT_STATUS.md` | 前半页是产品终点：用户是谁、输入什么、终点是"逐镜带配音的 MP4"、明确不做什么 |
-| 2 | `project_docs/DECISIONS_2026-09-02.md` | 本轮大改的全部决策，与任何文档冲突时以它为准 |
-| 3 | `aigc_studio_docs/15_ArchitectureDecisions.md` | 33 条 ADR，全部有效。ADR-030 ~ 033 是本轮新增 |
+| 2 | `project_docs/06_DEVELOPMENT_PRINCIPLES.md` | 当前统一开发原则；9 月 2 日决策是历史基线，后续决定覆盖冲突条款 |
+| 3 | `aigc_studio_docs/15_ArchitectureDecisions.md` | ADR-001～040，按后续 supersedes 条款判定有效范围 |
 | 4 | `project_docs/04_MODULE_ROADMAP.md` | 当前在哪一波、黄金路径是什么 |
 | 5 | `project_docs/modules/` | 要改哪个模块就读哪份 |
 | 6 | `aigc_studio_docs/19_UnitEconomics.md` | 钱怎么算。**盈亏平衡 = 每天 16 部成片**（"部"的定义随 ADR-032 待重估） |

@@ -4,6 +4,7 @@ import type * as React from "react";
 import { useState } from "react";
 import { AlertTriangle, Check, Loader2, Play, Undo2 } from "lucide-react";
 
+import { ModelSetupLink } from "@/components/freeflow/model-setup-link";
 import { Button } from "@/components/ui/button";
 import type { GateName } from "@/lib/api";
 import { GatePendingIcon } from "@/components/icons/studio-icons";
@@ -13,6 +14,7 @@ import {
   ROLE_LABEL,
   type ProjectState,
 } from "@/lib/freeflow/use-project-state";
+import { needsModelSetup } from "@/lib/freeflow/provider-scope";
 import { cn } from "@/lib/utils";
 
 /**
@@ -138,11 +140,7 @@ export function GateActions({
           <span className="text-xs text-rf-warning">{blockedReason ?? approveBlockedReason}</span>
         )}
       </div>
-      {state.actionError && (
-        <p role="alert" className="mt-2 rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
-          {state.actionError}
-        </p>
-      )}
+      {state.actionError && <ActionError state={state} />}
     </section>
   );
 }
@@ -229,11 +227,17 @@ export function AdvanceAction({ state, className }: { state: ProjectState; class
         这是真实的模型调用，会扣 Credits，并且一路跑到下一个审核门才停。
       </p>
 
-      {state.actionError && state.busy === null && (
-        <p role="alert" className="mt-2 rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
-          {state.actionError}
-        </p>
-      )}
+      {state.actionError && state.busy === null && <ActionError state={state} />}
     </section>
+  );
+}
+
+/** 动作失败的提示。没有可用模型时附「去模型库」：那种失败重试多少次都一样。 */
+export function ActionError({ state }: { state: Pick<ProjectState, "actionError" | "actionErrorCode"> }) {
+  return (
+    <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
+      <p className="min-w-0 flex-1">{state.actionError}</p>
+      {needsModelSetup(state.actionErrorCode) && <ModelSetupLink size="sm" />}
+    </div>
   );
 }

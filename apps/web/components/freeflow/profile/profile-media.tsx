@@ -3,6 +3,7 @@
 import { Loader2, RefreshCw, Sparkles } from "lucide-react";
 
 import { PromptPanel } from "@/components/freeflow/project/prompt-panel";
+import { RenderFailure, canRetryRender } from "@/components/freeflow/render-failure";
 import { OutdatedNotice } from "@/components/freeflow/storyboard/shot-detail";
 import { ShotStage } from "@/components/freeflow/storyboard/shot-stage";
 import { ImageSourcePicker } from "@/components/project/image-source-picker";
@@ -86,7 +87,7 @@ export function ProfileMedia({
             {busy ? <Loader2 aria-hidden className="size-3.5 animate-spin" /> : <Sparkles aria-hidden className="size-3.5" />}
             {pending ? "提交中" : running ? "生成中" : current ? "再出一张" : `生成${noun}`}
           </Button>
-          {failed && latest?.taskId && (
+          {failed && latest?.taskId && canRetryRender(latest.errorCode) && (
             <Button size="sm" disabled={busy || blocked} title={blockedReason ?? undefined} onClick={() => renders.retry(subject, latest.taskId as string)}>
               <RefreshCw aria-hidden className="size-3.5" />
               重试这次任务
@@ -115,14 +116,11 @@ export function ProfileMedia({
           {blockedReason && <p className="text-xs text-rf-warning">{blockedReason}</p>}
           {prepared && !blocked && <p className="text-xs text-fg-subtle">出图将使用你已准备的提示词</p>}
           {outdated && editedAt !== null && <OutdatedNotice editedAt={editedAt} changed="档案改动" content="当前档案" />}
-          {error && (
-            <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-xs break-words text-danger">
-              {error}
-            </p>
-          )}
-          {failed && latest?.errorCode && (
-            <p className="text-xs text-danger">上次出图失败，错误码：{latest.errorCode}。可以重试这次任务，或再出一张。</p>
-          )}
+          <RenderFailure
+            error={error}
+            errorCode={renders.errorCodeOf(subject)}
+            lastFailedCode={failed ? (latest?.errorCode ?? null) : null}
+          />
         </>
       }
     />

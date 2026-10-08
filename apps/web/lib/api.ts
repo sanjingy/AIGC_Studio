@@ -1414,6 +1414,13 @@ export type ConnectionReferences = {
 };
 
 export const modelConfig = {
+  discoverModels: (body: { base_url: string; api_key?: string }, connectionId?: string) =>
+    apiFetch<{ base_url: string; models: string[]; mock: boolean }>(
+      connectionId
+        ? `/model-config/connections/${encodeURIComponent(connectionId)}/discover`
+        : "/model-config/connections/discover",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
   /** 每个能力：可选上游与模型（目录 + 组织连接）、组织当前选择、目录各家 Key 状态 */
   get: () => apiFetch<ModelConfig>("/model-config"),
 

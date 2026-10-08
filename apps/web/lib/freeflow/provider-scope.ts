@@ -1,3 +1,4 @@
+import { connectionLabel, normalizeApiAddress } from "./model-options";
 /**
  * 模型与供应商页（ADR-039 A2）的纯逻辑：引用串、测试结论、默认切换的行、表单草稿与请求体。
  *
@@ -93,6 +94,31 @@ export function byokReasonText(reason: unknown): string | null {
   return typeof reason === "string" && reason ? (BYOK_REASON[reason] ?? null) : null;
 }
 
+// ---------------------------------------------------------------- 一个模型都没有
+
+/**
+ * 这个能力一个候选模型都没有（平台没配 Key、组织也没接供应商）。等多久都不会好，
+ * 只能去模型库配——所以界面遇到它给「去模型库」，不把「重试」当主按钮。
+ * 一律按错误码判断，不匹配文案。
+ */
+export const NOT_CONFIGURED = "provider.not_configured";
+export const MODELS_HREF = "/freeflow/models";
+
+const CAPABILITY_LABEL: Record<string, string> = {
+  text_generation: "文本生成",
+  image_generation: "图片生成",
+};
+
+export function needsModelSetup(code: string | null | undefined): boolean {
+  return code === NOT_CONFIGURED;
+}
+
+/** 后端 `user_message` 不带能力名，能力在 `detail.capability`。认不出的能力返回 null，用后端原句。 */
+export function notConfiguredText(capability: unknown): string | null {
+  const label = typeof capability === "string" ? CAPABILITY_LABEL[capability] : undefined;
+  return label ? `还没有可用的${label}模型：请到「模型库」添加供应商并设为默认，或联系管理员配置平台 Key` : null;
+}
+
 type ErrorLike = { code: string; message?: string; user_message?: string; detail?: Record<string, unknown> };
 
 /**
@@ -102,6 +128,7 @@ type ErrorLike = { code: string; message?: string; user_message?: string; detail
  */
 export function describeApiError(error: ErrorLike, preferMessage = false): string {
   const base = (preferMessage ? error.message || error.user_message : error.user_message || error.message) ?? "";
+  if (error.code === NOT_CONFIGURED) return notConfiguredText(error.detail?.capability) ?? base;
   if (error.code !== "provider.byok.rejected") return base;
   const reason = byokReasonText(error.detail?.reason);
   return reason ? `${reason}。去「模型」页或项目设置改选。` : base;
@@ -214,7 +241,7 @@ export function draftFromPreset(preset: ProviderPreset | null, protocols: Protoc
       label: "",
       baseUrl: "",
       apiKey: "",
-      models: [{ model_id: "", protocol: protocols[0]?.protocol ?? "", reasoning: false }],
+      models: [{ model_id: "", protocol: "openai_chat", reasoning: false }],
     };
   }
   return {
@@ -249,7 +276,6 @@ function cleanModels(models: ModelDraft[]): ConnectionModelInput[] {
  */
 export function draftProblems(draft: ConnectionDraft, mode: "create" | "edit"): string[] {
   const out: string[] = [];
-  if (!draft.label.trim()) out.push("填写名称");
   const url = draft.baseUrl.trim();
   if (!url) out.push("填写 Base URL");
   else if (!/^https:\/\//i.test(url)) out.push("Base URL 必须以 https:// 开头");
@@ -268,8 +294,8 @@ export function draftProblems(draft: ConnectionDraft, mode: "create" | "edit"): 
 
 export function createBody(draft: ConnectionDraft): ConnectionCreate {
   const body: ConnectionCreate = {
-    label: draft.label.trim(),
-    base_url: draft.baseUrl.trim(),
+    label: connectionLabel(draft.label, draft.baseUrl),
+    base_url: normalizeApiAddress(draft.baseUrl),
     models: cleanModels(draft.models),
     api_key: draft.apiKey.trim(),
   };
@@ -281,7 +307,7 @@ export function createBody(draft: ConnectionDraft): ConnectionCreate {
 export function patchBody(draft: ConnectionDraft, saved: ProviderConnection): ConnectionPatch {
   const body: ConnectionPatch = {};
   if (draft.label.trim() !== saved.label) body.label = draft.label.trim();
-  if (draft.baseUrl.trim() !== saved.base_url) body.base_url = draft.baseUrl.trim();
+  if (normalizeApiAddress(draft.baseUrl) !== saved.base_url) body.base_url = normalizeApiAddress(draft.baseUrl);
   const next = cleanModels(draft.models);
   const prev = saved.models.map((m) => ({ model_id: m.model_id, protocol: m.protocol, reasoning: Boolean(m.reasoning) }));
   if (JSON.stringify(next) !== JSON.stringify(prev)) body.models = next;
@@ -301,7 +327,7 @@ export function draftTestBody(
   return {
     protocol: model.protocol,
     model_id: model.model_id,
-    base_url: url,
+    base_url: normalizeApiAddress(url),
     api_key: key,
     ...(draft.presetId ? { preset_id: draft.presetId } : {}),
   };
@@ -318,7 +344,7 @@ export function savedTestBody(
     body.protocol = model.protocol;
     body.model_id = model.model_id;
   }
-  if (draft.baseUrl.trim() && draft.baseUrl.trim() !== saved.base_url) body.base_url = draft.baseUrl.trim();
+  if (draft.baseUrl.trim() && normalizeApiAddress(draft.baseUrl) !== saved.base_url) body.base_url = normalizeApiAddress(draft.baseUrl);
   if (draft.apiKey.trim()) body.api_key = draft.apiKey.trim();
   return body;
 }

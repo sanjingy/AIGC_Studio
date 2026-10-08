@@ -1,12 +1,14 @@
 # 开发流程
 
-> 更新：2026-09-17（§5 / §6 重写）。适用于所有 Lead 会话与 Worker。
+> 更新：2026-10-08。适用于所有 Lead 会话与 Worker。
+> 统一产品、复用、视觉及验收规则见 [统一开发原则](./06_DEVELOPMENT_PRINCIPLES.md)。
+> 每个模块选型和编码前必须搜索 GitHub 同类模块，候选至少 1,000 stars；合适则优先套用代码，记录来源版本、许可证和适配方案。无合适候选记录原因后再决定自研。
 
 ## 1. 文档先行
 
 1. 新功能先改对应模块文档（`project_docs/modules/`）的需求、接口、验收，再改代码。
 2. 偏离既有 ADR 的实现先提新 ADR（`aigc_studio_docs/15_ArchitectureDecisions.md`），
-   标注 supersedes 哪一条。**29 条既有 ADR 全部有效**，不允许"顺手改掉"。
+   标注 supersedes 哪一条。**以最新有效 ADR 为准，被后续 ADR 替代的条款不再有效**，不允许"顺手改掉"。
 3. 状态词只用五个：已实现 / 部分实现 / 预留 / 仅设计 / 未实现。页面占位、类型声明、
    路线图都不算实现。
 4. 事实来源优先级：当前代码与迁移 > 自动化测试 > `project_docs` > `aigc_studio_docs` 历史文档 > `_research`。
@@ -14,7 +16,7 @@
 ## 2. 每个功能的实施顺序
 
 ```
-Domain model → API contract → Service → Worker → Adapter → UI → Tests → Docs
+GitHub 同类模块调研（至少 1,000 stars）→ 复用选型与模块需求/验收 → Domain model → API contract → Service → Worker → Adapter → UI → Tests → Docs
 ```
 
 外部 Provider 一律先有 Mock，`ENV=test` 强制走 Mock。
@@ -55,7 +57,7 @@ redis:7 两个 service 容器）与 `web`。backend 的步骤顺序就是下表�
 | 前端 `lint` | 待 ESLint 9 flat config 修好 | — |
 | Playwright 黄金路径 | Wave 1 | 登录 → 新建 → 剧本确认 → 分镜确认 → 出图 |
 
-CI 是地板不是天花板：CI 绿只说明没白屏，能不能用由 Lead 手动验收说了算。
+CI 是工程地板，不证明交互或生成质量。Lead 按统一开发原则 §6 走真实用户流程，分别记录工程检查、产品交互、真实后端闭环、真实生成质量与部署生效；Mock 浏览器通过不能替代真实生成验收。
 
 ### 5.1 lint 范围：`.claude/skills/` 不在口径内
 
@@ -200,3 +202,8 @@ lint 结论只对**你这台机上那个 ruff 版本**成立，跟 CI 对不上�
 前端验收可设置 `NEXT_BUILD_DIR=.next-acceptance`，生产构建检查可设置
 `NEXT_BUILD_DIR=.next-build-check`，将模块清单与已有开发服务的 `.next` 隔离。
 同一轮 `build` 与 `start` 必须使用同一个目录和 `API_ORIGIN`。
+
+
+### 2026-10-08 部署依赖兼容性核对
+
+SQLAlchemy 限定 `>=2.0.36,<2.1`。服务器曾安装 2.1.3，本地为 2.0.54；2.1 将 Select 的泛型参数改为元素类型，现有 2.0 的 `Select[tuple[Entity]]` 注解在旧提交上也报 14 个类型错误。此轮保留 2.0 契约并约束兼容范围，避免重建镜像时未经迁移进入 2.1；升级 2.1 需要另做类型/API 兼容核验。ruff/mypy 的版本策略没有因此改变。

@@ -74,6 +74,11 @@ def _tarball(paths: list[str]) -> bytes:
 def main() -> int:
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
     command = COMMANDS.get(what, what)
+    needs_worker = "pytest" in command
+    worker_reload = (
+        "docker compose restart worker && sleep 2 && "
+        "docker compose exec -T api python -m arq worker.main.WorkerSettings --check && "
+    )
 
     paths = _tracked_files()
     blob = _tarball(paths)
@@ -96,7 +101,7 @@ def main() -> int:
             f"{RESTORE} >/dev/null 2>&1; "
             f"cd {REMOTE} && tar xzf {remote_tar} && "
             f"echo '[srv] 开始执行: {what}' && "
-            f"cd {REMOTE} && {command}"
+            f"cd {REMOTE} && {worker_reload if needs_worker else ''}{command}"
         )
         started = time.time()
         _, out, err = client.exec_command(script, timeout=3600, get_pty=False)
@@ -110,7 +115,10 @@ def main() -> int:
         return code
     finally:
         # 无论成败都恢复，别把部署检出留成脏的。
-        _, out, _ = client.exec_command(RESTORE, timeout=120)
+        restore_command = RESTORE
+        if needs_worker:
+            restore_command += " && docker compose restart worker"
+        _, out, _ = client.exec_command(restore_command, timeout=120)
         out.channel.recv_exit_status()
         client.close()
         print("[srv] 服务器检出已恢复", flush=True)

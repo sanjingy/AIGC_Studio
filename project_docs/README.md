@@ -1,6 +1,7 @@
 # AIGC Studio 项目知识库
 
-> 更新基线：2026-09-02，分支 `feat/freeflow-prototype`。**本目录是项目文档的唯一入口。**
+> 规则入口更新：2026-10-08，当前默认在本地 `main` 开发。**本目录是项目文档的唯一入口。**
+> 先读 [统一开发原则](./06_DEVELOPMENT_PRINCIPLES.md)。下方模块盘点为 9 月 2 日历史基线，最新阶段快照见当前状态首页与参考工作台计划。
 >
 > 本目录以当前代码、数据库迁移和测试为事实依据；`aigc_studio_docs/` 除 ADR 外均为历史资料。文档中的状态统一使用：`已实现`、`部分实现`、`预留`、`仅设计`、`未实现`。
 
@@ -8,7 +9,8 @@
 
 | 文档 | 用途 |
 |---|---|
-| [DECISIONS_2026-09-02.md](./DECISIONS_2026-09-02.md) | **本轮大改的全部决策**，与其他文档冲突时以它为准 |
+| [06_DEVELOPMENT_PRINCIPLES.md](./06_DEVELOPMENT_PRINCIPLES.md) | 当前统一规则：产品、GitHub 1k 星复用、工作台、验收与事实口径 |
+| [DECISIONS_2026-09-02.md](./DECISIONS_2026-09-02.md) | 9 月 2 日历史决策基线；后续明确决定及有效 ADR 覆盖冲突条款 |
 | [00_CURRENT_STATUS.md](./00_CURRENT_STATUS.md) | 产品终点定义（先读）、当前完成度、边界和主要风险 |
 | [01_FUNCTION_INVENTORY.md](./01_FUNCTION_INVENTORY.md) | 现有功能总清单和真实状态 |
 | [02_TECH_STACK.md](./02_TECH_STACK.md) | 技术栈选择、理由和替代边界 |
@@ -18,7 +20,7 @@
 | [modules/](./modules/) | 每个业务模块的独立需求与实施计划 |
 | [A/B/C 整改计划](./plans/2026-09-11_abc_workbench_and_prompt_alignment.md) | 9 月 13 日接续：每个小步骤的页面/后台边界、日志调查、提示词接入验收 |
 | [本机运行时](./modules/15_LOCAL_RUNTIME.md) | 文本与图片试点、接口契约、已验证范围和未完成的真实生成验收 |
-| `../aigc_studio_docs/15_ArchitectureDecisions.md` | ADR-001 ~ 038；后续决定覆盖被替代条款 |
+| `../aigc_studio_docs/15_ArchitectureDecisions.md` | ADR-001 ~ 040；后续决定覆盖被替代条款 |
 
 ## 2. 模块计划
 
@@ -50,8 +52,10 @@
 ## 4. 事实来源优先级
 
 ```text
-当前代码与迁移
-  > 自动化测试与可运行行为
+规则与目标：负责人最新明确决定 > 统一开发原则与最新有效 ADR > 模块需求 > 历史记录
+
+实现事实：当前代码与迁移
+  > 对应自动化测试与可运行行为
   > 本目录模块计划
   > aigc_studio_docs 历史设计文档
   > reviews 与研究报告

@@ -558,23 +558,14 @@ ADR-029 的三条 Patch 端点后端一直都有（`apps/api/modules/content/`�
 
 ## 10. 设计系统
 
-- Token 基线仍是 `design-system/aigc-studio/MASTER.md`，**但 §5 的四栏版式作废**
-  （ADR-030 代价第 2 条），需要一次设计系统文档同步：freeflow 是
-  「Topbar + 全局 rail + 主编辑区 + 可折叠 inspector」，不是旧壳的四栏。
-- 延续 neutral slate + teal，桌面高密度生产工具定位；边框和分区优先，
-  少用大圆角卡片墙和无意义阴影。
-- 图片、视频、状态和真实结果是视觉主体；图像评审区用纯中性 surface，
-  不用彩色底影响颜色判断。
-- 尺寸建议（`_research/workbench_redesign_spec.md`）：Topbar 56px、
-  全局 rail 72px（1920 可 80px）、主编辑区 `minmax(600px,1fr)`、
-  inspector 320–340px（1920 400–440px）、内容内边距 24px（1920 32px）。
-- **禁止 body 横向滚动**；空间不足时按"rail 收窄 → 隐藏层级列 →
-  inspector 变覆盖抽屉 → 分镜预览/提示词切 tab"的顺序降级，
-  不得把两个编辑列各压到 300px 以下。
-- 动效 150–200ms ease-out，仅用于状态与层级反馈，支持 `prefers-reduced-motion`；
-  不用 shimmer 骨架屏，用静态占位。
+- 产品为面向普通外部创作者的托管 SaaS；规则见 [统一开发原则](../06_DEVELOPMENT_PRINCIPLES.md)，视觉细节统一引用 `design-system/aigc-studio/MASTER.md`。
+- 当前采用 Reelbench 参考工作台：紧凑项目顶栏、72–88px 模块栏、230–280px 对象目录、弹性编辑与预览主区；窄屏目录及辅助面板转抽屉。
+- 工作台沿用 `.theme-reelflow` 暖黑底与克制金色语义 token。旧 teal、霓虹青、蓝灰场记台及装饰胶片齿孔不再作为设计要求。
+- 正文 14–16px，表格最小 13px，系统字体；真实内容为主体，动作靠近对象，导航位置与生产状态分开。避免空大卡片、大标题与内部错误码主导用户流程。
+- 禁止 body 横向滚动，支持键盘焦点及 reduced-motion。具体页面动作范围与数据边界见参考工作台计划及 MASTER 的 P1–P3 条目。
+- GitHub 复用调研和工程、交互、真实后端、生成质量、部署分别验收，遵从统一原则 §2 与 §6。
 
----
+本模块中带日期的旧清理清单和缺口是历史基线；最新阶段完成度以当前状态首页及 `plans/2026-09-25_reference_workbench.md` 为准。
 
 ## 11. 模块依赖
 

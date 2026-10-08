@@ -38,6 +38,7 @@ import {
   type DefaultRow,
 } from "@/lib/freeflow/provider-scope";
 import { cn } from "@/lib/utils";
+import { mergeModelOptions } from "@/lib/freeflow/model-options";
 
 import { ConfirmDialog } from "./project/feedback";
 
@@ -49,7 +50,7 @@ import { ConfirmDialog } from "./project/feedback";
  * - **默认模型**：每个已接入能力一本。候选是平台目录里的每一家（模型与计费在行内选）
  *   加上每个供应商连接里这个能力的每个模型（一键）。保存成功才换「当前」，失败保留原值、
  *   显示后端原文。默认指向的连接坏了（`broken_reason`）时顶部醒目提示，下面直接改选。
- * - **供应商**：本组织的连接。添加从预设选（只填 Key）或自定义；编辑时 Key 从空开始，
+ * - **供应商**：本组织的连接。直接填写 Key 与地址，读取或手填模型；编辑时 Key 从空开始，
  *   **永不回显**，只显示后端给的尾号掩码。删除前列出谁正指向它——删了不会自动换到别家。
  * - **还没接入的能力**（视频、语音）照实写，不放控件。
  *
@@ -95,7 +96,7 @@ export function ModelCatalogPage() {
         setPresets(r.presets);
         setProtocols(r.protocols);
       })
-      // 预设读不到只影响「从预设添加」，自定义仍可用（协议也读不到时自定义表单会写明）
+      // 协议目录读不到时基础兼容配置仍可用，高级协议选择照实提示
       .catch(() => undefined);
   }, [reloadConfig, reloadConnections]);
 
@@ -168,6 +169,16 @@ export function ModelCatalogPage() {
         </p>
       )}
 
+      <ConnectionsSection
+        connections={connections}
+        limit={limit}
+        presets={presets}
+        protocols={protocols}
+        loadError={connError}
+        capLabel={capLabel}
+        onChanged={afterConnectionChange}
+      />
+
       {available.map((item) => (
         <DefaultSection
           key={item.capability}
@@ -183,16 +194,6 @@ export function ModelCatalogPage() {
           }}
         />
       ))}
-
-      <ConnectionsSection
-        connections={connections}
-        limit={limit}
-        presets={presets}
-        protocols={protocols}
-        loadError={connError}
-        capLabel={capLabel}
-        onChanged={afterConnectionChange}
-      />
 
       {pending.map((item) => (
         <PendingSection key={item.capability} item={item} />
@@ -290,7 +291,7 @@ function DefaultSection({
           </div>
           {orgRows.length === 0 && (
             <p className="ff-ledger-empty px-4 py-3 text-xs text-fg-subtle">
-              还没有能做{item.label}的供应商。在下方「供应商」里添加后，这里可以一键切换。
+              还没有能做{item.label}的供应商。在上方「供应商」里添加后，这里可以一键切换。
             </p>
           )}
           {orgRows.map((r) => (
@@ -772,21 +773,62 @@ function ConnectionDrawer({
   onClose: () => void;
   onSaved: (message: string) => void;
 }) {
-  /** 新建先选来源；编辑直接进表单 */
-  const [draft, setDraft] = useState<ConnectionDraft | null>(saved ? draftFromConnection(saved) : null);
-  const [busy, setBusy] = useState<"save" | "test" | null>(null);
+  /** 新建直接填写 Key + 地址；厂商与模型不固定。 */
+  const [draft, setDraft] = useState<ConnectionDraft | null>(
+    saved ? draftFromConnection(saved) : draftFromPreset(null, protocols),
+  );
+  const [discovered, setDiscovered] = useState<string[]>([]);
+  const [discoveryNote, setDiscoveryNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | "discover" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<KeyTestResult | null>(null);
   const [showKey, setShowKey] = useState(false);
-  const preset = draft?.presetId ? presets.find((p) => p.preset_id === draft.presetId) ?? null : null;
+  const preset = draft?.presetId
+    ? (presets.find((p) => p.preset_id === draft.presetId) ?? null)
+    : null;
 
   function patch(next: Partial<ConnectionDraft>) {
     setDraft((d) => (d ? { ...d, ...next } : d));
     setResult(null);
+    if (next.baseUrl !== undefined || next.apiKey !== undefined) {
+      setDiscovered([]);
+      setDiscoveryNote(null);
+    }
+  }
+
+  async function discover() {
+    if (!draft) return;
+    setBusy("discover");
+    setError(null);
+    setDiscoveryNote(null);
+    try {
+      const response = await modelConfig.discoverModels(
+        {
+          base_url: draft.baseUrl.trim(),
+          ...(draft.apiKey.trim() ? { api_key: draft.apiKey.trim() } : {}),
+        },
+        saved?.id,
+      );
+      setDiscovered(response.models);
+      setDraft((d) => (d ? { ...d, baseUrl: response.base_url } : d));
+      setDiscoveryNote(
+        response.mock
+          ? "测试环境模型列表（Mock），未连接真实上游"
+          : `读取到 ${response.models.length} 个模型，请选择要使用的模型`,
+      );
+    } catch (e) {
+      setError(errorText(e, "读取模型失败，可以在高级设置中手动填写模型 ID"));
+    } finally {
+      setBusy(null);
+    }
   }
 
   const problems = draft ? draftProblems(draft, mode) : [];
-  const testBody = draft ? (saved ? savedTestBody(draft, saved) : draftTestBody(draft)) : null;
+  const testBody = draft
+    ? saved
+      ? savedTestBody(draft, saved)
+      : draftTestBody(draft)
+    : null;
   const changes = draft && saved ? patchBody(draft, saved) : null;
   const nothingChanged = changes !== null && Object.keys(changes).length === 0;
 
@@ -800,7 +842,9 @@ function ConnectionDrawer({
         onSaved(`${draft.label.trim()} 已保存`);
       } else {
         const created = await modelConfig.createConnection(createBody(draft));
-        onSaved(`已添加 ${created.label}。在上面的默认模型里点「设为默认」就会改用它`);
+        onSaved(
+          `已添加 ${created.label}。在默认模型区域点「设为默认」就会改用它`,
+        );
       }
       setDraft((d) => (d ? { ...d, apiKey: "" } : d));
     } catch (e) {
@@ -817,7 +861,10 @@ function ConnectionDrawer({
     setError(null);
     setResult(null);
     try {
-      if (saved) setResult(await modelConfig.testSaved(saved.id, savedTestBody(draft, saved)));
+      if (saved)
+        setResult(
+          await modelConfig.testSaved(saved.id, savedTestBody(draft, saved)),
+        );
       else {
         const body = draftTestBody(draft);
         if (body) setResult(await modelConfig.testDraft(body));
@@ -831,7 +878,13 @@ function ConnectionDrawer({
 
   const field =
     "h-8 w-full min-w-0 rounded-md border border-border-strong bg-surface px-2.5 text-sm text-fg placeholder:text-fg-subtle";
-  const title = saved ? `编辑 ${saved.label}` : draft ? (preset ? `添加 ${preset.label}` : "添加自定义供应商") : "添加供应商";
+  const title = saved
+    ? `编辑 ${saved.label}`
+    : draft
+      ? preset
+        ? `添加 ${preset.label}`
+        : "添加自定义供应商"
+      : "添加供应商";
 
   return (
     <Dialog
@@ -849,60 +902,49 @@ function ConnectionDrawer({
         <DialogCloseButton disabled={busy !== null} onClick={onClose} />
       </div>
 
-      {!draft && (
-        <div className="flex flex-col gap-3 p-4">
-          <p className="text-xs leading-5 text-fg-subtle">选一个厂商，地址和模型已经填好，只需粘贴 Key。</p>
-          <ul className="grid gap-2 sm:grid-cols-2" aria-label="预设">
-            {presets.map((p) => (
-              <li key={p.preset_id} className="flex flex-col gap-1 rounded-[2px] border border-border p-2.5">
-                <button
-                  type="button"
-                  className="cursor-pointer text-left text-sm font-medium text-fg hover:text-primary"
-                  onClick={() => setDraft(draftFromPreset(p, protocols))}
-                >
-                  {p.label}
-                </button>
-                <span className="text-xs text-fg-subtle">{p.capabilities.map(capLabel).join(" / ")}</span>
-              </li>
-            ))}
-          </ul>
-          {presets.length === 0 && <p className="text-xs text-fg-subtle">预设暂时读不到，可以用自定义添加。</p>}
-          <Button size="sm" className="self-start" onClick={() => setDraft(draftFromPreset(null, protocols))}>
-            自定义（填写地址与模型）
-          </Button>
-        </div>
-      )}
-
       {draft && (
         <div className="flex flex-col gap-3 p-4">
           {preset && (
             <p className="text-xs text-fg-subtle">
               {preset.key_url ? (
-                <a href={preset.key_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                <a
+                  href={preset.key_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary hover:underline"
+                >
                   去 {preset.label} 取 Key
                 </a>
               ) : (
-                <a href={preset.docs_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                <a
+                  href={preset.docs_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary hover:underline"
+                >
                   {preset.label} 文档（取 Key 方法见文档）
                 </a>
               )}
             </p>
           )}
+          <p className="text-sm leading-6 text-fg-muted">
+            填写 API Key 和请求地址，读取模型后选择使用。无需先选厂商。
+          </p>
           <label className="flex flex-col gap-1 text-xs text-fg">
-            名称
-            <input className={field} value={draft.label} maxLength={64} onChange={(e) => patch({ label: e.target.value })} placeholder="例如：公司网关" />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-fg">
-            Base URL
+            API 请求地址
             <input
               className={cn(field, "font-mono")}
               value={draft.baseUrl}
+              disabled={busy !== null}
               maxLength={512}
               spellCheck={false}
               onChange={(e) => patch({ baseUrl: e.target.value })}
               placeholder="https://api.example.com/v1"
             />
-            <span className="text-[11px] leading-5 text-fg-subtle">只接受 https；内网与本机地址会被拒绝。</span>
+            <span className="text-[11px] leading-5 text-fg-subtle">
+              填写兼容 API 的基础地址或完整请求地址，例如
+              https://api.example.com/v1/chat/completions。
+            </span>
           </label>
           <label className="flex flex-col gap-1 text-xs text-fg">
             API Key
@@ -913,8 +955,13 @@ function ConnectionDrawer({
                 autoComplete="off"
                 spellCheck={false}
                 value={draft.apiKey}
+                disabled={busy !== null}
                 onChange={(e) => patch({ apiKey: e.target.value })}
-                placeholder={saved ? `已保存 ${saved.masked_key ?? ""}，留空不更换` : "粘贴 API Key"}
+                placeholder={
+                  saved
+                    ? `已保存 ${saved.masked_key ?? ""}，留空不更换`
+                    : "粘贴 API Key"
+                }
                 data-testid="conn-key-input"
               />
               <button
@@ -924,91 +971,253 @@ function ConnectionDrawer({
                 aria-pressed={showKey}
                 className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-fg"
               >
-                {showKey ? <EyeOff aria-hidden className="size-3.5" /> : <Eye aria-hidden className="size-3.5" />}
+                {showKey ? (
+                  <EyeOff aria-hidden className="size-3.5" />
+                ) : (
+                  <Eye aria-hidden className="size-3.5" />
+                )}
               </button>
             </span>
           </label>
 
-          <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs text-fg">模型</legend>
-            {protocols.length === 0 && (
-              <p className="text-xs text-danger">协议列表读不到，暂时不能填写模型。</p>
+          <Button
+            size="sm"
+            className="self-start"
+            disabled={
+              busy !== null ||
+              !draft.baseUrl.trim() ||
+              (!saved && draft.apiKey.trim().length < 8)
+            }
+            onClick={() => void discover()}
+          >
+            {busy === "discover" && (
+              <Loader2 aria-hidden className="size-3.5 animate-spin" />
             )}
-            {draft.models.map((m, i) => {
-              const spec = protocols.find((p) => p.protocol === m.protocol);
-              const isText = spec?.capability === "text_generation";
-              const set = (next: Partial<typeof m>) =>
-                patch({ models: draft.models.map((x, j) => (j === i ? { ...x, ...next } : x)) });
-              return (
-                <div key={i} className="flex flex-col gap-1.5 rounded-[2px] border border-border p-2" data-testid={`model-row-${i}`}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      aria-label={`模型 ${i + 1} 的 ID`}
-                      className={cn(field, "min-w-[160px] flex-1 font-mono")}
-                      value={m.model_id}
-                      maxLength={128}
-                      spellCheck={false}
-                      onChange={(e) => set({ model_id: e.target.value })}
-                      placeholder="模型 ID"
-                    />
-                    <select
-                      aria-label={`模型 ${i + 1} 的协议`}
-                      value={m.protocol}
-                      onChange={(e) => set({ protocol: e.target.value, reasoning: false })}
-                      className="h-8 cursor-pointer rounded-md border border-border-strong bg-surface px-2 text-sm text-fg"
-                    >
-                      {!spec && <option value={m.protocol}>{m.protocol || "选协议"}</option>}
-                      {protocols.map((p) => (
-                        <option key={p.protocol} value={p.protocol}>
-                          {p.label}（{capLabel(p.capability)}）
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      aria-label={`移除模型 ${i + 1}`}
-                      disabled={draft.models.length <= 1}
-                      onClick={() => patch({ models: draft.models.filter((_, j) => j !== i) })}
-                      className="grid size-7 cursor-pointer place-items-center rounded text-fg-subtle hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <X aria-hidden className="size-3.5" />
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                    {isText && (
-                      <label className="flex items-center gap-1.5 text-fg">
-                        <input type="checkbox" checked={m.reasoning} onChange={(e) => set({ reasoning: e.target.checked })} />
-                        推理模型
-                      </label>
-                    )}
-                    {isText && <span className="text-[11px] text-fg-subtle">流程中的分类、结构化环节不能用推理模型</span>}
-                    {spec?.consistency_verified === false && <UnverifiedTag />}
-                  </div>
-                </div>
-              );
-            })}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="self-start"
-              disabled={draft.models.length >= 50 || protocols.length === 0}
-              onClick={() =>
-                patch({ models: [...draft.models, { model_id: "", protocol: draft.models.at(-1)?.protocol ?? protocols[0]?.protocol ?? "", reasoning: false }] })
+            读取可用模型
+          </Button>
+          {discoveryNote && (
+            <p role="status" className="text-xs text-fg-muted">
+              {discoveryNote}
+            </p>
+          )}
+          <label className="flex flex-col gap-1 text-xs text-fg">
+            使用模型
+            <select
+              className={field}
+              value={draft.models[0]?.model_id ?? ""}
+              disabled={busy !== null}
+              onChange={(e) =>
+                patch({
+                  models: [
+                    {
+                      model_id: e.target.value,
+                      protocol: draft.models[0]?.protocol ?? "openai_chat",
+                      reasoning: draft.models[0]?.reasoning ?? false,
+                    },
+                    ...draft.models.slice(1),
+                  ],
+                })
               }
             >
-              <Plus aria-hidden className="size-3.5" />
-              加一个模型
-            </Button>
-          </fieldset>
+              <option value="">
+                {discovered.length
+                  ? "请选择模型"
+                  : "先读取模型，或在高级设置中手动填写"}
+              </option>
+              {mergeModelOptions(
+                discovered,
+                draft.models.map((m) => m.model_id),
+              ).map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-fg">
+            用途
+            <select
+              className={field}
+              value={draft.models[0]?.protocol ?? "openai_chat"}
+              disabled={busy !== null}
+              onChange={(e) =>
+                patch({
+                  models: draft.models.map((m, i) =>
+                    i === 0
+                      ? { ...m, protocol: e.target.value, reasoning: false }
+                      : m,
+                  ),
+                })
+              }
+            >
+              <option value="openai_chat">文本生成</option>
+              <option value="openai_images">图片生成</option>
+              {draft.models[0] &&
+                !["openai_chat", "openai_images"].includes(
+                  draft.models[0].protocol,
+                ) && (
+                  <option value={draft.models[0].protocol}>
+                    {draft.models[0].protocol}
+                  </option>
+                )}
+            </select>
+            <span className="text-xs text-fg-subtle">
+              模型列表不提供可靠的能力信息，请按所选模型的实际用途选择。
+            </span>
+          </label>
+          <details className="border-t border-border pt-3">
+            <summary className="cursor-pointer text-sm text-fg-muted">
+              高级设置：名称、手填模型、多模型与协议
+            </summary>
+            <div className="mt-3 flex flex-col gap-3">
+              <label className="flex flex-col gap-1 text-xs text-fg">
+                名称
+                <input
+                  className={field}
+                  value={draft.label}
+                  maxLength={64}
+                  onChange={(e) => patch({ label: e.target.value })}
+                  placeholder="例如：公司网关"
+                />
+              </label>
+              <fieldset
+                disabled={busy !== null}
+                className="flex flex-col gap-2"
+              >
+                <legend className="mb-1 text-xs text-fg">模型</legend>
+                {protocols.length === 0 && (
+                  <p className="text-xs text-danger">
+                    协议目录暂不可用，仍可手填兼容协议的模型；其他协议请稍后再试。
+                  </p>
+                )}
+                {draft.models.map((m, i) => {
+                  const spec = protocols.find((p) => p.protocol === m.protocol);
+                  const isText = spec?.capability === "text_generation";
+                  const set = (next: Partial<typeof m>) =>
+                    patch({
+                      models: draft.models.map((x, j) =>
+                        j === i ? { ...x, ...next } : x,
+                      ),
+                    });
+                  return (
+                    <div
+                      key={i}
+                      className="flex flex-col gap-1.5 rounded-[2px] border border-border p-2"
+                      data-testid={`model-row-${i}`}
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          aria-label={`模型 ${i + 1} 的 ID`}
+                          className={cn(
+                            field,
+                            "min-w-[160px] flex-1 font-mono",
+                          )}
+                          value={m.model_id}
+                          maxLength={128}
+                          spellCheck={false}
+                          onChange={(e) => set({ model_id: e.target.value })}
+                          placeholder="模型 ID"
+                        />
+                        <select
+                          aria-label={`模型 ${i + 1} 的协议`}
+                          value={m.protocol}
+                          onChange={(e) =>
+                            set({ protocol: e.target.value, reasoning: false })
+                          }
+                          className="h-8 cursor-pointer rounded-md border border-border-strong bg-surface px-2 text-sm text-fg"
+                        >
+                          {!spec && (
+                            <option value={m.protocol}>
+                              {m.protocol || "选协议"}
+                            </option>
+                          )}
+                          {protocols.map((p) => (
+                            <option key={p.protocol} value={p.protocol}>
+                              {p.label}（{capLabel(p.capability)}）
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          aria-label={`移除模型 ${i + 1}`}
+                          disabled={draft.models.length <= 1}
+                          onClick={() =>
+                            patch({
+                              models: draft.models.filter((_, j) => j !== i),
+                            })
+                          }
+                          className="grid size-7 cursor-pointer place-items-center rounded text-fg-subtle hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <X aria-hidden className="size-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                        {isText && (
+                          <label className="flex items-center gap-1.5 text-fg">
+                            <input
+                              type="checkbox"
+                              checked={m.reasoning}
+                              onChange={(e) =>
+                                set({ reasoning: e.target.checked })
+                              }
+                            />
+                            推理模型
+                          </label>
+                        )}
+                        {isText && (
+                          <span className="text-[11px] text-fg-subtle">
+                            流程中的分类、结构化环节不能用推理模型
+                          </span>
+                        )}
+                        {spec?.consistency_verified === false && (
+                          <UnverifiedTag />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="self-start"
+                  disabled={draft.models.length >= 50 || protocols.length === 0}
+                  onClick={() =>
+                    patch({
+                      models: [
+                        ...draft.models,
+                        {
+                          model_id: "",
+                          protocol:
+                            draft.models.at(-1)?.protocol ??
+                            protocols[0]?.protocol ??
+                            "",
+                          reasoning: false,
+                        },
+                      ],
+                    })
+                  }
+                >
+                  <Plus aria-hidden className="size-3.5" />
+                  加一个模型
+                </Button>
+              </fieldset>
+            </div>
+          </details>
 
           {result && <TestResultLine result={result} />}
           {error && (
-            <p role="alert" className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger" data-testid="conn-save-error">
+            <p
+              role="alert"
+              className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger"
+              data-testid="conn-save-error"
+            >
               {error}
             </p>
           )}
           {problems.length > 0 && (
-            <p className="text-[11px] leading-5 text-fg-subtle">还差：{problems.join("、")}</p>
+            <p className="text-[11px] leading-5 text-fg-subtle">
+              还差：{problems.join("、")}
+            </p>
           )}
 
           <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
@@ -1019,19 +1228,24 @@ function ConnectionDrawer({
               title={nothingChanged ? "没有改动" : undefined}
               onClick={() => void save()}
             >
-              {busy === "save" && <Loader2 aria-hidden className="size-3.5 animate-spin" />}
+              {busy === "save" && (
+                <Loader2 aria-hidden className="size-3.5 animate-spin" />
+              )}
               保存
             </Button>
-            <Button size="sm" disabled={busy !== null || !testBody} onClick={() => void test()}>
-              {busy === "test" && <Loader2 aria-hidden className="size-3.5 animate-spin" />}
+            <Button
+              size="sm"
+              disabled={busy !== null || !testBody}
+              onClick={() => void test()}
+            >
+              {busy === "test" && (
+                <Loader2 aria-hidden className="size-3.5 animate-spin" />
+              )}
               测试连接
             </Button>
-            {!saved && (
-              <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setDraft(null)}>
-                换一个来源
-              </Button>
-            )}
-            <span className="text-[11px] text-fg-subtle">测试只发一次不花钱的请求，测第一个模型。</span>
+            <span className="text-[11px] text-fg-subtle">
+              测试只发一次不花钱的请求，测第一个模型。
+            </span>
           </div>
         </div>
       )}

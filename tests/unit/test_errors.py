@@ -45,6 +45,21 @@ def test_platform_fault_refunds_user() -> None:
     assert ERRORS["provider.account.insufficient"].disposition is Disposition.REFUND
 
 
+def test_no_model_configured_is_not_a_transient_fault() -> None:
+    """一个候选模型都没有：等多久都不会好，只有用户自己去配。
+
+    所以不可重试、不换 Provider（没有可换的）、预扣原样释放（一次上游都没调），
+    文案指到模型库而不是"正在切换备用通道"。
+    """
+    spec = ERRORS["provider.not_configured"]
+    assert spec.http_status == 409
+    assert spec.retryable is False
+    assert spec.failover is False
+    assert spec.disposition is Disposition.RELEASE
+    assert "模型库" in spec.user_message
+    assert "备用通道" not in spec.user_message
+
+
 def test_content_rejection_counts_as_waste() -> None:
     """内容被上游拦截：产生了成本，计入废片率，但退还用户（19_UnitEconomics 2.1）。"""
     spec = ERRORS["provider.content.rejected"]

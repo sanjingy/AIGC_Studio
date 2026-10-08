@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Loader2, MessageSquareText, RefreshCw } from "lucide-react";
 
 import { StaleIcon } from "@/components/icons/studio-icons";
+import { ActionError } from "@/components/freeflow/project/production-actions";
 import { Button } from "@/components/ui/button";
 import type { ReviseTarget } from "@/lib/api";
 import { ROLE_LABEL, type ProjectState } from "@/lib/freeflow/use-project-state";
@@ -93,11 +94,7 @@ export function RevisePanel({
         {disabledReason && <span className="text-xs text-rf-warning">{disabledReason}</span>}
       </div>
 
-      {state.actionError && state.busy === null && (
-        <p role="alert" className="mt-2 rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
-          {state.actionError}
-        </p>
-      )}
+      {state.actionError && state.busy === null && <ActionError state={state} />}
 
       {messages.length > 0 && (
         <ol className="mt-3 flex flex-col gap-1.5 border-t border-border pt-3">

@@ -133,7 +133,8 @@ class RecordDetail:
 _STEP_ERROR_TEXT: dict[str, str] = {
     "agent.output.schema_invalid": "模型返回的内容不符合约定格式",
     "agent.output.truncated": "模型输出被截断，没写完",
-    "provider.unavailable": "没有可用的模型",
+    "provider.unavailable": "上游服务不可用",
+    "provider.not_configured": "没有可用的模型，请到模型库添加供应商",
     "provider.rate_limited": "上游限流，稍后重试",
     "provider.timeout": "上游超时",
     "provider.params.invalid": "请求参数被上游拒绝",

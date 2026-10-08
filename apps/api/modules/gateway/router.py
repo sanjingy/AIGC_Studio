@@ -28,6 +28,8 @@ from apps.api.modules.gateway.schemas import (
     CapabilityModelsOut,
     ConnectionCreateIn,
     ConnectionDefaultRefOut,
+    ConnectionDiscoverIn,
+    ConnectionDiscoverOut,
     ConnectionDraftTestIn,
     ConnectionListOut,
     ConnectionModelOut,
@@ -401,6 +403,28 @@ async def test_draft_connection(
         preset_id=payload.preset_id,
     )
     return _probe_out(result)
+
+
+@config_router.post("/connections/discover", response_model=ConnectionDiscoverOut)
+async def discover_draft_models(
+    payload: ConnectionDiscoverIn, user: CurrentUser, db: DbSession
+) -> ConnectionDiscoverOut:
+    return await upstreams.discover_connection_models(
+        db, org_id=user.org_id, base_url=payload.base_url, api_key=payload.api_key
+    )
+
+
+@config_router.post("/connections/{connection_id}/discover", response_model=ConnectionDiscoverOut)
+async def discover_saved_models(
+    connection_id: uuid.UUID, payload: ConnectionDiscoverIn, user: CurrentUser, db: DbSession
+) -> ConnectionDiscoverOut:
+    return await upstreams.discover_connection_models(
+        db,
+        org_id=user.org_id,
+        connection_id=connection_id,
+        base_url=payload.base_url,
+        api_key=payload.api_key,
+    )
 
 
 @config_router.get("/connections/{connection_id}", response_model=ConnectionOut)

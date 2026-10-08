@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from adapters.providers import endpoint_url
 from adapters.providers.base import KeySource
+from adapters.providers.model_discovery import normalize_api_base
 from apps.api.core.config import get_settings
 from apps.api.core.crypto import CryptoConfigError, decrypt_secret, encrypt_secret
 from apps.api.core.errors import AppError
@@ -43,6 +44,7 @@ from apps.api.modules.billing import credentials
 from apps.api.modules.gateway import catalog, presets, probe
 from apps.api.modules.gateway import repository as repo
 from apps.api.modules.gateway.models import KEY_SOURCES, OrgProviderConnection
+from apps.api.modules.gateway.schemas import ConnectionDiscoverOut
 
 log = get_logger(__name__)
 
@@ -869,6 +871,8 @@ async def create_connection(
         else []
     )
     clean = clean_models(raw_models)
+    if all(m["protocol"] in {"openai_chat", "openai_images"} for m in clean):
+        clean_url = normalize_api_base(clean_url)
     key = credentials.clean_key(api_key)
     row = await repo.create_connection(
         db,
@@ -914,6 +918,11 @@ async def update_connection(
         changes["base_url"] = endpoint_url.normalize_base_url(base_url)
     if models is not None:
         changes["models"] = clean_models(models)
+    effective_models = changes.get("models", row.models)
+    if base_url is not None and all(
+        m["protocol"] in {"openai_chat", "openai_images"} for m in effective_models
+    ):
+        changes["base_url"] = normalize_api_base(base_url)
     if enabled is not None:
         changes["enabled"] = bool(enabled)
     if api_key is not None:
@@ -971,6 +980,37 @@ async def connection_references(
 
     projects = await project_service.list_preference_references(db, org_id=org_id, provider_ref=ref)
     return ConnectionReferences(default_capabilities=defaults, projects=projects)
+
+
+async def discover_connection_models(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    base_url: str,
+    api_key: str | None,
+    connection_id: uuid.UUID | None = None,
+) -> ConnectionDiscoverOut:
+    from adapters.providers.model_discovery import discover_models, normalize_api_base
+
+    saved = (
+        await _require_connection(db, org_id=org_id, connection_id=connection_id)
+        if connection_id is not None
+        else None
+    )
+    key = (
+        credentials.clean_key(api_key)
+        if api_key is not None
+        else decrypt_secret(saved.key_encrypted)
+        if saved is not None
+        else None
+    )
+    if not key:
+        raise AppError("common.validation_failed", message="请填写 API Key")
+    base = normalize_api_base(base_url)
+    if get_settings().env == "test":
+        return ConnectionDiscoverOut(base_url=base, models=["mock.text.v1"], mock=True)
+    models = await discover_models(base_url=base, api_key=key)
+    return ConnectionDiscoverOut(base_url=base, models=models)
 
 
 async def test_connection(

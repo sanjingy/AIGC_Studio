@@ -525,11 +525,16 @@ async def _candidates(resolution: Resolution) -> list[Route]:
         # 用户拿到的是假内容而不是这条错误。两条自动兜底都撤掉之后，
         # "一个模型都没有"如实走到这里，所以文案要能直接给用户看——
         # 说清楚差什么、该去哪儿配，不要求他去读日志。
+        #
+        # 码是 `provider.not_configured` 而不是 `unavailable`：后者的文案是
+        # "正在切换备用通道"、可重试，用户会以为是临时故障反复点。这里一次
+        # 上游都没调，等多久都不会好。只有"一个候选都没有"走这里；有候选但
+        # 全部失败的那条在 `_attempt` 末尾，仍是上游的原码。
         raise AppError(
-            "provider.unavailable",
+            "provider.not_configured",
             message=(
                 f"没有可用的模型来完成「{resolution.capability}」。"
-                "请在设置页配置你自己的 Provider Key，或联系管理员为平台配置 Key。"
+                "请在模型库添加供应商并设为默认，或联系管理员为平台配置 Key。"
             ),
             detail={"capability": resolution.capability},
         )
