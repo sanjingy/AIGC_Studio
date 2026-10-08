@@ -24,6 +24,7 @@ from adapters.providers.dashscope import DashScopeImageProvider
 from adapters.providers.deepseek import DeepSeekProvider
 from adapters.providers.openai_compat import OpenAICompatTextProvider
 from adapters.providers.openai_images import OpenAIImagesProvider
+from adapters.providers.openai_responses import OpenAIResponsesTextProvider
 from apps.api.core.config import get_settings
 
 
@@ -103,6 +104,14 @@ PROTOCOLS: dict[str, ProtocolSpec] = {
         adapter=OpenAICompatTextProvider,
         label="OpenAI 兼容对话（/chat/completions）",
     ),
+    # 2026-10-09 ADR-039 后续决定：Codex 系模型只挂在 Responses 上。仍是文本能力，
+    # 与 `openai_chat` 并列由用户显式选择；`/models` 不说明模型走哪个接口，不自动判定。
+    "openai_responses": ProtocolSpec(
+        protocol="openai_responses",
+        capability="text_generation",
+        adapter=OpenAIResponsesTextProvider,
+        label="OpenAI Responses（/responses）",
+    ),
     "openai_images": ProtocolSpec(
         protocol="openai_images",
         capability="image_generation",
@@ -111,6 +120,13 @@ PROTOCOLS: dict[str, ProtocolSpec] = {
         consistency_verified=False,
     ),
 }
+
+
+#: 地址按 OpenAI 规矩规整（剥完整请求地址后缀、只填主机补 `/v1`）的协议。
+#: 第二批专用出图协议的地址形状各不相同，不在此列。
+OPENAI_BASE_PROTOCOLS: frozenset[str] = frozenset(
+    {"openai_chat", "openai_responses", "openai_images"}
+)
 
 
 def protocol_spec(protocol: str) -> ProtocolSpec | None:

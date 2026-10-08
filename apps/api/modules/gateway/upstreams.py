@@ -871,7 +871,7 @@ async def create_connection(
         else []
     )
     clean = clean_models(raw_models)
-    if all(m["protocol"] in {"openai_chat", "openai_images"} for m in clean):
+    if all(m["protocol"] in catalog.OPENAI_BASE_PROTOCOLS for m in clean):
         clean_url = normalize_api_base(clean_url)
     key = credentials.clean_key(api_key)
     row = await repo.create_connection(
@@ -920,7 +920,7 @@ async def update_connection(
         changes["models"] = clean_models(models)
     effective_models = changes.get("models", row.models)
     if base_url is not None and all(
-        m["protocol"] in {"openai_chat", "openai_images"} for m in effective_models
+        m["protocol"] in catalog.OPENAI_BASE_PROTOCOLS for m in effective_models
     ):
         changes["base_url"] = normalize_api_base(base_url)
     if enabled is not None:
@@ -1072,7 +1072,7 @@ async def test_connection(
         api_key=key,
     )
     try:
-        if proto in {"openai_chat", "openai_images"}:
+        if proto in catalog.OPENAI_BASE_PROTOCOLS:
             # 草稿地址与保存时同一道规整：粘完整请求地址测试，不能测成 `.../chat/completions/models`
             connection = replace(connection, base_url=normalize_api_base(url))
         adapter = build_adapter(connection, model_id=_clean_model_id(model), protocol=proto)

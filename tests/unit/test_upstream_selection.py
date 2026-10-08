@@ -18,6 +18,7 @@ import pytest
 from adapters.providers.base import ImageRequest, KeySource, TextRequest, TextResponse
 from adapters.providers.openai_compat import OpenAICompatTextProvider
 from adapters.providers.openai_images import OpenAIImagesProvider
+from adapters.providers.openai_responses import OpenAIResponsesTextProvider
 from apps.api.core.errors import AppError
 from apps.api.modules.billing.credentials import ResolvedKey
 from apps.api.modules.gateway import breaker, catalog, upstreams
@@ -45,9 +46,10 @@ def test_catalog_model_ids_unique_within_capability() -> None:
 
 
 def test_protocol_whitelist_binds_one_capability_and_adapter_each() -> None:
-    """协议 → 唯一能力 → 唯一适配器（ADR-039 第 2 条）。A 批只有这两个。"""
+    """协议 → 唯一能力 → 唯一适配器（ADR-039 第 2 条）。A 批两个，10-09 加 Responses。"""
     assert {p: (s.capability, s.adapter) for p, s in catalog.PROTOCOLS.items()} == {
         "openai_chat": (TEXT, OpenAICompatTextProvider),
+        "openai_responses": (TEXT, OpenAIResponsesTextProvider),
         "openai_images": (IMAGE, OpenAIImagesProvider),
     }
     assert catalog.supports_org_connections(TEXT) and catalog.supports_org_connections(IMAGE)

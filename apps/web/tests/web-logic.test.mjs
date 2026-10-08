@@ -978,6 +978,80 @@ test("测试连接只读了模型列表：结论画成中性，不画成「连�
   assert.equal(modelOptions.normalizeApiAddress("https://relay.example/v1/responses"), "https://relay.example/v1");
 });
 
+test("Responses：404 说清实际接口，并给出在已保存连接上切换协议、Key 不用重填的步骤", () => {
+  const e = (detail) => ({ code: "provider.byok.rejected", message: "m", user_message: "你自己配置的模型供应商调用失败", detail });
+  const chat404 = prov.describeApiError(
+    e({ reason: "upstream_not_found", capability: "text_generation", http_status: 404, operation: "POST /v1/chat/completions", upstream_error_code: "not_found", model_id: "gpt-6.1-sol" }),
+  );
+  assert.match(chat404, /平台调用的是 OpenAI Chat Completions/);
+  assert.match(chat404, /OpenAI Responses/);
+  assert.match(chat404, /把「用途」改成「文本生成 · Responses」/);
+  assert.match(chat404, /API Key 留空即沿用原 Key/);
+  assert.doesNotMatch(chat404, /更换 Key/);
+  const resp404 = prov.describeApiError(
+    e({ reason: "upstream_not_found", capability: "text_generation", http_status: 404, operation: "POST /v1/responses", model_id: "m1" }),
+  );
+  assert.match(resp404, /POST \/v1\/responses 返回 HTTP 404/);
+  assert.match(resp404, /平台调用的是 OpenAI Responses（POST \/responses）/);
+  assert.match(resp404, /改回「文本生成 · Chat Completions」/);
+  // 出图不给文本协议切换建议，接口名仍是 Images
+  const img404 = prov.describeApiError(
+    e({ reason: "upstream_not_found", capability: "image_generation", http_status: 404, operation: "POST /v1/images/generations", model_id: "i1" }),
+  );
+  assert.match(img404, /OpenAI Images/);
+  assert.doesNotMatch(img404, /Responses/);
+  // 参数被拒时也按实际接口说
+  assert.match(
+    prov.describeApiError(e({ reason: "upstream_request_rejected", http_status: 400, operation: "POST /v1/responses", model_id: "m1" })),
+    /OpenAI Responses/,
+  );
+});
+
+test("Responses 测试连接结论同样是中性，用途选项把 Responses 归在文本下", () => {
+  const msg =
+    "模型列表接口鉴权通过，列表（24 个）里有 gpt-6.1-sol。只读取了模型列表（GET /models，不发生成请求），没有试调用生成接口 POST /responses；该模型能否用这个接口生成，以第一次生成为准";
+  assert.equal(prov.classifyTest({ ok: true, message: msg, error_code: null }), "neutral");
+  assert.deepEqual([...prov.USAGE_PROTOCOLS], ["openai_chat", "openai_responses", "openai_images"]);
+  assert.match(prov.USAGE_LABEL.openai_responses, /^文本生成/);
+  assert.equal(prov.USAGE_LABEL.openai_images, "图片生成");
+});
+
+test("地址线索只认 …/responses，且只改新建草稿里默认的 Chat，不动已保存连接", () => {
+  const draft = { presetId: null, label: "", baseUrl: "", apiKey: "k-12345678", models: [{ model_id: "gpt-6.1-sol", protocol: "openai_chat", reasoning: false }] };
+  assert.equal(prov.protocolHintFromAddress("https://cchost.example/v1/responses"), "openai_responses");
+  assert.equal(prov.protocolHintFromAddress(" https://cchost.example/v1/responses/ "), "openai_responses");
+  assert.equal(prov.protocolHintFromAddress("https://cchost.example/v1"), null);
+  assert.equal(prov.protocolHintFromAddress("https://cchost.example/v1/chat/completions"), null);
+  const hinted = prov.withAddress(draft, "https://cchost.example/v1/responses", true);
+  assert.equal(hinted.models[0].protocol, "openai_responses");
+  assert.equal(hinted.baseUrl, "https://cchost.example/v1/responses");
+  // 保存时规整成同一 base
+  assert.equal(prov.createBody(hinted).base_url, "https://cchost.example/v1");
+  assert.deepEqual(prov.createBody(hinted).models, [{ model_id: "gpt-6.1-sol", protocol: "openai_responses", reasoning: false }]);
+  // 已保存连接：改地址不改协议
+  assert.equal(prov.withAddress(draft, "https://cchost.example/v1/responses", false).models[0].protocol, "openai_chat");
+  // 用户已选图片用途：不被地址改写
+  const image = { ...draft, models: [{ model_id: "img", protocol: "openai_images", reasoning: false }] };
+  assert.equal(prov.withAddress(image, "https://x.example/v1/responses", true).models[0].protocol, "openai_images");
+  // 普通地址：协议原样
+  assert.equal(prov.withAddress(draft, "https://cchost.example/v1", true).models[0].protocol, "openai_chat");
+});
+
+test("已保存的 Chat 连接改成 Responses：PATCH 只带 models，不带 Key 与地址；测试连接也按新协议", () => {
+  const saved = {
+    id: "c1", label: "cchost.ai", preset_id: null, base_url: "https://cchost.ai/v1", masked_key: "****abcd", enabled: true,
+    provider_id: "provider.org:c1",
+    models: [{ model_id: "gpt-6.1-sol", protocol: "openai_chat", capability: "text_generation", consistency_verified: null, reasoning: false }],
+  };
+  const draft = prov.draftFromConnection(saved);
+  assert.equal(draft.apiKey, "");
+  const switched = { ...draft, models: draft.models.map((m) => ({ ...m, protocol: "openai_responses" })) };
+  assert.deepEqual(prov.patchBody(switched, saved), { models: [{ model_id: "gpt-6.1-sol", protocol: "openai_responses", reasoning: false }] });
+  assert.deepEqual(prov.savedTestBody(switched, saved), { protocol: "openai_responses", model_id: "gpt-6.1-sol" });
+  // 不改就没有任何字段：旧 Chat 连接不会被静默重写
+  assert.deepEqual(prov.patchBody(draft, saved), {});
+});
+
 test("没有可用模型：按码判断、能力名翻成中文、给模型库地址，且不可重试", () => {
   assert.equal(prov.NOT_CONFIGURED, "provider.not_configured");
   assert.equal(prov.MODELS_HREF, "/freeflow/models");

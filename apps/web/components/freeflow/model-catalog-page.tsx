@@ -34,7 +34,10 @@ import {
   referenceLines,
   savedTestBody,
   sourceText,
+  USAGE_LABEL,
+  USAGE_PROTOCOLS,
   VERDICT_LABEL,
+  withAddress,
   type ConnectionDraft,
   type DefaultRow,
 } from "@/lib/freeflow/provider-scope";
@@ -841,7 +844,7 @@ function ConnectionDrawer({
       setDiscoveryNote(
         response.mock
           ? "测试环境模型列表（Mock），未连接真实上游"
-          : `读取到 ${response.models.length} 个模型，请选择要使用的模型。列表只说明 Key 能读取模型；平台用 OpenAI Chat Completions 生成文本、OpenAI Images 出图，所选模型是否支持以第一次生成为准`,
+          : `读取到 ${response.models.length} 个模型，请选择要使用的模型。列表只说明 Key 能读取模型，不说明模型走哪个接口；文本请按供应商文档在「用途」里选 Chat Completions 或 Responses，所选模型是否支持以第一次生成为准`,
       );
     } catch (e) {
       setError(errorText(e, "读取模型失败，可以在高级设置中手动填写模型 ID"));
@@ -956,7 +959,8 @@ function ConnectionDrawer({
           )}
           <p className="text-sm leading-6 text-fg-muted">
             填写 API Key 和请求地址，读取模型后选择使用。无需先选厂商。供应商需兼容 OpenAI
-            接口：文本走 Chat Completions，出图走 Images；只提供 Responses 等其他接口的模型暂不支持。
+            接口：文本可走 Chat Completions 或 Responses，出图走 Images。平台无法免费判断模型走哪个接口，
+            请在「用途」里按供应商说明选择。
           </p>
           <label className="flex flex-col gap-1 text-xs text-fg">
             API 请求地址
@@ -966,12 +970,15 @@ function ConnectionDrawer({
               disabled={busy !== null}
               maxLength={512}
               spellCheck={false}
-              onChange={(e) => patch({ baseUrl: e.target.value })}
+              onChange={(e) => {
+                const next = withAddress(draft, e.target.value, !saved);
+                patch({ baseUrl: next.baseUrl, models: next.models });
+              }}
               placeholder="https://api.example.com/v1"
             />
             <span className="text-[11px] leading-5 text-fg-subtle">
               填写兼容 API 的基础地址或完整请求地址，例如
-              https://api.example.com/v1/chat/completions。
+              https://api.example.com/v1/chat/completions；粘贴 …/v1/responses 时新建的文本用途会预选 Responses。
             </span>
           </label>
           <label className="flex flex-col gap-1 text-xs text-fg">
@@ -1078,10 +1085,13 @@ function ConnectionDrawer({
                 })
               }
             >
-              <option value="openai_chat">文本生成</option>
-              <option value="openai_images">图片生成</option>
+              {USAGE_PROTOCOLS.map((p) => (
+                <option key={p} value={p}>
+                  {USAGE_LABEL[p]}
+                </option>
+              ))}
               {draft.models[0] &&
-                !["openai_chat", "openai_images"].includes(
+                !(USAGE_PROTOCOLS as readonly string[]).includes(
                   draft.models[0].protocol,
                 ) && (
                   <option value={draft.models[0].protocol}>
@@ -1090,7 +1100,9 @@ function ConnectionDrawer({
                 )}
             </select>
             <span className="text-xs text-fg-subtle">
-              模型列表不提供可靠的能力信息，请按所选模型的实际用途选择。
+              模型列表不提供可靠的能力信息，请按所选模型的实际用途选择。文本模型若在 CC Switch 或
+              Codex 里配置为「OpenAI Responses」格式（如 GPT/Codex 系模型），选「{USAGE_LABEL.openai_responses}」；
+              已保存的供应商改这里后保存即可，API Key 留空沿用原 Key。
             </span>
           </label>
           <details className="border-t border-border pt-3">

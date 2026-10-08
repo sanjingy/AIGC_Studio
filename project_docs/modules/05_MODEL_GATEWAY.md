@@ -774,11 +774,73 @@ GitHub 搜索：`openai api gateway stars:>=1000`，核对候选 one-api 37,084 
 `https://cchost.ai/v1` 已是正确 base，无 `/v1/v1` 拼接（无 Key 的路由探测显示
 `/v1/chat/completions`、`/v1/responses` 均由 OpenAI 格式处理器应答 401）。
 
-**未做**：`openai_responses`（Responses API）协议。该模型是否只能走 Responses 未经证实
-（需一次带 Key 的生成调用），新增协议属 ADR-039 白名单变更，由 Lead 决定。真实上游生成未验收。
+**未做**（当时）：`openai_responses`（Responses API）协议。2026-10-09 已补，见下一节。真实上游生成未验收。
 
 **GitHub 调研**（2026-10-09）：LiteLLM（60,372 stars，MIT，commit `6e54dced8c29`）
 `litellm_core_utils/exception_mapping_utils.py` 把 404 映射为 `NotFoundError`、与 401
 `AuthenticationError` 分开，印证分层做法；本次逻辑十余行，沿用仓库既有映射风格，未复制代码。
 Wei-Shaw/sub2api（43,493 stars，LGPL-3.0，commit `5fc0e486c3f6`）与 claude-relay-service
 （12,677 stars，MIT）只读参考中转路由行为，未引入。
+
+## 2026-10-09 OpenAI Responses 文本协议（USER_FLOW_REPAIR responses，ADR-039 后续决定；已实现、未提交）
+
+**起因**：上一节的 cchost.ai + `gpt-6.1-sol` 连接。用户确认 CC Switch 里这条供应商的
+「API 格式」（上游格式）是 OpenAI Responses，Codex 与 Claude Code 经 CC Switch 都能用；
+本站只会发 `POST /v1/chat/completions`，所以 404。
+
+**协议**：白名单新增 `openai_responses → text_generation`，适配器
+`adapters/providers/openai_responses.py::OpenAIResponsesTextProvider`，继承 `openai_chat` 的
+`OpenAICompatTextProvider`，只换接口路径、请求体与结果解析；出网校验（https、公网解析、DNS 复查）、
+不跟随跳转、`provider.call` Key 来源日志、`raise_for_upstream` 错误分层、Gateway 出口脱敏、
+`byok_unit_credits` 计费与按 org 熔断都沿用同一条路径，**没有为它另写一份**。它不是出图能力：
+`protocols_for("image_generation")` 不含它，选作出图默认会 400。
+
+| `TextRequest` | Responses 请求体 |
+|---|---|
+| `system` | `instructions`（空串不发） |
+| `user` | `input`（字符串，等价一条 user 消息） |
+| `max_output_tokens` | `max_output_tokens`，低于 16 抬到 16（Responses 拒收 < 16） |
+| `json_mode=True` | `text.format = {"type": "json_object"}`（不是 Chat 的 `response_format`） |
+| `temperature` | **不发**：Codex / 推理系模型拒收采样参数 |
+
+不发 `stream`、`store`、`messages`、`max_tokens`。结果：优先顶层 `output_text`，否则按序拼接
+`output[]` 里 message 的 `content[].text`（`output_text` 类型），推理项、工具项不算正文；用量读
+`usage.input_tokens / output_tokens / output_tokens_details.reasoning_tokens`，退一步读
+Chat 字段名，缺失记 0。HTTP 200 也要看终态：`status=failed|cancelled` 或带 `error` →
+`provider.unavailable`（上游错误码按短码白名单进 detail）；`incomplete` + `content_filter` →
+`provider.content.rejected`，其他 `incomplete`（如 `max_output_tokens`）→ `provider.transient.timeout`；
+只有 `refusal` → `provider.content.rejected`；正文为空 → `provider.transient.timeout`；
+`queued` / `in_progress` 等其他非 `completed` 状态即使带正文也 → `provider.unavailable`
+（只有 `completed` 或缺 `status` 才读正文）。
+
+**测试连接**仍只 `GET {base}/models`，结论写明"没有试调用生成接口 POST /responses……以第一次生成为准"，
+前端判中性。地址规整对它与 `openai_chat` / `openai_images` 一致（`catalog.OPENAI_BASE_PROTOCOLS`），
+`.../v1/responses` 保存与草稿测试都规整到 `.../v1`。
+
+**切换已有连接**：模型页编辑连接，把「用途」从「文本生成 · Chat Completions」改成「文本生成 ·
+Responses」后保存。前端 `patchBody` 只发 `models`，Key 留空不发，后端 `update_connection` 不动
+`key_encrypted`；组织默认 / 项目偏好按 `provider.org:<id>:<model>` 指向模型，不含协议，改协议后仍有效。
+**已有 `openai_chat` 连接不会被迁移、不会被自动切换**；未改的连接一字不动（集成测试比对了库里密文与 models）。
+
+**自动选择协议：不做。** `/models` 不说明模型走哪个接口；唯一免费线索是用户粘了
+`.../responses` 完整请求地址——只对**新建草稿**、且第一个模型还是默认 Chat 时据此预选 Responses
+（界面可见、可改），已保存连接改地址不改协议。要真判定只能发一次生成，那是花用户的钱。界面在添加说明、
+「用途」帮助文案、读取模型提示里写明需按供应商说明选择；Chat 404 的报错给出"改成 Responses、Key 不用重填"
+的步骤，Responses 404 给出改回 Chat 的步骤。
+
+**复用**：CC Switch（farion1231/cc-switch，2026-10-09 约 141k stars，MIT，commit
+`2db86e94da13365caae55bb08d09295e31500d21`）。其 `docs/guides/claude-codex-routing-guide-zh.md` 说明
+Codex 系网关的上游格式为 OpenAI Responses、请求打 `/v1/responses`；
+`src-tauri/src/proxy/providers/transform_responses.rs` 是 Anthropic Messages ↔ Responses 的 Rust 转换。
+移植了其中与本仓库契约相符的规则（终态校验 `validate_responses_terminal_status`、用量字段兜底
+`build_anthropic_usage_from_responses`、`RESPONSES_MIN_MAX_OUTPUT_TOKENS`），按 Python 重写并在
+`THIRD_PARTY_NOTICES.md` 保留 MIT 声明。**没有整块引入**：它是桌面端本地代理（Tauri/Rust），转换对象是
+多轮 Messages、工具、图片、SSE 流，本仓库只需要单轮非流式 `TextRequest`；它对 API Key 路由透传
+`temperature`，这里按官方契约与 Codex 模型限制不发。
+
+**验证**：`tests/unit/test_openai_responses.py`（MockTransport + 替换 DNS，零网络）覆盖请求体映射、
+解析与用量、JSON 模式、空/拒答/incomplete/failed、非 JSON、跳转不跟随、私网解析在发请求前拒绝、
+Key 来源日志、测试连接只读 `/models`、`/responses` 地址规整、Gateway 全链路成功 / 404 分层 / 401 脱敏；
+`tests/integration/test_responses_protocol_connection.py` 走 HTTP + 库：Chat 连接改 Responses 后密文不变、
+组织默认仍有效、Gateway 按新协议造适配器、其他连接未动、Responses 不能当出图默认。前端
+`web-logic.test.mjs` 覆盖用途选项、地址线索、PATCH 形状与报错文案。**真实 cchost 生成未验证**（禁止付费调用）。

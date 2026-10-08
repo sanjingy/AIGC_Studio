@@ -1,5 +1,8 @@
 """OpenAI 兼容的文本 Provider：协议 `openai_chat`（ADR-039，05_MODEL_GATEWAY.md §5.2）。
 
+`openai_responses`（`openai_responses.py`）是它的子类：同一套出网校验、错误分层与
+测试连接，只换接口路径、请求体与结果解析。
+
 **只按 `text_generation` 的契约调用**：`POST {base_url}/chat/completions`，
 结果只按 `TextResponse` 解析。端点自己在 `/models` 里声明了什么（哪怕是
 一个叫 `sora-video-1` 的东西）都不采信——那是 §5.2 第 4 条。
@@ -17,6 +20,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 import httpx
 
@@ -35,6 +39,8 @@ PROVIDER_ID = "provider.org"
 
 class OpenAICompatTextProvider:
     provider_id = PROVIDER_ID
+    #: 正式生成打的接口（相对 base_url）。测试连接的结论要写明"没试调用的是哪个接口"
+    generation_path = "/chat/completions"
 
     def __init__(
         self,
@@ -85,15 +91,20 @@ class OpenAICompatTextProvider:
             body["response_format"] = {"type": "json_object"}
         return body
 
-    async def generate_text(self, request: TextRequest) -> TextResponse:
+    def request_body(self, request: TextRequest) -> dict[str, object]:
+        return self.chat_request_body(request)
+
+    async def post_generation(self, request: TextRequest) -> dict[str, Any]:
+        """发一次生成请求，返回解析好的 JSON。出网校验、不跟随跳转、错误分层都在这里，
+        子类（`openai_responses`）只换接口路径、请求体与结果解析。"""
         self._signal_call()
         await endpoint_url.assert_public_host(self._base_url)
         try:
             async with self._client(180) as client:
                 resp = await client.post(
-                    f"{self._base_url}/chat/completions",
+                    f"{self._base_url}{self.generation_path}",
                     headers={**self._auth, "Content-Type": "application/json"},
-                    json=self.chat_request_body(request),
+                    json=self.request_body(request),
                 )
         except httpx.TimeoutException as exc:
             raise AppError("provider.transient.timeout", message=f"自定义端点超时：{exc}") from exc
@@ -106,6 +117,12 @@ class OpenAICompatTextProvider:
             payload = resp.json()
         except ValueError as exc:
             raise AppError("provider.unavailable", message="自定义端点返回的不是 JSON") from exc
+        if not isinstance(payload, dict):
+            raise AppError("provider.unavailable", message="自定义端点返回的不是 JSON 对象")
+        return payload
+
+    async def generate_text(self, request: TextRequest) -> TextResponse:
+        payload = await self.post_generation(request)
         choice = (payload.get("choices") or [{}])[0]
         text = (choice.get("message") or {}).get("content") or ""
         tokens_in, tokens_out, reasoning = usage_of(payload)
@@ -165,14 +182,16 @@ class OpenAICompatTextProvider:
                 f"模型列表接口鉴权通过，但列表（{len(listed)} 个）里没有 {self.model_id}，"
                 "请核对模型 ID"
             )
-        return f"{head}。{GENERATION_UNVERIFIED}"
+        return f"{head}。{generation_unverified(self.generation_path)}"
 
 
-# 测试连接只读了模型列表。这句话的"以第一次"是前端 `classifyTest` 判中性的依据，改措辞要同步。
-GENERATION_UNVERIFIED = (
-    "只读取了模型列表（GET /models，不发生成请求），没有试调用生成接口 "
-    "POST /chat/completions；该模型能否用这个接口生成，以第一次生成为准"
-)
+def generation_unverified(path: str) -> str:
+    """测试连接只读了模型列表。"以第一次"是前端 `classifyTest` 判中性的依据，改措辞要同步。"""
+    return (
+        "只读取了模型列表（GET /models，不发生成请求），没有试调用生成接口 "
+        f"POST {path}；该模型能否用这个接口生成，以第一次生成为准"
+    )
+
 
 # 上游错误体里的 `error.code` / `error.type` 只收这种形状的短码，其余一律不进 detail
 _UPSTREAM_CODE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")

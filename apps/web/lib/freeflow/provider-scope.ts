@@ -94,13 +94,37 @@ export function byokReasonText(reason: unknown): string | null {
   return typeof reason === "string" && reason ? (BYOK_REASON[reason] ?? null) : null;
 }
 
-/** 每个能力在平台这边走的唯一生成接口（`gateway/catalog.py::PROTOCOLS`） */
+/** 每个能力在平台这边的默认生成接口（`gateway/catalog.py::PROTOCOLS`）；文本另有 Responses，按实际接口判 */
+const CHAT_API = "OpenAI Chat Completions（POST /chat/completions）";
 const GENERATION_API: Record<string, string> = {
-  text_generation: "OpenAI Chat Completions（POST /chat/completions）",
+  text_generation: CHAT_API,
   image_generation: "OpenAI Images（POST /images/generations）",
 };
+const RESPONSES_API = "OpenAI Responses（POST /responses）";
 
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+
+/** 这次失败实际调的是哪个接口：看 `operation` 的路径，认不出再按能力给默认 */
+function generationApiOf(d: Record<string, unknown>): string {
+  const op = str(d.operation) ?? "";
+  if (/\/responses$/.test(op)) return RESPONSES_API;
+  if (/\/chat\/completions$/.test(op)) return CHAT_API;
+  return GENERATION_API[str(d.capability) ?? ""] ?? "平台支持的 OpenAI 兼容接口";
+}
+
+/**
+ * 文本 404 时的下一步：Chat 与 Responses 互为另一条路。改协议在已保存连接上做，Key 沿用，
+ * 不用重填——真实案例 cchost + gpt-6.1-sol 只挂在 Responses 上（CC Switch 里 API 格式即 OpenAI Responses）。
+ */
+function switchProtocolHint(op: string): string {
+  if (/\/chat\/completions$/.test(op)) {
+    return `。如果供应商说明该模型走 OpenAI Responses（例如 CC Switch 里这个供应商的 API 格式是「OpenAI Responses」），到「模型」页编辑这个供应商，把「用途」改成「${USAGE_LABEL.openai_responses}」后保存，API Key 留空即沿用原 Key`;
+  }
+  if (/\/responses$/.test(op)) {
+    return `。如果供应商只提供 Chat Completions，到「模型」页编辑这个供应商，把「用途」改回「${USAGE_LABEL.openai_chat}」，API Key 留空即沿用原 Key`;
+  }
+  return "";
+}
 
 /**
  * 自带上游调用失败时**失败在哪一层**（后端 `service._upstream_reason`）。
@@ -116,14 +140,15 @@ export function upstreamFailureText(detail: Record<string, unknown> | undefined)
   const model = str(d.model_id) ? `模型 ${d.model_id} ` : "所选模型";
   const op = str(d.operation) ?? "生成接口";
   const code = str(d.upstream_error_code);
-  const api = GENERATION_API[str(d.capability) ?? ""] ?? "平台支持的 OpenAI 兼容接口";
+  const api = generationApiOf(d);
   const http = status ? `HTTP ${status}${code ? ` ${code}` : ""}` : null;
   switch (str(d.reason)) {
     case "upstream_not_found":
       return (
         `供应商对 ${op} 返回 ${http}：这个地址上没有该接口，或${model}不能通过它调用。` +
         `这通常不是 API Key 的问题——测试连接只读取模型列表，列表里有这个模型不代表它支持该接口。` +
-        `平台调用的是 ${api}；请向供应商确认${model}支持这个接口，或在「模型」页换一个模型`
+        `平台调用的是 ${api}；请向供应商确认${model}支持这个接口，或在「模型」页换一个模型` +
+        switchProtocolHint(op)
       );
     case "upstream_model_not_found":
       return `供应商说${model}不存在（${http}）。请在「模型」页核对模型 ID，或换一个模型`;
@@ -335,6 +360,36 @@ export type ConnectionDraft = {
   apiKey: string;
   models: ModelDraft[];
 };
+
+/**
+ * 表单「用途」的三个选项：协议 → 能力只认后端白名单，这里只给常用的三个起个人话名字。
+ * `/models` 不说明模型走哪个接口，所以文本的 Chat / Responses 由用户按供应商文档选，前端不猜。
+ */
+export const USAGE_LABEL: Record<string, string> = {
+  openai_chat: "文本生成 · Chat Completions",
+  openai_responses: "文本生成 · Responses",
+  openai_images: "图片生成",
+};
+export const USAGE_PROTOCOLS = ["openai_chat", "openai_responses", "openai_images"] as const;
+
+/**
+ * 地址里唯一可靠的协议线索：用户粘的是 `.../responses` 完整请求地址。只认这一条，
+ * 不按模型名或主机名猜（猜错 = 第一次生成就失败，还是花用户的钱）。
+ */
+export function protocolHintFromAddress(raw: string): "openai_responses" | null {
+  return /\/responses\/*$/i.test(raw.trim()) ? "openai_responses" : null;
+}
+
+/**
+ * 改地址。**只对新建草稿**、且第一个模型还是默认的 Chat 时，按地址线索改成 Responses；
+ * 已保存连接的协议从不因为改地址而变（旧连接不能被静默改写，见 ADR-039 后续决定）。
+ */
+export function withAddress(draft: ConnectionDraft, baseUrl: string, isNew: boolean): ConnectionDraft {
+  const next = { ...draft, baseUrl };
+  const hint = protocolHintFromAddress(baseUrl);
+  if (!isNew || !hint || draft.models[0]?.protocol !== "openai_chat") return next;
+  return { ...next, models: draft.models.map((m, i) => (i === 0 ? { ...m, protocol: hint } : m)) };
+}
 
 export function draftFromPreset(preset: ProviderPreset | null, protocols: ProtocolSpec[]): ConnectionDraft {
   if (!preset) {

@@ -1255,6 +1255,16 @@ new-api 渠道为全局运维配置、明确不对渠道地址做 SSRF 防护、
   租户失去文本默认，必须有回滚脚本与迁移测试。
 
 
+**后续决定（2026-10-09，USER_FLOW_REPAIR responses）**：第 2 条的文本协议白名单增加
+`openai_responses → text_generation`（`POST {base}/responses`，适配器 `OpenAIResponsesTextProvider`）。
+起因是 Codex 系模型在中转上只挂 Responses 接口，`/models` 能列出、Chat Completions 回 404；用户确认
+CC Switch 里该供应商上游格式为 OpenAI Responses。约束不变：第 5、6 条（BYOK 计费、按 org 熔断、
+不回落平台、出网校验、不跟随跳转、Key 不回显）全部适用；它只绑定文本能力，不得作为出图协议。
+已有 `openai_chat` 连接不迁移、不自动切换，用户在模型页编辑连接改协议，Key 沿用加密存储的原值。
+协议不按模型名或 `/models` 自动判定（第 2 条"不采信端点自我声明"），仅在新建草稿粘贴
+`.../responses` 地址时预选并对用户可见。规则移植自 CC Switch（MIT，commit `2db86e94da13`），
+见 `05_MODEL_GATEWAY.md` 2026-10-09 Responses 一节与 `THIRD_PARTY_NOTICES.md`。
+
 ## ADR-040 API Key + 请求地址为默认配置入口，模型从上游读取
 
 **日期**：2026-10-08，负责人明确要求模型 API 不固定，只输入 API Key 与请求地址。
