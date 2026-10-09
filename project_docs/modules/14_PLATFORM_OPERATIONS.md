@@ -95,7 +95,7 @@ Credits 规则；它只保证承载这些语义的进程活着、能观测、能
 | FR-OPS-012 | `/readyz` 增加对象存储探测。视频与 MP4 全部落 S3，S3 不通时服务不该报 ready |
 | FR-OPS-013 | 队列拆分后的部署形态：按 [`08_TASK_REALTIME.md`](08_TASK_REALTIME.md) §6 起多个 Worker 服务（`default` / `video` / `render`），并**把发件箱中继固定在其中一个**——多副本 Worker 各起一份中继会重复投递同一批事件 |
 | FR-OPS-014 | 恢复 lint 门禁：补 ESLint 9 flat config，再把 `npm run lint` 加进 FR-OPS-001 的 job |
-| FR-OPS-015 | 固定第三方镜像版本：`minio/minio:latest` 和 `minio/mc:latest` 换成固定 tag（`latest` 让"昨天能跑今天不能跑"无法复现） |
+| FR-OPS-015 | 固定第三方镜像版本：`minio/minio:latest` 和 `minio/mc:latest` 换成固定 tag（`latest` 让"昨天能跑今天不能跑"无法复现）。2026-10-09：上游 `minio/minio` 已归档、官方镜像不可匿名拉取，compose 与 CI 改钉社区分支 `pgsty/minio:RELEASE.2026-08-04T00-00-00Z` / `pgsty/mc:RELEASE.2026-09-16T00-00-00Z` |
 | FR-OPS-016 | `billing.audit()` 接定时调度 + 不平时告警（现在有函数无调度） |
 | FR-OPS-017 | 基础指标：API 的 QPS / P95 / 5xx / DB pool、Worker 的队列深度与等待时长、Provider 的延迟 / 错误率 / failover 率 / 花费。先落到日志字段可聚合，不强求上 Prometheus |
 | FR-OPS-018 | 新增顶层目录时同步改 Compose 挂载（见 §11.1），或写一条 CI 检查防止再犯 |

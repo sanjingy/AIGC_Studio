@@ -71,7 +71,9 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    # 上游 minio/minio 已归档，Docker Hub / quay.io 镜像均不可匿名拉取；
+    # 改用社区维护分支 pgsty/minio（AGPL-3.0，同上游许可），钉版本不跟 latest。
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-aigc_minio}
@@ -82,7 +84,7 @@ services:
     # 探针本身反而成了不稳定源。就绪判断交给下面的 minio-init 轮询。
 
   minio-init:
-    image: minio/mc:latest
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
     depends_on: [minio]
     restart: "no"
     entrypoint: >
