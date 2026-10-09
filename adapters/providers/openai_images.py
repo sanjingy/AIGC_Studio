@@ -34,7 +34,7 @@ import httpx
 
 from adapters.providers import endpoint_url
 from adapters.providers.base import ImageRequest, ImageResult, KeySource, signal_key_source
-from adapters.providers.openai_compat import failure_detail, refuse_redirect
+from adapters.providers.openai_compat import failure_detail, raise_for_upstream, refuse_redirect
 from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
 
@@ -224,22 +224,14 @@ def _decode_b64(text: str) -> bytes:
 
 
 def _raise_for_status(resp: httpx.Response, *, model_id: str) -> None:
-    """状态码 → 错误目录。与 DeepSeek / 万相适配器同一套分法，另带 `failure_detail`。"""
-    if resp.status_code == 200:
-        return
-    text = resp.text[:300]
-    facts = failure_detail(resp, model_id=model_id)
-    if resp.status_code == 429:
-        raise AppError("provider.rate_limit.exceeded", message=text, detail=facts)
-    if resp.status_code in (401, 402, 403):
-        raise AppError(
-            "provider.account.insufficient",
-            message=f"auth failed (HTTP {resp.status_code}): {text}",
-            detail=facts,
-        )
+    """状态码 → 错误目录。与文本连接同一套分法（`raise_for_upstream`），只多一条：
+    400 / 422 的正文带内容审核字样时归 `provider.content.rejected`。"""
     if resp.status_code in (400, 422):
-        lowered = text.lower()
-        if any(hint in lowered for hint in _CONTENT_HINTS):
-            raise AppError("provider.content.rejected", message=text, detail=facts)
-        raise AppError("provider.params.invalid", message=text, detail=facts)
-    raise AppError("provider.unavailable", message=f"HTTP {resp.status_code}: {text}", detail=facts)
+        text = resp.text[:300]
+        if any(hint in text.lower() for hint in _CONTENT_HINTS):
+            raise AppError(
+                "provider.content.rejected",
+                message=text,
+                detail=failure_detail(resp, model_id=model_id),
+            )
+    raise_for_upstream(resp, model_id=model_id)

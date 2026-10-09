@@ -34,7 +34,7 @@
 
 - Orca Run `run_d5a5d21d8323`；本轮后端 Task `task_6f5eb179e337`，Dispatch `ctx_9caa8948c0f1` 已收到worker_done（仅交付、尚未Lead验收）；终端 `term_d5449c56-ea1b-434c-a8a3-56610fae993d` 已关闭，返回 `ptyKilled:true`。明天按交接建新验收/返工任务，不恢复旧终端。
 - 老前端终端 `term_846bb435-611a-4ac0-9c65-00d7f3575819` 显示无关历史内容，未操作，不应盲目发送或关闭。
-- Python：`C:/Users/92505/.orca-abc-venv/Scripts/python.exe`；npm用 `npm.cmd`。
+- Python：本机虚拟环境里的 `python.exe`（路径因机器而异）；npm用 `npm.cmd`。
 - 远端辅助脚本 `python orca/tasks/abc_verify.py sync` / `run ...`；只用已有独立目录 `/tmp/aigc_abc_20260913`、DB `aigc_abc_20260913`、Redis和bucket `aigc-abc-20260913`，归属标记 `abc-verification-20260913`。不要在测试运行时sync。
 - 独立API容器 `aigc-abc-20260913-api` 限640MB/0.75CPU；`abc_lifecycle_check.py` 是本次有界临时Worker驱动。测试容器可能睡眠到期自行退出，明天检查后只重启本任务归属容器。
 - 不打印或复制 `.env`、SSH凭据和Provider Key。真实模型按具体对象与次数确认；实际发布待可审查候选和演练完成后确认。

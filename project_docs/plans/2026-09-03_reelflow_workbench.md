@@ -1,6 +1,6 @@
 # 2026-09-03 工作台重做计划：ReelFlow 视觉壳 × freeflow 真实接口
 
-> 负责人 2026-09-03 指令：今天只做一件事——用 GPT 生成的 ReelFlow 原型（`C:\Users\92505\Desktop\AICG Studio ReelFlow`）取代现有工作台，接口和功能要做好。
+> 负责人 2026-09-03 指令：今天只做一件事——用 GPT 生成的 ReelFlow 原型（负责人本机目录，未入库）取代现有工作台，接口和功能要做好。
 > 本计划由 Lead 编写，是今天所有 Worker 任务书的共同依据。与 `DECISIONS_2026-09-02.md`、ADR-030 ~ 033 冲突时以那两份为准。
 
 ## 0. 对 ReelFlow 原型的判断

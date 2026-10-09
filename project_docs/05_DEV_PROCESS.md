@@ -129,7 +129,7 @@ ENV=test .venv/Scripts/python.exe -m mypy --platform linux apps worker packages 
 参数走，不需要项目被 install 也能检查。2026-09-17 就是用后一种方式跑出的上述结论，
 **因此它验证的是"当前依赖版本下代码干净"，不等于验证了 CI 的 `pip install -e` 那一步**。
 
-要跑完整后端门禁又不想在本机装 Docker，走测试机：`python tools/srv_check.py all`
+要跑完整后端门禁又不想在本机装 Docker，走测试机：`SRV_HOST=<测试机地址> python tools/srv_check.py all`
 （把当前工作区打包传到香港测试机的 api 容器里跑，跑完恢复服务器检出）。
 **同一时刻只能有一个人跑**——服务器上只有一套容器和一个库。
 

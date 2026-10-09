@@ -1,4 +1,4 @@
-"""在香港测试机上跑后端门禁。本地不需要 Docker。
+"""在远程测试机上跑后端门禁（地址从环境变量 `SRV_HOST` 读，不入库）。本地不需要 Docker。
 
     python tools/srv_check.py pytest
     python tools/srv_check.py "ruff check ."
@@ -18,7 +18,7 @@
 
 **并发**：服务器上只有一套容器和一个数据库，同一时刻只能有一个人跑。
 这条今天不是限制——账号速率限制本来就逼着一次只跑一个 Claude Worker。
-真要并发得给每个 Worker 起一套容器，而那台机上还跑着别人的游戏服，内存不够。
+真要并发得给每个 Worker 起一套容器，而那台机的内存不够。
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ import time
 
 import paramiko
 
-HOST = os.environ.get("SRV_HOST", "38.76.215.147")
+HOST = os.environ.get("SRV_HOST", "")
 KEY = os.path.expanduser("~/.ssh/id_ed25519")
 REMOTE = "/opt/aigc_studio"
 
@@ -83,6 +83,9 @@ def main() -> int:
     paths = _tracked_files()
     blob = _tarball(paths)
     print(f"[srv] 打包 {len(paths)} 个文件，{len(blob) / 1024:.0f} KB", flush=True)
+
+    if not HOST:
+        sys.exit("[srv] 先设置环境变量 SRV_HOST=<测试机地址>")
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())

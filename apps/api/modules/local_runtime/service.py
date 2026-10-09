@@ -224,6 +224,27 @@ async def text_provider_ready(provider: str) -> bool:
     return state is not None and "text" in state.kinds
 
 
+def _require_text_offered(org_id: uuid.UUID, project_id: uuid.UUID, provider: str) -> None:
+    """部署对这个 org / 项目开放了、这个 CLI 也在可选名单里。存选择和真正生成共用这一道。
+
+    没开放（白名单收回、名字不在名单里）就报出来让用户改选，**不**替他换成付费模型。
+    """
+    if provider not in text_providers() or not applies_to(org_id, project_id):
+        raise AppError(
+            "local_runtime.text_not_configured",
+            message=f"local text provider {provider!r} is not offered for this org/project",
+        )
+
+
+async def _require_text_ready(provider: str) -> None:
+    """连接器此刻在线并报告了文本能力。没登录的 CLI 连接器起不来，所以只会是离线。"""
+    if not await text_provider_ready(provider):
+        raise AppError(
+            "local_runtime.text_offline",
+            message=f"local runner for {provider} is not connected with text capability",
+        )
+
+
 async def validate_text_selection(
     *, org_id: uuid.UUID, project_id: uuid.UUID, capability: str, provider: str
 ) -> None:
@@ -240,16 +261,8 @@ async def validate_text_selection(
             message="本机会员 CLI 目前只能用来写文本",
             detail={"capability": capability},
         )
-    if provider not in text_providers() or not applies_to(org_id, project_id):
-        raise AppError(
-            "local_runtime.text_not_configured",
-            message=f"local text provider {provider!r} is not offered for this project",
-        )
-    if not await text_provider_ready(provider):
-        raise AppError(
-            "local_runtime.text_offline",
-            message=f"local runner for {provider} is not connected with text capability",
-        )
+    _require_text_offered(org_id, project_id, provider)
+    await _require_text_ready(provider)
 
 
 def image_applies_to(org_id: uuid.UUID | None, project_id: uuid.UUID | None) -> bool:
@@ -304,13 +317,7 @@ async def complete_text(
     共享池**里的一条连接，而 SSE、熔断器、幂等键都在用同一个池。
     分段之后顺带把取消能力也拿到了——两条路径从此只有一种等法。
     """
-    if provider not in text_providers() or not applies_to(org_id, project_id):
-        # 项目选了本机，但部署没对它开放（白名单收回、名字不在可选名单里）。
-        # 报出来让用户改选，**不**替他换成付费模型。
-        raise AppError(
-            "local_runtime.text_not_configured",
-            message=f"local text provider {provider!r} is not offered for this org/project",
-        )
+    _require_text_offered(org_id, project_id, provider)
 
     settings = get_settings()
     timeout_seconds = settings.local_cli_timeout_seconds
@@ -321,11 +328,7 @@ async def complete_text(
             message=f"local runtime prompt exceeds {MAX_PROMPT_CHARS} chars",
         )
 
-    if not await text_provider_ready(provider):
-        raise AppError(
-            "local_runtime.text_offline",
-            message=f"local runner for {provider} is not connected",
-        )
+    await _require_text_ready(provider)
 
     request_id = uuid.uuid4()
     try:

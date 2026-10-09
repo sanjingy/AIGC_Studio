@@ -63,3 +63,9 @@ _research/
 
 # Claude Code 本地 MCP 配置，按机器不同，不入库
 .mcp.json
+
+# 部署机本地覆盖（端口、域名、凭据），不入库
+docker-compose.override.yml
+
+# 个人测试笔记，只留本地
+/need.md

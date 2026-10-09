@@ -34,7 +34,7 @@ class UrlPolicyTest(unittest.TestCase):
 
     def test_http_to_a_remote_host_is_refused(self) -> None:
         with self.assertRaises(UrlPolicyError):
-            normalize_server_url("http://38.76.215.147:3000")
+            normalize_server_url("http://203.0.113.10:3000")
 
     def test_other_schemes_are_refused(self) -> None:
         for url in ("ftp://x/y", "file:///c:/x", "ws://127.0.0.1:1"):

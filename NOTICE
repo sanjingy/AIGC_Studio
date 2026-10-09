@@ -1,0 +1,10 @@
+AIGC Studio
+Copyright 2026 AIGC Studio contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes code adapted from third-party projects under the MIT License
+(one-api, CC Switch) and vendored developer tooling under the MIT License
+(UI/UX Pro Max, orca-task-router) and the Apache License 2.0
+(anthropics/skills frontend-design).
+See THIRD_PARTY_NOTICES.md for sources and full license texts.
