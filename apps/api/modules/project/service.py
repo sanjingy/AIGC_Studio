@@ -136,6 +136,8 @@ async def set_model_preference(
        `provider.org:<连接 id>[:<模型 id>]`（ADR-039）：连接必须存在于本 org
        （别的 org 的 id 一律 404）、有这个能力的协议的模型、模型在连接里。
        连接以后被删 / 停用时偏好不会被静默改掉，生成时报可读错误。
+       以及本机会员 CLI `provider.local:<claude|codex>`（ADR-041，只限文本）：
+       部署对本项目开放、连接器此刻在线才存得进去；之后离线不改偏好，生成时报错。
        目录是"有哪些模型"的唯一真相源（`gateway/catalog.py`），存一个路由表里没有的 id 等于让偏好
        静默失效：Gateway 找不到匹配的路由就按默认优先级走，用户看着
        设置页显示"已选高质档"，实际跑的是另一个模型。
@@ -148,8 +150,17 @@ async def set_model_preference(
     """
     row = await get_project(db, org_id=org_id, project_id=project_id)
 
+    local_provider = catalog.parse_local_ref(model_id)
     org_ref = model_id is not None and catalog.parse_org_ref(model_id) is not None
-    if org_ref:
+    if local_provider is not None:
+        # 本机会员 CLI（ADR-041）：只接受文本、部署对本项目开放、连接器此刻在线。
+        # 延迟导入：local_runtime.service 依赖本模块（读项目偏好），模块级互相 import 会成环
+        from apps.api.modules.local_runtime import service as local_runtime
+
+        await local_runtime.validate_text_selection(
+            org_id=org_id, project_id=project_id, capability=capability, provider=local_provider
+        )
+    elif org_ref:
         # 延迟导入：gateway.service 依赖本模块（读项目偏好），模块级互相 import 会成环
         from apps.api.modules.gateway import upstreams
 

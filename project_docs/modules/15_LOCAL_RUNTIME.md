@@ -1,6 +1,7 @@
 # 15 本机运行时（试点）
 
-> 状态：**试点，默认关闭，未部署，未接受对外开放。** ADR 待定。
+> 状态：**试点，默认关闭，未部署，未接受对外开放。** 文本这一段的选择与计费口径见
+> ADR-041（2026-10-09）：**逐项目显式选择、本机文本 0 平台 Credits、prod 闸门不变**。
 > 本文档描述的是**当前工作区里真实存在的实现**（`feat/freeflow-prototype`，未合并）。
 > 上一版（只有文本、走 `codex exec` 一次性子进程）已被替换，见 §9 变更记录。
 
@@ -10,7 +11,7 @@
 
 | 能力 | 走谁 | 产物落在哪 |
 |---|---|---|
-| 文本（Agent 的一步） | 本机 Claude 或 Codex | 与原来一样，`agent_runs` |
+| 文本（Agent 的一步） | 本机 Claude 或 Codex，**项目在设置里显式选了才走**（ADR-041） | 与原来一样，`agent_runs`，`model_id` 记 `local-cli.<cli>[:<自报模型>]` |
 | **图片** | 本机 **Codex 原生 `image_gen`** | **项目资产库**（与平台出图同一张 `tasks`、同一条 `register_generated`） |
 | 视频 / 语音 | —— | **不支持**，见 §2 |
 
@@ -48,7 +49,8 @@
 | `LOCAL_CLI_ENABLED` | 总开关，默认 `false` |
 | `LOCAL_CLI_ORG_ID` | 只对这一个 org 生效 |
 | `LOCAL_CLI_PROJECT_IDS` | 显式项目白名单，逗号分隔，不许留空、不许写 `*` |
-| `LOCAL_CLI_PROVIDER` | **文本**走哪个 CLI：`codex` / `claude`，默认 `claude` |
+| `LOCAL_CLI_PROVIDER` | 文本 CLI 的默认可选项：`codex` / `claude`，默认 `claude` |
+| `LOCAL_CLI_TEXT_PROVIDERS` | 项目**可以选**哪几个 CLI 写文本，CSV（如 `claude,codex`）；留空 = 只有 `LOCAL_CLI_PROVIDER`。**只决定选项里出现谁，不让任何项目自动改道**（ADR-041） |
 | `LOCAL_CLI_IMAGE_PROVIDER` | **图片**走哪个：只有 `codex` |
 | `LOCAL_CLI_TOKEN` | 桥接令牌，≥ 32 个随机字符 |
 | `LOCAL_CLI_TIMEOUT_SECONDS` | 文本上限，30~900，默认 180 |
@@ -135,6 +137,32 @@ GET  /api/v1/local-runtime/status                   正常登录态，界面用
 | 清理 | LREM 与 DEL 分开 = 队列里留下指向已删载荷的 id |
 
 队列按 `(provider, kind)` 分开，所以只跑文本的那台连接器不会捞走一条出图请求。
+
+### 3.6 文本：逐项目显式选择（ADR-041）
+
+**以前**：试点开着时，白名单内项目的**所有**文本自动改道本机，用的是唯一一个
+`LOCAL_CLI_PROVIDER`。用户既看不到"这个项目在用本机"，也选不了 Claude / Codex。
+
+**现在**：项目文本偏好（`projects.model_preference.text_generation`，与 API 模型默认
+同一个字段、同一套语义）多一种取值 `provider.local:<claude|codex>`。
+
+| 环节 | 规则 | 代码 |
+|---|---|---|
+| 存进去 | 只限 `text_generation`、只限**项目级**（组织默认不接受）；CLI 在可选名单里、项目在白名单里、该 CLI 的连接器**此刻在线并报告 text 能力**，才存得进 | `local_runtime.service.validate_text_selection`，由 `project.service.set_model_preference` 调用 |
+| 路由 | `RoutingLLM` 只在项目显式选了本机时走本机；没选的白名单项目照常走 Gateway / Mock | `agent/llm.py::RoutingLLM`、`service.selected_text_provider` |
+| 失败 | 不回落。离线 `local_runtime.text_offline`、未订阅 `text_auth_required`、额度 `text_usage_limit`、超时 `text_timeout`、其余 `text_failed`；部署收回开放范围后 `text_not_configured` | `core/errors.py` |
+| 过期偏好 | 偏好是本机、却走到了 Gateway 解析（例如试点被关掉）→ `gateway.upstreams.decide` 直接抛 `text_not_configured`，**不会被当成未知值落到付费默认路由** | `gateway/upstreams.py::decide` |
+| 运行记录 | `agent_runs.model_id = local-cli.<cli>[:<连接器自报模型>]`，截到 64 字符（列宽） | `service.local_model_id` |
+| 状态接口 | `GET /local-runtime/status` 多两列：`text_providers`（每个可选 CLI 的在线 / 版本 / 修复命令）、`projects`（哪个项目选了哪个 CLI） | `service.describe_status` |
+
+**前端**：模型页单独一节「本机会员 CLI」（`components/freeflow/local-cli-section.tsx`，
+纯逻辑在 `lib/freeflow/local-cli.ts`），与 API Key 供应商分开；写明电脑与连接器必须在线、
+须官方 CLI 会员登录、0 Credits、失败不回落、没有视频。项目设置的文本下拉多一组
+「本机会员 CLI」，未连接的置灰；已选但失效的标出原因。浏览器从头到尾拿不到桥接令牌。
+
+**Codex 文本**：要 `LOCAL_CLI_TEXT_PROVIDERS=claude,codex` 才出现在选项里；本机
+`codex login status` 未登录时连接器起不来，界面显示「未连接」、选不了，不会出现一个
+"能选却跑不通"的 Codex。
 
 ## 4. 出图这条闭环
 
@@ -232,6 +260,16 @@ claude     : 版本 = 2.1.263 (Claude Code)
 * **耗掉的是用户自己的订阅额度**，那笔账不在平台 Credits 体系里。
 * → **对外开放之前必须先定折算规则。** 在那之前这条路径只对白名单项目开着。
 
+**本机文本是 0 平台 Credits**（ADR-041，用户 2026-10-09 决定；出图口径**不随之改变**）：
+
+* 项目文本（advance / revise）今天本来就**不建任务、不动账本**（FR-AGENT-003 未接），
+  所以选了本机的那次调用，账本里不会多出任何一行——集成测试直接断言流水条数与余额。
+* 防线放在计价函数上，为 FR-AGENT-003 接计费那天准备：`pricing.text_run_cost` 对
+  `local-cli.` 前缀一律返回 0（先于 BYOK 与定价表判断，防止自报模型名与平台目录同名时
+  按名查价）；`pricing.estimate_agent_run(project_id=)` 项目选了本机返回 0。
+* **注意**：`billing.reserve(0)` 仍会写一条流水。接计费时金额为 0 要整段跳过预扣 / 结算。
+* 唯一已接计费的文本路径 `asset/character.py` 不带 `project_id`，永远不走本机，计价不变。
+
 ## 7. 测试
 
 ```powershell
@@ -243,7 +281,16 @@ pytest tests/unit/test_local_runtime_config.py tests/unit/test_local_runtime_sel
 pytest tests/integration/test_local_runtime_transport.py
 pytest tests/integration/test_local_runtime_api.py
 pytest tests/integration/test_local_image_source.py
+pytest tests/integration/test_local_text_source.py
 ```
+
+`test_local_text_source.py`（ADR-041，15 条）盯文本这一段：选择校验 9 条（已连接的
+Claude 能选能清、离线不能选、不在名单的 Codex 在线也不能选、在名单但未登录的 Codex 显示
+不可用并带修复命令、白名单外 / 试点关闭不能选、只能用于文本、不能设为组织默认、跨租户进不来）；
+路由与 0 Credits 4 条（白名单内没选的项目不改道、选了 Claude 走本机且**流水条数与余额不变**、
+离线立即失败且不回落不扣费、选完后试点被关也**到不了付费上游**）；计价边界 2 条
+（`text_run_cost` 对 API 模型照常计价、对 `local-cli.` 给 0；没选本机时预估仍是预算值）。
+变异实验：恢复"白名单自动改道"、去掉 `decide` 的本机守卫，各自对应用例判红，已还原。
 
 `test_local_image_source.py` 盯的是这条路径上真正会出事的那几件事：来源钉死且
 重试不漂移、失败绝不回落 Gateway、不可用时不建任务不预扣、失败释放预扣、
@@ -446,6 +493,15 @@ provider 被换成按量付费端点时拒绝、逐线程配置覆盖的形状�
 
 ## 9. 变更记录
 
+* 2026-10-09（ADR-041，文本逐项目显式选择 + 0 Credits）：项目文本偏好新增
+  `provider.local:<claude|codex>`，选择时校验名单 / 白名单 / 连接器在线；`RoutingLLM`
+  不再对白名单项目自动改道；文本失败改用 `local_runtime.text_*` 六个码（以前借
+  `provider.*`，文案是"正在切换备用通道"，而这条路恰恰不切换）；`decide` 拒绝把本机
+  偏好当过期值落到付费路由；本机文本计价 0；模型页新增「本机会员 CLI」一节、项目设置
+  文本下拉新增本机组。新配置 `LOCAL_CLI_TEXT_PROVIDERS`。prod 闸门、令牌、白名单未动；
+  prod 的每用户配对方案见 ADR-041 第 6 条，**只写设计、未实现**。
+  **行为变化**：已开试点的白名单项目需要在项目设置里重新选一次本机，否则走 API 模型。
+  状态不变：**试点、默认关闭、未部署、未对外开放。**
 * 2026-09-09（**只改一个测试文件，生产代码零改动**）：连接器取消回归改走
   **生产入口**（`run_text` / `run_image`），补上出图那条入口与"文本取消不
   污染随后出图"，并用变异实验证明这组用例真的能判红（旧那版在同一变异下

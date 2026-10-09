@@ -143,6 +143,9 @@ characters → scenes → await_anchors → storyboard → await_storyboard → 
   → `billing.settle`）。要么把 `advance` 也走 `tasks` + reserve/settle（与出图对齐），
   要么至少把 `agent_runs.cost` 按 `model_pricing` 算出来写进去。当前状态下平台不知道
   一个项目的文本花了多少钱，`task_cost_cap` 这类熔断对文本也完全无效。
+  **本机会员 CLI（ADR-041）**：项目选了 `provider.local:<cli>` 时文本是 0 平台 Credits，
+  `estimate_agent_run(project_id=)` 与 `text_run_cost`（`local-cli.` 前缀）已返回 0；
+  接计费时金额为 0 要**整段跳过** `reserve` / `settle`——`reserve(0)` 仍会写一条流水。
 - **FR-AGENT-004**：Agent 失败不把内部 Prompt 或 Provider 原始错误暴露给用户，
   只给 `21_ErrorTaxonomy.md` 的错误码 + 用户话术（`apps/api/core/errors.py` 已有目录）。
 - **FR-AGENT-005**：Gateway 发生 failover 时，实际使用的模型必须回写到运行记录并在前端显示

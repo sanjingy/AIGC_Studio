@@ -4,6 +4,10 @@
 
 * :func:`applies_to` / :func:`image_applies_to` —— 这一条请求**能不能**走本机。
   逐请求判定，不是全局开关：同一个部署里，白名单外的项目照常走 Mock / Gateway。
+* :func:`selected_text_provider` —— 项目**选没选**本机 CLI 写文本（ADR-041）。
+  "能走"不等于"要走"：白名单只是部署层的开放范围，文本只在项目设置里显式选了
+  `provider.local:<cli>` 时才走本机。以前白名单内的项目一律自动改道，用户不知情。
+* :func:`validate_text_selection` —— 存这个选择之前的校验（项目模块调用）。
 * :func:`preflight_image` —— 用户在网页上选了"本机出图"之后，**建任务之前**
   先把不可能成功的情况挡掉（没开、没连上、那台连接器不支持出图）。
   挡在建任务之前是有意的：建了任务就要预扣，预扣完再失败还得退，
@@ -16,7 +20,12 @@
 不许悄悄退回 Gateway（那是付费的，用户以为自己在用订阅额度），
 也不许退回 Mock（那会把假数据当成真产出写进档案）。
 
-**计费口径**：本机出图照常走 `image.generate` 任务，照常预扣、照常结算——
+**计费口径（文本）**：本机会员 CLI 写文本**不收平台 Credits**（ADR-041，负责人
+2026-10-09 决定）。项目文本调用本来就不建任务，这条路径上 `billing` 一行都不执行；
+`model_id` 一律带 `local-cli.` 前缀，`pricing.text_run_cost` 认这个前缀直接给 0，
+将来文本链路接计费时也落不到一个碰巧同名的平台定价上。
+
+**计费口径（出图，未改）**：本机出图照常走 `image.generate` 任务，照常预扣、照常结算——
 `render.py` 那条链路一个字都没为它改。这不是"顺手做的"，是刻意的：
 "用户自己的订阅额度折算多少 Credits"这件事今天没有定义，而在没有定义之前
 把它当成免费，等于凭空改了资金语义。失败时按错误目录 RELEASE 退回预扣
@@ -38,11 +47,18 @@ from PIL import Image, UnidentifiedImageError
 from PIL.Image import DecompressionBombError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.core.config import get_settings
+from apps.api.core.config import LocalCliName, get_settings
+from apps.api.core.db import session_scope
 from apps.api.core.errors import AppError
 from apps.api.core.logging import get_logger
+from apps.api.modules.gateway import catalog
 from apps.api.modules.local_runtime import transport
-from apps.api.modules.local_runtime.schemas import Capabilities, StatusOut
+from apps.api.modules.local_runtime.schemas import (
+    Capabilities,
+    ProjectTextSource,
+    StatusOut,
+    TextProviderStatus,
+)
 from apps.api.modules.project import service as project_service
 
 log = get_logger(__name__)
@@ -81,18 +97,17 @@ MIN_IMAGE_SIDE = 16
 
 #: 有界错误码 → 平台错误目录。
 #:
-#: 文本那条沿用 `provider.*`（它替代的就是一次 Provider 调用，
-#: 用户看到的失败与上游失败没有区别）；出图这条用 `local_runtime.*`，
-#: 因为**能修的人是用户自己**——去桌面上启动连接器、登录 Codex、等额度。
-#: 复用"正在切换备用通道"那句文案，用户永远不知道该点哪里。
+#: 两条都用 `local_runtime.*`：**能修的人是用户自己**——去桌面上启动连接器、
+#: 登录 CLI、等额度。文本以前借用 `provider.*`，用户看到"正在切换备用通道"，
+#: 而这条路径恰恰不会切换任何通道（ADR-041 起文本也是用户显式选的）。
 _TEXT_ERROR_MAP: dict[str, str] = {
-    "timeout": "provider.transient.timeout",
-    "rate_limited": "provider.rate_limit.exceeded",
-    "auth_required": "provider.unavailable",
-    "cli_error": "provider.unavailable",
-    "unsupported": "provider.params.invalid",
-    "cancelled": "provider.unavailable",
-    "no_image": "provider.unavailable",
+    "timeout": "local_runtime.text_timeout",
+    "rate_limited": "local_runtime.text_usage_limit",
+    "auth_required": "local_runtime.text_auth_required",
+    "cli_error": "local_runtime.text_failed",
+    "unsupported": "local_runtime.text_failed",
+    "cancelled": "local_runtime.text_failed",
+    "no_image": "local_runtime.text_failed",
 }
 
 _IMAGE_ERROR_MAP: dict[str, str] = {
@@ -134,8 +149,27 @@ def is_enabled() -> bool:
     return get_settings().local_cli_enabled
 
 
-def text_provider() -> str:
-    return get_settings().local_cli_provider
+def text_providers() -> tuple[LocalCliName, ...]:
+    """项目可以选来写文本的本机 CLI（ADR-041）。"""
+    return get_settings().local_cli_text_options
+
+
+def _offered(name: str | None) -> LocalCliName | None:
+    """名字在可选名单里就返回名单里那一项，否则 None。"""
+    return next((p for p in text_providers() if p == name), None)
+
+
+def local_model_id(provider: str, reported: str | None) -> str:
+    """记进 `agent_runs.model_id` 的执行者。**一律带 `local-cli.` 前缀**。
+
+    连接器自报的模型名（`claude-opus-…`）原样写进去，会和平台 / BYOK 的同名模型
+    混在一起：成本复盘分不清是谁跑的，将来文本接计费时还可能撞上一条同名定价。
+    列宽 64，截断而不是让一次成功的生成在落库时炸掉。
+    """
+    base = f"{catalog.LOCAL_MODEL_PREFIX}{provider}"
+    if reported:
+        base = f"{base}:{reported}"
+    return base[:64]
 
 
 def image_provider() -> str:
@@ -155,11 +189,67 @@ def _in_scope(org_id: uuid.UUID | None, project_id: uuid.UUID | None) -> bool:
 
 
 def applies_to(org_id: uuid.UUID | None, project_id: uuid.UUID | None) -> bool:
-    """这一条**文本**请求走不走本机 CLI。
+    """这一条**文本**请求**能不能**走本机 CLI（部署层的开放范围）。
 
+    能走不等于要走：要不要走看 :func:`selected_text_provider`。
     不挂项目的调用（资产库里那条直接生成角色档案的路径）一律走原来的实现。
     """
     return _in_scope(org_id, project_id)
+
+
+async def _load_text_preference(*, org_id: uuid.UUID, project_id: uuid.UUID) -> str | None:
+    """项目的文本偏好。单开一个函数做测试替换点，理由同 `gateway._load_org_key`。"""
+    async with session_scope() as db:
+        return await project_service.get_model_preference(
+            db, org_id=org_id, project_id=project_id, capability=catalog.LOCAL_CAPABILITY
+        )
+
+
+async def selected_text_provider(
+    org_id: uuid.UUID | None, project_id: uuid.UUID | None
+) -> str | None:
+    """项目显式选了哪个本机 CLI 写文本。没选返回 None（照常走 Gateway / Mock）。
+
+    **只看项目偏好，不看白名单**：选了本机、却不在白名单里（部署收回了开放范围），
+    返回的仍是那个名字——调用方据此报"没开放"，而不是当成"没选"去调付费模型。
+    """
+    if org_id is None or project_id is None:
+        return None
+    value = await _load_text_preference(org_id=org_id, project_id=project_id)
+    return catalog.parse_local_ref(value)
+
+
+async def text_provider_ready(provider: str) -> bool:
+    state = await transport.runner_state(provider)
+    return state is not None and "text" in state.kinds
+
+
+async def validate_text_selection(
+    *, org_id: uuid.UUID, project_id: uuid.UUID, capability: str, provider: str
+) -> None:
+    """项目要把文本改成本机 CLI 之前的校验（`project.service.set_model_preference` 调用）。
+
+    选择只在**此刻真的能用**时才存得进去：部署对这个 org / 项目开放了、这个 CLI 在
+    可选名单里、它的连接器正在线并报告了文本能力（连接器启动时已确认订阅登录，
+    没登录根本起不来）。界面上未连接的选项本来就是灰的；这里挡住绕过界面直接调接口的。
+    之后连接器离线不会改掉这条选择，生成时报 `local_runtime.text_offline`。
+    """
+    if capability != catalog.LOCAL_CAPABILITY:
+        raise AppError(
+            "provider.params.invalid",
+            message="本机会员 CLI 目前只能用来写文本",
+            detail={"capability": capability},
+        )
+    if provider not in text_providers() or not applies_to(org_id, project_id):
+        raise AppError(
+            "local_runtime.text_not_configured",
+            message=f"local text provider {provider!r} is not offered for this project",
+        )
+    if not await text_provider_ready(provider):
+        raise AppError(
+            "local_runtime.text_offline",
+            message=f"local runner for {provider} is not connected with text capability",
+        )
 
 
 def image_applies_to(org_id: uuid.UUID | None, project_id: uuid.UUID | None) -> bool:
@@ -196,6 +286,7 @@ async def complete_text(
     *,
     org_id: uuid.UUID,
     project_id: uuid.UUID,
+    provider: str,
     system: str,
     user: str,
     schema_name: str,
@@ -213,15 +304,15 @@ async def complete_text(
     共享池**里的一条连接，而 SSE、熔断器、幂等键都在用同一个池。
     分段之后顺带把取消能力也拿到了——两条路径从此只有一种等法。
     """
-    if not applies_to(org_id, project_id):
-        # 兜底。正常路径上 llm.py 已经判过一次，走到这里说明有人绕过了选择器。
+    if provider not in text_providers() or not applies_to(org_id, project_id):
+        # 项目选了本机，但部署没对它开放（白名单收回、名字不在可选名单里）。
+        # 报出来让用户改选，**不**替他换成付费模型。
         raise AppError(
-            "common.forbidden",
-            message="local runtime not configured for this org/project",
+            "local_runtime.text_not_configured",
+            message=f"local text provider {provider!r} is not offered for this org/project",
         )
 
     settings = get_settings()
-    provider = settings.local_cli_provider
     timeout_seconds = settings.local_cli_timeout_seconds
 
     if len(system) + len(user) > MAX_PROMPT_CHARS:
@@ -230,10 +321,9 @@ async def complete_text(
             message=f"local runtime prompt exceeds {MAX_PROMPT_CHARS} chars",
         )
 
-    state = await transport.runner_state(provider)
-    if state is None or "text" not in state.kinds:
+    if not await text_provider_ready(provider):
         raise AppError(
-            "provider.unavailable",
+            "local_runtime.text_offline",
             message=f"local runner for {provider} is not connected",
         )
 
@@ -252,10 +342,7 @@ async def complete_text(
             ),
         )
         if not accepted:
-            raise AppError(
-                "provider.rate_limit.exceeded",
-                message="local runtime queue is full",
-            )
+            raise AppError("local_runtime.busy", message="local runtime queue is full")
         log.info(
             # 只记形状，不记内容：提示词里有用户的小说原文。
             "local_runtime.enqueued",
@@ -269,7 +356,7 @@ async def complete_text(
             request_id=request_id,
             deadline=time.monotonic() + timeout_seconds,
             is_cancelled=is_cancelled,
-            cancelled_error="provider.unavailable",
+            cancelled_error="local_runtime.text_failed",
         )
     finally:
         # 超时、取消、异常都要清干净：留在队列里的请求会被下一次 poll 捞去
@@ -279,12 +366,12 @@ async def complete_text(
     if reply is None:
         log.warning("local_runtime.timeout", request_id=str(request_id), provider=provider)
         raise AppError(
-            "provider.transient.timeout",
+            "local_runtime.text_timeout",
             message=f"local runner did not answer within {timeout_seconds}s",
         )
 
     if reply.error_code:
-        code = _TEXT_ERROR_MAP.get(reply.error_code, "provider.unavailable")
+        code = _TEXT_ERROR_MAP.get(reply.error_code, "local_runtime.text_failed")
         log.warning(
             "local_runtime.failed",
             request_id=str(request_id),
@@ -296,7 +383,7 @@ async def complete_text(
 
     if not reply.text or not reply.text.strip():
         raise AppError(
-            "provider.unavailable",
+            "local_runtime.text_failed",
             message="local runner returned empty text",
         )
 
@@ -304,7 +391,7 @@ async def complete_text(
         text=reply.text,
         # 如实标注是谁跑的。写成 deepseek-chat 之类会让 agent_runs.model_id
         # 与真实执行者对不上，那张表是后面所有成本复盘的依据。
-        model_id=reply.model_id or f"local-cli.{provider}",
+        model_id=local_model_id(provider, reply.model_id),
         tokens_in=reply.tokens_in or 0,
         tokens_out=reply.tokens_out or 0,
     )
@@ -554,7 +641,7 @@ def _assert_provider(provider: str) -> None:
     跨 Provider 抢单会让用户拿到一个他没配过的模型的产出。
     """
     settings = get_settings()
-    if provider not in (settings.local_cli_provider, settings.local_cli_image_provider):
+    if provider not in (*text_providers(), settings.local_cli_image_provider):
         raise AppError("common.forbidden", message="provider mismatch")
 
 
@@ -562,12 +649,13 @@ def _allowed_kinds(provider: str, requested: list[str]) -> list[transport.Reques
     """这台连接器**被允许**取哪几种活。
 
     两侧取交集：连接器自报支持什么，配置又把哪一种能力指给了它。
-    配置里文本走 claude 时，一台 codex 连接器就不该拿到文本请求——
-    否则用户在设置里选的那个模型形同虚设。
+    可选名单里没有 codex 时，一台 codex 连接器就不该拿到文本请求。
+    名单里有它也只代表"可以被选"：文本请求按项目选中的 CLI 分队列入队，
+    选了 claude 的项目，请求根本进不了 codex 的队列。
     """
     settings = get_settings()
     allowed: list[transport.RequestKind] = []
-    if "text" in requested and provider == settings.local_cli_provider:
+    if "text" in requested and provider in text_providers():
         allowed.append("text")
     if "image" in requested and provider == settings.local_cli_image_provider:
         allowed.append("image")
@@ -710,17 +798,35 @@ async def describe_status(db: AsyncSession, *, org_id: uuid.UUID) -> StatusOut:
 
     # 配置里写错一个 id（别的租户的项目）也不能回显出去，逐个核对归属。
     owned: list[uuid.UUID] = []
+    projects: list[ProjectTextSource] = []
+    offered = text_providers()
     for project_id in settings.local_cli_project_ids:
-        if await project_service.project_exists(db, org_id=org_id, project_id=project_id):
-            owned.append(project_id)
+        if not await project_service.project_exists(db, org_id=org_id, project_id=project_id):
+            continue
+        owned.append(project_id)
+        row = await project_service.get_project(db, org_id=org_id, project_id=project_id)
+        chosen = catalog.parse_local_ref(
+            await project_service.get_model_preference(
+                db, org_id=org_id, project_id=project_id, capability=catalog.LOCAL_CAPABILITY
+            )
+        )
+        projects.append(
+            ProjectTextSource(
+                project_id=project_id,
+                title=row.title,
+                # 存着一个已不在可选名单里的名字：这里给 None（界面不显示不存在的选项），
+                # 生成时报 text_not_configured，项目设置页把它标成"已失效的设置"。
+                provider=_offered(chosen),
+            )
+        )
 
-    text_state = await transport.runner_state(settings.local_cli_provider)
+    states = {p: await transport.runner_state(p) for p in offered}
+    text_rows = [_text_provider_row(p, states[p]) for p in offered]
     image_state = (
-        text_state
-        if settings.local_cli_image_provider == settings.local_cli_provider
+        states[settings.local_cli_image_provider]
+        if settings.local_cli_image_provider in states
         else await transport.runner_state(settings.local_cli_image_provider)
     )
-    text_ready = text_state is not None and "text" in text_state.kinds
     image_ready = image_state is not None and "image" in image_state.kinds
 
     reason: str | None = None
@@ -736,12 +842,47 @@ async def describe_status(db: AsyncSession, *, org_id: uuid.UUID) -> StatusOut:
         text_provider=settings.local_cli_provider,
         image_provider=settings.local_cli_image_provider,
         project_ids=owned,
-        capabilities=Capabilities(text=text_ready, image=image_ready),
-        runner_connected=text_state is not None,
+        capabilities=Capabilities(text=any(r.ready for r in text_rows), image=image_ready),
+        runner_connected=any(r.connected for r in text_rows),
         image_runner_connected=image_state is not None,
         image_runner_version=image_state.version if image_state else None,
         image_available=bool(owned) and image_ready,
         image_unavailable_reason=reason,
+        text_providers=text_rows,
+        projects=projects,
+    )
+
+
+#: 每个 CLI 的修复指引。只写官方命令，不写路径、不写令牌。
+_LOGIN_HINT = {
+    "claude": "claude auth login",
+    "codex": "codex login",
+}
+
+
+def _text_provider_row(
+    provider: LocalCliName, state: transport.RunnerState | None
+) -> TextProviderStatus:
+    login = _LOGIN_HINT.get(provider, "登录")
+    if state is None:
+        reason = (
+            f"没有检测到它的本地连接器。确认电脑开着、已用会员账号登录（{login}），"
+            f"再启动连接器：python -m apps.local_runner --provider {provider}"
+        )
+        return TextProviderStatus(provider=provider, connected=False, ready=False, reason=reason)
+    if "text" not in state.kinds:
+        return TextProviderStatus(
+            provider=provider,
+            connected=True,
+            ready=False,
+            version=state.version,
+            reason="连接器在线，但没有报告文本能力；用 --doctor 体检后重启连接器",
+        )
+    return TextProviderStatus(
+        provider=provider,
+        connected=True,
+        ready=True,
+        version=state.version,
     )
 
 

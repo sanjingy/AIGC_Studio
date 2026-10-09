@@ -20,7 +20,7 @@ from adapters.providers.base import KeySource
 from apps.api.core.logging import get_logger
 from apps.api.modules.billing import service as billing_service
 from apps.api.modules.billing.models import ModelPricing
-from apps.api.modules.gateway import upstreams
+from apps.api.modules.gateway import catalog, upstreams
 from apps.api.modules.project import service as project_service
 
 log = get_logger(__name__)
@@ -221,7 +221,11 @@ _TOKENS_PER_UNIT = 1_000_000
 
 
 async def estimate_agent_run(
-    db: AsyncSession, *, budget_credits: int, org_id: uuid.UUID | None = None
+    db: AsyncSession,
+    *,
+    budget_credits: int,
+    org_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> int:
     """一次同步 Agent 调用要预扣多少 Credits。
 
@@ -234,7 +238,18 @@ async def estimate_agent_run(
     扣少了就得平台垫。
 
     BYOK（ADR-025）：上游的钱用户自己付，平台只收隐性成本那一档。
+
+    **本机会员 CLI 是 0**（ADR-041）：项目文本选了 `provider.local:<cli>` 时，
+    跑的是用户自己电脑上的会员额度，平台不收 Credits。注意 `billing.reserve(0)`
+    **仍会写一条流水**——将来文本链路接计费（FR-AGENT-003）时，金额为 0 要整段跳过
+    预扣 / 结算，不能指望"0 就等于没动账本"。
     """
+    if org_id is not None and project_id is not None:
+        preference = await project_service.get_model_preference(
+            db, org_id=org_id, project_id=project_id, capability="text_generation"
+        )
+        if catalog.parse_local_ref(preference) is not None:
+            return 0
     if await uses_own_key(db, org_id=org_id, capability="text_generation"):
         cfg = await billing_service.rules(db)
         return int(cfg["byok_unit_credits"])
@@ -259,7 +274,12 @@ async def text_run_cost(
     （宁可拦下来），结算这头拿不准就不能往高收——把我们的配置缺失变成
     用户账单，比少收一笔钱严重得多。预扣已经把风险封顶，告警会让缺的
     那条定价被看见。
+
+    **本机会员 CLI 跑的（`local-cli.` 前缀）一律 0**，先于 BYOK 与定价表判断：
+    自报模型名可能与平台目录同名，按名查价会把用户自己的会员额度算成平台成本（ADR-041）。
     """
+    if catalog.is_local_model(model_id):
+        return 0
     cfg = await billing_service.rules(db)
     if await uses_own_key(db, org_id=org_id, capability="text_generation"):
         return int(cfg["byok_unit_credits"])

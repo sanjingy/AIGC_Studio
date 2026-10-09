@@ -78,6 +78,35 @@ ORG_PROVIDER_LABEL = "自带 Key 的供应商"
 # 只有"端点早已删除"的旧项目偏好还会留着它，解析时按"连接不存在"报错。
 LEGACY_CUSTOM_TEXT_PROVIDER_ID = "provider.custom.text"
 
+# 本机会员 CLI（ADR-041）。**只**作为项目的文本偏好出现：`provider.local:<claude|codex>`。
+# 它不进路由表、不进组织默认，也**不经过 Gateway**——由 `agent/llm.py::RoutingLLM`
+# 在 Gateway 之前接走。这里只登记写法，让 Gateway 认得它并拒绝，而不是把它当成
+# 一条过期偏好、悄悄落到平台或用户自己的付费 Key 上。
+LOCAL_PROVIDER_PREFIX = "provider.local:"
+LOCAL_CAPABILITY = "text_generation"
+#: 本机 CLI 跑出来的 `agent_runs.model_id` 一律以它开头（`local-cli.claude[:<自报模型>]`）。
+#: 计费靠它认出"这次是用户自己的会员额度"，不靠模型名猜。
+LOCAL_MODEL_PREFIX = "local-cli."
+
+
+def is_local_model(model_id: str | None) -> bool:
+    return bool(model_id) and str(model_id).startswith(LOCAL_MODEL_PREFIX)
+
+
+def local_ref(provider: str) -> str:
+    return f"{LOCAL_PROVIDER_PREFIX}{provider}"
+
+
+def parse_local_ref(value: str | None) -> str | None:
+    """`provider.local:<名字>` → 名字。前缀不对返回 None。
+
+    名字**不在这里校验**：前缀对、名字认不出（`provider.local:gemini`）照样返回原串，
+    调用方按"选了本机但这个 CLI 不可用"报错，不当成"不是本机"往付费路由上落。
+    """
+    if not value or not value.startswith(LOCAL_PROVIDER_PREFIX):
+        return None
+    return value[len(LOCAL_PROVIDER_PREFIX) :]
+
 
 @dataclass(frozen=True, slots=True)
 class ProtocolSpec:

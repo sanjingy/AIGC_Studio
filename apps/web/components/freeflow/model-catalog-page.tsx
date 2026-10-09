@@ -44,6 +44,7 @@ import {
 import { cn } from "@/lib/utils";
 import { mergeModelOptions } from "@/lib/freeflow/model-options";
 
+import { LocalCliSection } from "./local-cli-section";
 import { ConfirmDialog } from "./project/feedback";
 
 /**
@@ -56,6 +57,8 @@ import { ConfirmDialog } from "./project/feedback";
  *   显示后端原文。默认指向的连接坏了（`broken_reason`）时顶部醒目提示，下面直接改选。
  * - **供应商**：本组织的连接。直接填写 Key 与地址，读取或手填模型；编辑时 Key 从空开始，
  *   **永不回显**，只显示后端给的尾号掩码。删除前列出谁正指向它——删了不会自动换到别家。
+ * - **本机会员 CLI**（ADR-041）：单独一本，与 API Key 的供应商分开。只看状态，
+ *   选择在项目设置里逐项目做。
  * - **还没接入的能力**（视频、语音）照实写，不放控件。
  *
  * 选项不在 React 里写死：有哪几家、协议能选哪些、哪个能力能指向连接，全来自后端。
@@ -162,6 +165,7 @@ export function ModelCatalogPage() {
         这里是<strong className="font-medium text-fg-muted">组织默认</strong>，对所有项目生效；单个项目可在
         项目设置 › 默认模型 里覆盖。用自己的供应商时按你的 Key 调用，出错会直接报错，
         <strong className="font-medium text-fg-muted">不会悄悄换到别家或平台</strong>。
+        不想用 API Key？下面的「本机会员 CLI」用你自己电脑上已登录的官方 CLI 写文本。
       </p>
 
       {notice && (
@@ -198,6 +202,8 @@ export function ModelCatalogPage() {
           }}
         />
       ))}
+
+      <LocalCliSection />
 
       {pending.map((item) => (
         <PendingSection key={item.capability} item={item} />

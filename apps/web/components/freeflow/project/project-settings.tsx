@@ -17,7 +17,9 @@ import {
   type Project,
   type StyleOption,
 } from "@/lib/api";
+import { localSelectionHint, localTextOptions, parseLocalRef } from "@/lib/freeflow/local-cli";
 import { describeApiError, orgRef, parseOrgRef } from "@/lib/freeflow/provider-scope";
+import { useLocalRuntime } from "@/lib/freeflow/use-local-runtime";
 import { useLockVariables } from "@/lib/freeflow/use-lock-variables";
 import { cn } from "@/lib/utils";
 
@@ -609,6 +611,9 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
   /** 组织层配置：用来写清"跟随组织默认"是谁，以及本组织有哪些供应商连接可选 */
   const [org, setOrg] = useState<CapabilityConfig[]>([]);
   const [orgLoaded, setOrgLoaded] = useState(false);
+  /** 本机会员 CLI 的实况（ADR-041）。只有白名单内的项目、文本这一行会出现它的选项 */
+  const local = useLocalRuntime(project?.id ?? null);
+  const localOptions = localTextOptions(local.status, project?.id ?? null);
 
   useEffect(() => {
     modelCatalog
@@ -673,6 +678,7 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
         这里是<strong className="font-medium text-fg-muted">项目覆盖</strong>：只改本项目，不选就跟随组织默认
         （在 <Link href="/freeflow/models" className="text-primary hover:underline">模型</Link> 页设置）。
         平台模型出故障时会自动切到同能力的下一个；选了自己的供应商则不会换到别家，出错直接报错。
+        {localOptions.length > 0 && " 文本还可以选「本机会员 CLI」：用你电脑上已登录的官方 CLI，不扣平台 Credits。"}
       </p>
 
       {!items && <p className="ff-ledger-empty">加载中…</p>}
@@ -686,7 +692,9 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
               // 档位说明只讲模型定位，不讲价格——价格在 model_pricing 表里，
               // 写死在前端的"更便宜"等上游调价就变成谎话
               (item.models ?? []).find((m) => m.model_id === preference[item.capability])?.note ??
-              (parseOrgRef(preference[item.capability])
+              (parseLocalRef(preference[item.capability])
+                ? localSelectionHint(preference[item.capability], local.status)
+                : parseOrgRef(preference[item.capability])
                 ? orgLoaded && isStale(item, org, preference[item.capability])
                   ? "选中的供应商已删除或模型已移除，生成会报错，请改选"
                   : "用你自己的供应商：出错直接报错，不会换到别家"
@@ -723,10 +731,26 @@ function ModelPreferenceCard({ project }: { project: Project | null }) {
                     ))}
                   </optgroup>
                 )}
+                {/* 本机会员 CLI：只在文本、只对白名单内的项目出现；未连接的列出来但不可选 */}
+                {item.capability === "text_generation" && localOptions.length > 0 && (
+                  <optgroup label="本机会员 CLI（不扣平台 Credits）">
+                    {localOptions.map((o) => (
+                      <option key={o.value} value={o.value} disabled={o.disabled}>
+                        {o.text}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
                 {/* 存着的值在选项里找不到（连接删了 / 模型移除了）：照实显示，不让下拉静默落到别的值上 */}
-                {isStale(item, org, preference[item.capability]) && (
+                {isStale(item, org, preference[item.capability], localOptions) && (
                   <option value={preference[item.capability]}>
-                    {orgLoaded ? "已失效的设置（请改选）" : "我的供应商（详情暂时读不到）"}
+                    {parseLocalRef(preference[item.capability])
+                      ? local.loading
+                        ? "本机会员 CLI（状态读取中）"
+                        : "本机会员 CLI（已不可用，请改选）"
+                      : orgLoaded
+                        ? "已失效的设置（请改选）"
+                        : "我的供应商（详情暂时读不到）"}
                   </option>
                 )}
               </select>
@@ -771,9 +795,15 @@ function orgOptions(
     );
 }
 
-function isStale(item: CapabilityModels, org: CapabilityConfig[], value: string | undefined): boolean {
+function isStale(
+  item: CapabilityModels,
+  org: CapabilityConfig[],
+  value: string | undefined,
+  local: { value: string }[] = [],
+): boolean {
   if (!value) return false;
   if ((item.models ?? []).some((m) => m.model_id === value)) return false;
+  if (local.some((o) => o.value === value)) return false;
   return !orgOptions(item.capability, org).some((o) => o.value === value);
 }
 

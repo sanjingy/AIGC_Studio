@@ -4,7 +4,8 @@
 
 1. **试点关着时，整条链路与接入之前逐字相同。** `ENV=test` 拿到的仍然
    必须是 `MockLLM` 本体（`test_no_live_provider_in_tests.py` 在断言这件事）。
-2. **开着时按请求分流**：白名单内走本地，白名单外照常走原实现。
+2. **开着时按请求分流**：项目显式选了本机 CLI（`provider.local:<cli>`，ADR-041）
+   才走本地；白名单只决定"能不能选"，没选的项目照常走原实现。
 3. **选中本地之后失败就是失败**，不许退回 Gateway（那要花钱）
    也不许退回 Mock（那会把假数据写进档案）。
 """
@@ -19,6 +20,7 @@ import pytest
 from apps.api.core.config import Settings
 from apps.api.core.errors import AppError
 from apps.api.modules.agent import llm
+from apps.api.modules.gateway import catalog, upstreams
 from apps.api.modules.local_runtime import service as local_runtime
 
 ORG = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -78,13 +80,23 @@ class TestSelection:
         assert isinstance(provider.fallback, llm.MockLLM)
 
 
+def _preference(value: str | None):
+    async def _load(**kwargs: object) -> str | None:
+        return value
+
+    return _load
+
+
 class TestRouting:
-    async def test_whitelisted_project_goes_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_selected_project_goes_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(local_runtime, "get_settings", _pilot_settings)
-        calls: list[str] = []
+        monkeypatch.setattr(
+            local_runtime, "_load_text_preference", _preference("provider.local:codex")
+        )
+        calls: list[tuple[str, str]] = []
 
         async def _fake_complete(**kwargs: object) -> local_runtime.LocalCompletion:
-            calls.append(str(kwargs["schema_name"]))
+            calls.append((str(kwargs["provider"]), str(kwargs["schema_name"])))
             return local_runtime.LocalCompletion(
                 text='{"ok": true}', model_id="local-cli.codex", tokens_in=0, tokens_out=0
             )
@@ -94,22 +106,44 @@ class TestRouting:
         routing = llm.RoutingLLM(llm.MockLLM())
         response = await routing.complete(_request(PROJECT))
 
-        assert calls == ["StoryOutline"]
+        # 选的是哪个 CLI 就把哪个 CLI 传下去：请求按它分队列
+        assert calls == [("codex", "StoryOutline")]
         assert response.text == '{"ok": true}'
         # 如实标注执行者：agent_runs.model_id 是后面成本复盘的唯一依据。
         assert response.model_id == "local-cli.codex"
 
-    async def test_other_project_keeps_the_old_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_allowlisted_but_unselected_project_keeps_the_old_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """白名单 ≠ 改道（ADR-041）。以前白名单内的项目会被自动送去本机。"""
         monkeypatch.setattr(local_runtime, "get_settings", _pilot_settings)
+        monkeypatch.setattr(local_runtime, "_load_text_preference", _preference(None))
 
         async def _must_not_be_called(**kwargs: object) -> local_runtime.LocalCompletion:
-            raise AssertionError("白名单外的项目不该走本地 CLI")
+            raise AssertionError("没选本机的项目不该走本地 CLI")
 
         monkeypatch.setattr(local_runtime, "complete_text", _must_not_be_called)
 
         routing = llm.RoutingLLM(llm.MockLLM())
-        response = await routing.complete(_request(OTHER_PROJECT))
-        assert response.model_id == llm.MockLLM.model_id
+        for project_id in (PROJECT, OTHER_PROJECT):
+            response = await routing.complete(_request(project_id))
+            assert response.model_id == llm.MockLLM.model_id
+
+    async def test_a_platform_model_preference_is_not_local(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(local_runtime, "get_settings", _pilot_settings)
+        monkeypatch.setattr(local_runtime, "_load_text_preference", _preference("deepseek-chat"))
+        assert await local_runtime.selected_text_provider(ORG, PROJECT) is None
+
+    async def test_unattached_calls_never_go_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """不挂项目的调用（资产库直接生成角色档案）连偏好都不查。"""
+
+        async def _must_not_be_called(**kwargs: object) -> str | None:
+            raise AssertionError("没有项目就没有项目偏好")
+
+        monkeypatch.setattr(local_runtime, "_load_text_preference", _must_not_be_called)
+        assert await local_runtime.selected_text_provider(ORG, None) is None
 
     async def test_local_failure_never_falls_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """选中本地之后，失败必须以失败告终。
@@ -118,9 +152,12 @@ class TestRouting:
         退回 Mock 更糟——假档案会被当成真产出写进库，而且不会有任何报错。
         """
         monkeypatch.setattr(local_runtime, "get_settings", _pilot_settings)
+        monkeypatch.setattr(
+            local_runtime, "_load_text_preference", _preference("provider.local:codex")
+        )
 
         async def _boom(**kwargs: object) -> local_runtime.LocalCompletion:
-            raise AppError("provider.unavailable", message="local runner is not connected")
+            raise AppError("local_runtime.text_offline", message="local runner is not connected")
 
         monkeypatch.setattr(local_runtime, "complete_text", _boom)
 
@@ -134,5 +171,36 @@ class TestRouting:
         routing = llm.RoutingLLM(_Tripwire())
         with pytest.raises(AppError) as exc:
             await routing.complete(_request(PROJECT))
-        assert exc.value.code == "provider.unavailable"
+        assert exc.value.code == "local_runtime.text_offline"
         assert fallback_calls == []
+
+
+class TestRefsAndIds:
+    def test_local_ref_round_trip(self) -> None:
+        assert catalog.parse_local_ref(catalog.local_ref("claude")) == "claude"
+        assert catalog.parse_local_ref("deepseek-chat") is None
+        assert catalog.parse_local_ref(None) is None
+        # 前缀对、名字认不出：仍认作"选了本机"，由调用方报不可用，而不是往付费路由上落
+        assert catalog.parse_local_ref("provider.local:gemini") == "gemini"
+
+    def test_gateway_refuses_a_local_preference_instead_of_treating_it_as_stale(self) -> None:
+        with pytest.raises(AppError) as exc:
+            upstreams.decide("text_generation", preference="provider.local:claude", default=None)
+        assert exc.value.code == "local_runtime.text_not_configured"
+
+    def test_local_model_id_is_prefixed_and_fits_the_column(self) -> None:
+        assert local_runtime.local_model_id("claude", None) == "local-cli.claude"
+        assert (
+            local_runtime.local_model_id("claude", "claude-opus-5")
+            == "local-cli.claude:claude-opus-5"
+        )
+        long = local_runtime.local_model_id("codex", "x" * 300)
+        assert len(long) == 64 and long.startswith("local-cli.codex:")
+        assert catalog.is_local_model(long)
+        assert not catalog.is_local_model("deepseek-chat")
+
+    def test_text_options_default_to_the_single_provider(self) -> None:
+        base: dict[str, object] = {"env": "test", "local_cli_provider": "claude"}
+        assert Settings(**base).local_cli_text_options == ("claude",)  # type: ignore[arg-type]
+        listed = Settings(**{**base, "local_cli_text_providers": "claude,codex,claude"})  # type: ignore[arg-type]
+        assert listed.local_cli_text_options == ("claude", "codex")

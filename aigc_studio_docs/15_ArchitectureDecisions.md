@@ -1279,3 +1279,28 @@ CC Switch 里该供应商上游格式为 OpenAI Responses。约束不变：第 5
 6. 复用 one-api（GitHub 调研 37,084 stars，MIT）的自定义模型选项合并代码，来源 commit `8df4a2670b98266bd287c698243fff327d9748cf`，移植到 `apps/web/lib/freeflow/model-options.ts`，许可见根目录 THIRD_PARTY_NOTICES.md。上游 Go 后端不整块引入现有 Python 系统。
 
 验收：地址与 Key 两个输入即可读取候选；任意合法模型可选择/手填且进入现有调用契约；自定义模型不因刷新列表丢失；完整地址保存后生成使用同一 base；测试覆盖鉴权失败、非兼容列表、私网/跳转拒绝、超时与密钥不回显。真实 Provider 生成质量另行验收。
+
+## ADR-041 本机会员 CLI 写文本：逐项目显式选择、0 平台 Credits、prod 先配对后开放
+
+**日期**：2026-10-09。用户决定：模型页单独提供「本机会员 CLI」模块；本机会员文本调用**不扣平台 Credits**；视频不开放。
+
+**Supersedes**：`project_docs/modules/15_LOCAL_RUNTIME.md` 试点中"试点开着时白名单项目的文本自动改道本机、只用一个 `LOCAL_CLI_PROVIDER`"这一条。出图来源选择、令牌隔离、白名单、取消、不回落、prod 闸门继续有效；出图计费口径（同价预扣结算）**不变**。
+
+1. **选择即路由，没有自动改道**。项目文本偏好（`projects.model_preference.text_generation`，ADR-024 同一字段）新增取值 `provider.local:<claude|codex>`。`RoutingLLM` 只在项目显式选了本机时把 `LLMRequest` 交给本机连接器；试点开着、项目在白名单里但没选的，照常走 Gateway / Mock。
+2. **只限文本、只限项目**。组织默认不接受本机值（一台个人电脑不能成为整个 org 的默认文本源）；本机值不能设为出图偏好（出图另有逐次来源选择）。
+3. **存得进 = 此刻能用**。保存时校验：CLI 在 `LOCAL_CLI_TEXT_PROVIDERS` 可选名单里（留空 = 只有 `LOCAL_CLI_PROVIDER`）、项目在白名单、该 CLI 的连接器在线且报告 text 能力（连接器启动时已核官方订阅登录，未登录起不来）。之后离线不改偏好，生成时报错。
+4. **不回落**。失败一律 `local_runtime.text_*`（not_configured / offline / auth_required / usage_limit / timeout / failed），`failover=False`；`gateway.upstreams.decide` 遇到本机偏好直接拒绝，防止试点被关后这条偏好被当成过期值落到付费默认路由。
+5. **0 平台 Credits**。项目文本今天不建任务、不动账本；为 FR-AGENT-003 接计费预先设防：`pricing.text_run_cost` 对 `agent_runs.model_id` 前缀 `local-cli.` 返回 0（先于 BYOK 与定价表），`pricing.estimate_agent_run(project_id=)` 对选了本机的项目返回 0。接计费时金额为 0 必须整段跳过 `reserve`/`settle`（`reserve(0)` 仍会写流水）。API / BYOK 文本计价不变。
+6. **prod 开放的前提是每用户配对（本 ADR 只定设计，未实现；prod 闸门保留）**。今天的桥接是一个 env 里的共享 `LOCAL_CLI_TOKEN` + 单 org / 显式项目白名单，只适合试点。对外开放前须替换为：
+   - 网页（已登录用户、项目设置）生成一次性配对码：随机 ≥ 128 bit、5 分钟过期、单次使用、只存哈希，绑定 `org_id + user_id`。
+   - 连接器 `--pair <code>` 出站换取**设备令牌**：只存哈希，绑定 `org_id + user_id + device_id`，可列出、可吊销，短期有效 + 刷新轮换（复用 S2 refresh 轮换与重放检测的做法），令牌仍只开 poll / heartbeat / result 三条路径。
+   - 队列与心跳键从 `(provider, kind)` 改为 `(device_id, provider, kind)`；项目选择时选的是"我的哪台设备的哪个 CLI"，校验设备属于当前用户与 org，跨租户 404。
+   - 取消 `LOCAL_CLI_ORG_ID` / `LOCAL_CLI_PROJECT_IDS` env 白名单，改为"有已配对且在线设备的用户可在自己有权限的项目里选择"；每设备并发与队列深度上限、按 org 限流、配对与吊销写审计。
+   - 完成以上并通过安全评审后，才允许移除 `config.py` 的 prod 拒绝启动；在此之前 prod 不开放，也不开放任何未认证的公共桥接。
+7. **视频不开放**。Codex / Claude CLI 均无经核实的订阅内原生视频生成；OpenAI 官方文档写明 Sora 2 / Videos API 已于 2026-09-24 关闭。界面不提供视频入口，不用付费 API 冒充。
+
+**复用核验**（2026-10-09，gh api）：`stablyai/orca`（88,057★，MIT，commit `8167ddaa7fcf011e4f3aff32d9c61336783f986e`）是既有桥接执行面的来源，见 `apps/local_runner/THIRD_PARTY_NOTICES.md`；`openai/codex`（128,259★，Apache-2.0，commit `e45069d770c6d0b8984c58a6e7cbaf221ad37599`）的 app-server `Account` schema（apiKey / chatgpt / amazonBedrock，null = 未登录）与连接器 `classify_codex_account` 一致。本轮没有新移植代码。
+
+**代价**：已开试点的白名单项目升级后需要在项目设置里重新选一次本机，否则文本走 API 模型（Lead 部署时须告知）；试点开着时每次文本调用多一次项目偏好查询；本机文本错误码从 `provider.*` 改为 `local_runtime.text_*`；`ENV=test` 且试点关闭时，选了本机的项目仍得到 MockLLM（测试环境规则）。
+
+**验收**：`tests/integration/test_local_text_source.py`（选择 9、路由与 0 Credits 4、计价边界 2）、`tests/unit/test_local_runtime_selector.py`、`tests/integration/test_local_runtime_api.py`；前端 `tests/web-logic.test.mjs` 本机 CLI 5 条与错误码表同步断言。真实会员 CLI 生成未在本轮执行。

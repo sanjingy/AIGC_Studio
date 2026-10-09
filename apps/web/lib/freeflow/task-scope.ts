@@ -145,6 +145,9 @@ export const NON_RETRYABLE_ERRORS: ReadonlySet<string> = new Set([
   "local_runtime.capability_unsupported",
   "local_runtime.auth_required",
   "local_runtime.result_invalid",
+  "local_runtime.text_not_configured",
+  "local_runtime.text_offline",
+  "local_runtime.text_auth_required",
   "skill.spec.too_large",
   "skill.spec.unreadable",
 ]);
@@ -204,6 +207,12 @@ const FAIL_REASON: Record<string, string> = {
   "local_runtime.no_image": "本机 Codex 这一轮没有画出图片",
   "local_runtime.failed": "本机生成失败，看本地连接器窗口里的原因",
   "local_runtime.result_invalid": "本机回传的不是有效图片",
+  "local_runtime.text_not_configured": "项目选了本机会员 CLI，但本机会员 CLI 没对这个项目开放",
+  "local_runtime.text_offline": "本机连接器不在线，文本没有发出、也没改用付费模型",
+  "local_runtime.text_auth_required": "本机 CLI 不是会员订阅登录",
+  "local_runtime.text_usage_limit": "CLI 会员额度暂时用完，本机文本不扣平台 Credits",
+  "local_runtime.text_timeout": "本机 CLI 写文本超时",
+  "local_runtime.text_failed": "本机 CLI 这次没有写成功，看本地连接器窗口里的原因",
 };
 
 /** 失败原因一句话。空码不编原因，照实说没记录。 */

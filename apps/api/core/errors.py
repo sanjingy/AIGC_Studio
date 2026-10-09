@@ -398,6 +398,52 @@ ERRORS: dict[str, ErrorSpec] = {
         "本机回传的结果不是一张有效图片，已丢弃",
         failover=False,
     ),
+    # 本机会员 CLI **文本**（ADR-041）。以前文本失败借用 `provider.*`，用户看到的是
+    # "正在切换备用通道"——而这条路径恰恰**不会**切换任何通道。项目显式选了本机之后，
+    # 能修的人是用户自己（开电脑、起连接器、登录 CLI），文案要说清该去哪儿。
+    # 全部 `failover=False`；文本调用不建任务、不动账本，`disposition` 不参与。
+    "local_runtime.text_not_configured": ErrorSpec(
+        "local_runtime.text_not_configured",
+        409,
+        "这个项目选了「本机会员 CLI」写文本，但本机会员 CLI 没有对这个项目开放；"
+        "请到 项目设置 › 默认模型 改选其他文本模型",
+        failover=False,
+    ),
+    "local_runtime.text_offline": ErrorSpec(
+        "local_runtime.text_offline",
+        409,
+        "你电脑上的本机连接器不在线（电脑关机、连接器没启动，或这个 CLI 没登录），"
+        "文本没有发出、也没有改用付费模型；启动后重试，或到项目设置改选其他模型",
+        failover=False,
+    ),
+    "local_runtime.text_auth_required": ErrorSpec(
+        "local_runtime.text_auth_required",
+        409,
+        "你电脑上的 CLI 不是会员订阅登录（没登录、登录过期，或指向了按量付费端点）；"
+        "Claude 请跑 claude auth login，Codex 请跑 codex login",
+        failover=False,
+    ),
+    "local_runtime.text_usage_limit": ErrorSpec(
+        "local_runtime.text_usage_limit",
+        429,
+        "你的 CLI 会员额度暂时用完了，等额度恢复后再试（本机文本不扣平台 Credits）",
+        retryable=True,
+        failover=False,
+    ),
+    "local_runtime.text_timeout": ErrorSpec(
+        "local_runtime.text_timeout",
+        504,
+        "本机 CLI 没有在时限内写完，可以再试一次",
+        retryable=True,
+        failover=False,
+    ),
+    "local_runtime.text_failed": ErrorSpec(
+        "local_runtime.text_failed",
+        502,
+        "本机 CLI 这次没有写成功，可以在本地连接器的窗口里看具体原因",
+        retryable=True,
+        failover=False,
+    ),
     # --- Skill ---
     "skill.spec.too_large": ErrorSpec(
         # 上限跟 skills/registry.py 的 MAX_SPEC_BYTES 是同一个数，

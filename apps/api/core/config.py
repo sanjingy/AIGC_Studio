@@ -26,6 +26,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 #: 否则 Arq 会在图刚回来、还没写进资产库的时候把整个 job 杀掉。
 LOCAL_IMAGE_WORKER_RESERVE_SECONDS = 120
 
+#: 本机运行时认得的 CLI。与 `local_runtime.schemas.ProviderName` 同一组取值。
+LocalCliName = Literal["codex", "claude"]
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -128,7 +131,11 @@ class Settings(BaseSettings):
     # **文本**走哪个本机 CLI。图像固定走 Codex（见下一条），两者可以是
     # 不同的进程：本用户的 Claude 订阅只有 Opus 且不能生图，Codex 才有
     # 原生 image_gen。默认按用户实际持有的那一份定：文本 = claude。
-    local_cli_provider: Literal["codex", "claude"] = "claude"
+    local_cli_provider: LocalCliName = "claude"
+    # 项目**可以选**哪几个本机 CLI 写文本（ADR-041）。留空 = 只有上面那一个。
+    # 开着不等于有人在用：文本只在项目设置里**显式选了**某个本机 CLI 时才走本机，
+    # 这里只决定选项里出现谁。没登录的 CLI 连接器起不来，界面显示未连接、不可选。
+    local_cli_text_providers: Annotated[list[LocalCliName], NoDecode] = Field(default_factory=list)
     # 模型 id **不在服务端配**：它是连接器启动时的 `--model` 参数，
     # 由本机那个人自己决定（他才知道自己的订阅里有哪几个模型）。
     # 在这里再加一个字段只会多出一份能和现实不一致的真相。
@@ -164,7 +171,7 @@ class Settings(BaseSettings):
             return None
         return v
 
-    @field_validator("local_cli_project_ids", mode="before")
+    @field_validator("local_cli_project_ids", "local_cli_text_providers", mode="before")
     @classmethod
     def _split_uuid_csv(cls, v: object) -> object:
         # 与 cors_origins 同样的理由：.env 里写的是 `a,b` 而不是 JSON 数组，
@@ -177,6 +184,12 @@ class Settings(BaseSettings):
                 return json.loads(s)
             return [item.strip() for item in s.split(",") if item.strip()]
         return v
+
+    @property
+    def local_cli_text_options(self) -> tuple[LocalCliName, ...]:
+        """项目可选的本机文本 CLI，去重保序。没单独配就只有 `local_cli_provider`。"""
+        chosen = self.local_cli_text_providers or [self.local_cli_provider]
+        return tuple(dict.fromkeys(chosen))
 
     @model_validator(mode="after")
     def _check_local_cli(self) -> "Settings":

@@ -1345,3 +1345,90 @@ test("保存原文：PUT 返回值直接并进快照，不靠重拉", () => {
   // 并回之后面板不再显示"有未保存的修改"
   assert.equal(storySource.sourceDirty("  原文\n", fresh.current_state_json.source), false);
 });
+
+// ---------------------------------------------------------------- 本机会员 CLI（ADR-041）
+
+const localCli = await jiti.import("../lib/freeflow/local-cli.ts");
+
+function localStatus(overrides = {}) {
+  return {
+    enabled: true,
+    text_provider: "claude",
+    image_provider: "codex",
+    project_ids: ["p1"],
+    capabilities: { text: true, image: false, video: false, audio: false },
+    runner_connected: true,
+    image_runner_connected: false,
+    image_runner_version: null,
+    image_available: false,
+    image_unavailable_reason: "没有检测到本地连接器，请在你的电脑上启动它",
+    text_providers: [
+      { provider: "claude", connected: true, ready: true, version: "2.1.294 (Claude Code)", reason: null },
+      {
+        provider: "codex",
+        connected: false,
+        ready: false,
+        version: null,
+        reason: "没有检测到它的本地连接器。确认电脑开着、已用会员账号登录（codex login），再启动连接器",
+      },
+    ],
+    projects: [{ project_id: "p1", title: "雾港", provider: null }],
+    pilot: true,
+    ...overrides,
+  };
+}
+
+test("本机文本选项：只对白名单内项目出现，未连接的 Codex 列出但不可选", () => {
+  const opts = localCli.localTextOptions(localStatus(), "p1");
+  assert.deepEqual(
+    opts.map((o) => [o.value, o.disabled]),
+    [
+      ["provider.local:claude", false],
+      ["provider.local:codex", true],
+    ],
+  );
+  assert.match(opts[0].text, /不扣平台 Credits/);
+  assert.match(opts[1].text, /未连接/);
+  assert.deepEqual(localCli.localTextOptions(localStatus(), "p2"), [], "白名单外的项目一个选项都没有");
+  assert.deepEqual(localCli.localTextOptions(localStatus({ enabled: false }), "p1"), []);
+  assert.deepEqual(localCli.localTextOptions(null, "p1"), [], "状态拿不到时不凭空给选项");
+});
+
+test("本机文本选项里没有视频", () => {
+  const text = JSON.stringify(localCli.localTextOptions(localStatus(), "p1"));
+  assert.doesNotMatch(text, /视频|video/i);
+});
+
+test("本机引用往返；平台模型与组织连接不是本机", () => {
+  assert.equal(localCli.parseLocalRef(localCli.localRef("claude")), "claude");
+  assert.equal(localCli.parseLocalRef("deepseek-chat"), null);
+  assert.equal(localCli.parseLocalRef("provider.org:abc:gpt"), null);
+  assert.equal(localCli.parseLocalRef(undefined), null);
+});
+
+test("选中本机后的说明：在线讲 0 Credits 与不回落，离线讲会直接报错并给修复办法", () => {
+  const online = localCli.localSelectionHint("provider.local:claude", localStatus());
+  assert.match(online, /不扣平台 Credits/);
+  assert.match(online, /不会换成付费模型/);
+
+  const offline = localCli.localSelectionHint("provider.local:codex", localStatus());
+  assert.match(offline, /不在线/);
+  assert.match(offline, /不会改用付费模型/);
+  assert.match(offline, /codex login/);
+
+  const gone = localCli.localSelectionHint("provider.local:codex", localStatus({ text_providers: [] }));
+  assert.match(gone, /已不在可选范围内/);
+});
+
+test("模型页状态行：已连接带版本，未连接带修复命令；项目来源一句话", () => {
+  const [claude, codex] = localCli.providerLines(localStatus().text_providers);
+  assert.equal(claude.tone, "ok");
+  assert.match(claude.state, /已连接 · 2\.1\.294/);
+  assert.equal(claude.fix, null);
+  assert.equal(codex.tone, "warn");
+  assert.equal(codex.state, "未连接");
+  assert.match(codex.fix, /codex login/);
+  assert.equal(codex.login, "codex login");
+  assert.match(localCli.projectSourceText("claude"), /本机 Claude/);
+  assert.match(localCli.projectSourceText(null), /未使用本机/);
+});

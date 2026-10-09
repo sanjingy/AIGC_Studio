@@ -133,6 +133,15 @@ def decide(capability: str, *, preference: str | None, default: DefaultRow | Non
         return None
 
     if preference:
+        if catalog.parse_local_ref(preference) is not None:
+            # 项目选的是本机会员 CLI（ADR-041）。走到 Gateway 说明本机那条没接走它
+            # （部署关了试点、项目不在白名单）。**不许**按"偏好过期"往下落：
+            # 那会把一次用户以为不花钱的调用悄悄变成平台或他自己 Key 的付费调用。
+            raise AppError(
+                "local_runtime.text_not_configured",
+                message=f"project text source is {preference} but local runtime is not routing it",
+                detail={"capability": capability, "reason": "local_selected"},
+            )
         if catalog.parse_org_ref(preference) is not None:
             # 项目把这个能力指到了组织连接（`provider.org:<id>[:<模型>]`）。
             # 能力对不对得上要看连接里的协议，这里不查库，交给解析时校验。

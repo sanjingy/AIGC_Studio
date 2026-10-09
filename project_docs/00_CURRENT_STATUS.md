@@ -1,5 +1,9 @@
 # 产品终点与当前状态
 
+## 2026-10-09 本机会员 CLI 文本（ADR-041，本地实现，未提交、未部署）
+
+模型页新增与 API Key 供应商分开的「本机会员 CLI」一节；项目设置可显式选本机 Claude（配置 `LOCAL_CLI_TEXT_PROVIDERS` 后可选 Codex，未 `codex login` 时显示未连接、不可选）写文本，选择进入真实 `LLMRequest` 路由，失败不回落付费模型，本机文本 0 平台 Credits、账本不动；出图计费不变。试点仍默认关闭、prod 闸门保留，prod 需每用户设备配对（ADR-041 第 6 条，仅设计）。真实会员 CLI 生成与浏览器验收未做，详见 `orca/tasks/LOCAL_CLI_MEMBER/report.md`。
+
 ## 2026-10-09 最新快照（覆盖下方旧记录）
 
 本轮修复了两处真实用户阻塞：模型页明确区分平台官方 Key 与「我的供应商」连接，并说明不可选原因；故事页可粘贴或导入 `.txt` / `.md`、免费保存原文、刷新后恢复，首页「只创建项目」也会保存已填原文。开始生产前要求已有原文，替换原文与生成并发时以行锁和条件写保护用户稿件，旧产出不能覆盖新稿。GitHub 复用选型采用 MIT 的 `react-dropzone`，见 `orca/tasks/USER_FLOW_REPAIR/reuse.md`。

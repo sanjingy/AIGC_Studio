@@ -369,7 +369,31 @@ export type LocalRuntimeStatus = {
   image_available: boolean;
   /** 不可用时**一定**有值，直接说给用户听，不要自己编一句。 */
   image_unavailable_reason: string | null;
+  /** 项目可以选来写文本的本机会员 CLI 及各自实况（ADR-041）。没开放时为空。 */
+  text_providers: LocalTextProvider[];
+  /** 白名单内每个项目选没选本机写文本。 */
+  projects: LocalProjectTextSource[];
   pilot: boolean;
+};
+
+export type LocalCliName = "codex" | "claude";
+
+export type LocalTextProvider = {
+  provider: LocalCliName;
+  /** 连接器在发心跳。没登录的 CLI 连接器起不来，所以只会是 false。 */
+  connected: boolean;
+  /** 在线且报告了文本能力：只有它为 true 时项目设置里才能选。 */
+  ready: boolean;
+  version: string | null;
+  /** ready=false 时一定有值：怎么修，原样显示。 */
+  reason: string | null;
+};
+
+export type LocalProjectTextSource = {
+  project_id: string;
+  title: string;
+  /** null = 没选本机，照常走平台 / 自带 Key */
+  provider: LocalCliName | null;
 };
 
 /** 把一张已有资产钉成基准图之后的回执。刻意不是 Task——这里没有任务在跑。 */

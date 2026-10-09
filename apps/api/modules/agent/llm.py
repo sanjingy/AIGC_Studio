@@ -101,9 +101,9 @@ class LocalCLILLM:
     去补一次他以为在用订阅额度的调用；退回 Mock 更糟，那会把假档案写进库。
     """
 
-    async def complete(self, request: LLMRequest) -> LLMResponse:
+    async def complete(self, request: LLMRequest, *, provider: str) -> LLMResponse:
         if request.org_id is None or request.project_id is None:
-            # 走不到：RoutingLLM 只在 applies_to 为真时才进来，而它要求两者都有。
+            # 走不到：RoutingLLM 只在项目选了本机时才进来，而那需要两者都有。
             # 留着这一手是因为 `python -O` 会把 assert 整条删掉，那样这里就成了
             # 一个静默把 None 传下去的洞。
             raise AppError(
@@ -113,6 +113,7 @@ class LocalCLILLM:
         result = await local_runtime.complete_text(
             org_id=request.org_id,
             project_id=request.project_id,
+            provider=provider,
             system=request.system,
             user=request.user,
             schema_name=request.schema_name,
@@ -131,12 +132,15 @@ class LocalCLILLM:
 class RoutingLLM:
     """按**每一条请求**决定走本地还是走原来的实现。
 
-    为什么不在 `get_provider()` 里一次性选完：命中条件是 (org, project)，
-    而那两个值只有请求本身知道。同一个部署里，白名单内的项目走桌面 CLI、
-    其余项目照常走 Mock / Gateway，两条路必须同时成立。
+    **走本地的唯一条件是项目显式选了本机 CLI**（项目设置里文本选
+    `provider.local:<cli>`，ADR-041）。以前的条件是"项目在白名单里"——
+    部署一开、白名单内的项目就全部自动改道，用户在界面上看不到也选不了。
+    现在白名单只决定"能不能选"，选了才走；选了却跑不了（没开放、离线、
+    没登录）就报错，**不**回落到 Mock 或付费 Gateway。
 
     只有试点开着时 `get_provider()` 才会返回它——关着的时候整条链路与
-    接入之前逐字相同，包括 `ENV=test` 拿到的仍然是 MockLLM 本体。
+    接入之前逐字相同，包括 `ENV=test` 拿到的仍然是 MockLLM 本体。关着时
+    选了本机的项目会在 Gateway 的 `upstreams.decide` 那里被拒，同样不付费。
     """
 
     def __init__(self, fallback: LLMProvider) -> None:
@@ -148,8 +152,9 @@ class RoutingLLM:
         return self._fallback
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
-        if local_runtime.applies_to(request.org_id, request.project_id):
-            return await self._local.complete(request)
+        provider = await local_runtime.selected_text_provider(request.org_id, request.project_id)
+        if provider is not None:
+            return await self._local.complete(request, provider=provider)
         return await self._fallback.complete(request)
 
 
@@ -852,8 +857,8 @@ def get_provider() -> LLMProvider:
     "非 test 也能出占位内容"的开关——多一个入口就多一条让假内容漏给用户
     的路，而那正是 ABC_AUDIT 记下的那次事故。
 
-    3. 本地 CLI 试点开着时，外面再包一层逐请求路由（见 RoutingLLM）。
-       **默认关着**，关着时前两条的行为逐字不变。
+    3. 本地 CLI 试点开着时，外面再包一层逐请求路由（见 RoutingLLM）：
+       项目显式选了本机 CLI 写文本才走本机。**默认关着**，关着时前两条的行为逐字不变。
     """
     global _provider
     if _provider is None:

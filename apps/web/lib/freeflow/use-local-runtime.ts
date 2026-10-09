@@ -86,6 +86,8 @@ export type LocalRuntimeView = {
   version: string | null;
   provider: string | null;
   loading: boolean;
+  /** 原始状态（含本机文本 CLI 的实况，ADR-041）。项目设置里的文本选项用它。 */
+  status: LocalRuntimeStatus | null;
   /** 这次出图用哪条来源。不可用时恒为 `api`。 */
   source: ImageSource;
   setSource: (next: ImageSource) => void;
@@ -131,6 +133,7 @@ export function useLocalRuntime(projectId: string | null): LocalRuntimeView {
     version: status?.image_runner_version ?? null,
     provider: status?.image_provider ?? null,
     loading: snapshot.loading,
+    status,
     // **不可用就一定回落到 api**：让选择停在一个用不了的值上，
     // 用户点生成只会拿到一个本可以提前避免的失败。
     source: available ? chosen : "api",

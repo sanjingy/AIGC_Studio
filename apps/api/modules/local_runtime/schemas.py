@@ -150,6 +150,29 @@ class Capabilities(BaseModel):
     audio: bool = False
 
 
+class TextProviderStatus(BaseModel):
+    """一个**可被项目选来写文本**的本机 CLI 现在的状态（ADR-041）。
+
+    `ready` 来自连接器心跳里的自报：连接器启动前会用官方免费子命令确认订阅登录，
+    没登录（例如 `codex login status` 报未登录）根本起不来，所以这里只会是"未连接"。
+    `ready=False` 时 `reason` 一定有一句中文，界面原样显示。
+    """
+
+    provider: ProviderName
+    connected: bool
+    ready: bool
+    version: str | None = None
+    reason: str | None = None
+
+
+class ProjectTextSource(BaseModel):
+    """白名单内一个本 org 项目的文本来源。`provider=None` = 没选本机，照常走平台 / 自带 Key。"""
+
+    project_id: uuid.UUID
+    title: str
+    provider: ProviderName | None = None
+
+
 class StatusOut(BaseModel):
     #: 本 org 是否配了本机运行时。别的 org 配了，这里一律 False。
     enabled: bool
@@ -168,5 +191,9 @@ class StatusOut(BaseModel):
     #: 一定有值——界面要把原因原样说给用户看，不能只把按钮变灰。
     image_available: bool = False
     image_unavailable_reason: str | None = None
+    #: 项目可以选来写文本的本机 CLI 及各自的实况（ADR-041）。没开放时为空。
+    text_providers: list[TextProviderStatus] = Field(default_factory=list)
+    #: 白名单内每个项目选没选本机写文本。界面据此显示"谁在用哪个"。
+    projects: list[ProjectTextSource] = Field(default_factory=list)
     #: 恒为 True：这是试点，界面必须如实标注，不能让用户以为它是正式能力。
     pilot: bool = True

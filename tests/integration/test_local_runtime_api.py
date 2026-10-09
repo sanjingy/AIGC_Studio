@@ -296,6 +296,7 @@ class TestRoundTrip:
 
         async def _generate() -> lr_service.LocalCompletion:
             return await lr_service.complete_text(
+                provider="codex",
                 org_id=org_id,
                 project_id=project_id,
                 system="系统提示词",
@@ -329,7 +330,8 @@ class TestRoundTrip:
             task.cancel()
 
         assert result.text == '{"title": "雾港迷案"}'
-        assert result.model_id == "gpt-5.1-codex"
+        # 一律带 local-cli. 前缀：自报的模型名可能与平台目录同名（ADR-041）
+        assert result.model_id == "local-cli.codex:gpt-5.1-codex"
         assert (result.tokens_in, result.tokens_out) == (120, 40)
 
     async def test_an_image_round_trip_returns_real_bytes(
@@ -385,6 +387,7 @@ class TestRoundTrip:
 
         task = asyncio.create_task(
             lr_service.complete_text(
+                provider="codex",
                 org_id=org_id,
                 project_id=project_id,
                 system="s",
@@ -421,6 +424,7 @@ class TestRoundTrip:
 
         task = asyncio.create_task(
             lr_service.complete_text(
+                provider="codex",
                 org_id=org_id,
                 project_id=project_id,
                 system="s",
@@ -591,6 +595,7 @@ class TestHeartbeatEndpoint:
 
         task = asyncio.create_task(
             lr_service.complete_text(
+                provider="codex",
                 org_id=org_id,
                 project_id=project_id,
                 system="s",
@@ -644,6 +649,7 @@ class TestFailFast:
 
         with pytest.raises(AppError) as exc:
             await lr_service.complete_text(
+                provider="codex",
                 org_id=org_id,
                 project_id=project_id,
                 system="s",
@@ -651,7 +657,7 @@ class TestFailFast:
                 schema_name="StoryOutline",
                 max_output_tokens=256,
             )
-        assert exc.value.code == "provider.unavailable"
+        assert exc.value.code == "local_runtime.text_offline"
 
         with pytest.raises(AppError) as img:
             await lr_service.complete_image(org_id=org_id, project_id=project_id, prompt="画一张")
@@ -666,6 +672,7 @@ class TestFailFast:
         enable_pilot(org_id, [await _new_project(alice)])
         with pytest.raises(AppError) as exc:
             await lr_service.complete_text(
+                provider="codex",
                 org_id=org_id,
                 project_id=uuid.uuid4(),
                 system="s",
@@ -673,7 +680,7 @@ class TestFailFast:
                 schema_name="StoryOutline",
                 max_output_tokens=256,
             )
-        assert exc.value.code == "common.forbidden"
+        assert exc.value.code == "local_runtime.text_not_configured"
 
     async def test_another_org_cannot_ride_the_same_runner(
         self, alice: AsyncClient, bob: AsyncClient, enable_pilot, clean_mailbox: None
@@ -797,6 +804,7 @@ class TestCancelLifecycle:
 
         with pytest.raises(AppError) as exc:
             await lr_service.complete_text(
+                provider="codex",
                 org_id=org_id,
                 project_id=project_id,
                 system="s",
@@ -805,9 +813,9 @@ class TestCancelLifecycle:
                 max_output_tokens=256,
                 is_cancelled=_is_cancelled,
             )
-        # 文本那条替代的是一次 Provider 调用，所以映射到 `provider.*`
-        # 而不是 `local_runtime.*`——两组的文案面向的人不一样。
-        assert exc.value.code == "provider.unavailable"
+        # ADR-041 起文本也映射到 `local_runtime.text_*`：`provider.unavailable`
+        # 的文案是"正在切换备用通道"，而这条路径不会切换任何通道。
+        assert exc.value.code == "local_runtime.text_failed"
         assert asked >= 2
         assert await transport.queue_depth("codex", "text") == 0
 
